@@ -8,6 +8,7 @@ import (
 
 	"boundlane/agents"
 	"boundlane/cli/internal/config"
+	"boundlane/cli/internal/team"
 	"boundlane/cli/internal/tui"
 )
 
@@ -58,8 +59,8 @@ func cmdHome(e env, _ []string) (int, error) {
 		lines = append(lines, row(u, "Waiting", plural(len(waiting.changes), "changed file", "changed files")+", not applied yet"))
 	}
 	plan := "Free plan, this machine"
-	if includedTeam {
-		plan = "Team build"
+	if en, err := team.Load(configDirs(e)); err == nil && en.Tenant != "" {
+		plan = "Team " + en.Tenant + ", " + en.Server
 	}
 	lines = append(lines, "", u.Dim(plan))
 	u.Blank()

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -248,98 +247,40 @@ func approve(base, code, email string) error {
 	return nil
 }
 
-var errStale = staleError("proposal inputs changed; evaluation refreshed, refetch and review again")
-
-type staleError string
-
-func (e staleError) Error() string { return string(e) }
-
-type errStatus int
-
-func (e errStatus) Error() string { return http.StatusText(int(e)) }
-
-type allow struct{}
-
-func (allow) Check(context.Context, []byte, []byte) (bool, string, error) { return true, "", nil }
-
-type fakeGW struct {
-	logs         []byte
-	logErr       error
-	rules        []byte
-	list         []byte
-	set          bool
-	policy       []byte
-	approved     string
-	approveCalls int
-	approveErr   error
-	pendingCalls int
-	mode         string
-	modeErr      error
-}
-
-// Version and ComputeDrivers return what OpenShell 0.1.2 gave on the test machine.
-func (g *fakeGW) Version(context.Context) (string, error) { return "openshell 0.1.2\n", nil }
-func (g *fakeGW) ComputeDrivers(context.Context) ([]string, error) {
-	return []string{"docker"}, nil
-}
-func (g *fakeGW) GlobalSetting(context.Context, string) (string, error) {
-	if g.mode == "" {
-		return "<unset>", g.modeErr
+func TestApprovalIsShippedWithItsChunk(t *testing.T) {
+	s, opt, gw := teamFixture(t)
+	// Recorded from a Codex session on OpenShell 0.1.2; the host is replaced.
+	gw.logs = append(gw.logs, "[1791297802.289] [sandbox] [OCSF ] [ocsf] CONFIG:APPROVED [INFO] chunk:fad7c2ed-3aca-4fb7-bb37-495820dd7562 approved on example.com:443 HEAD / by /usr/bin/curl\n"...)
+	gw.mode = "manual"
+	rep, err := Pass(context.Background(), opt)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return g.mode, g.modeErr
+	if rep.Decisions != 2 {
+		t.Fatalf("report %+v", rep)
+	}
+	got, err := s.Decisions("acme", 10)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("decisions %+v %v", got, err)
+	}
+	a := got[0]
+	if a.Class != "Config" || a.Action != "Approved" || a.Chunk != "fad7c2ed-3aca-4fb7-bb37-495820dd7562" ||
+		a.Destination != "example.com:443 HEAD /" || a.Process != "/usr/bin/curl" || a.Machine != "mbp" {
+		t.Fatalf("approval %+v", a)
+	}
+	machines, err := s.Machines("acme")
+	if err != nil || len(machines) != 1 || machines[0].ApprovalMode != "manual" || machines[0].Version != "0.1.2" || len(machines[0].Sandboxes) != 1 {
+		t.Fatalf("machines %+v %v", machines, err)
+	}
 }
-func (g *fakeGW) Sandboxes(context.Context) ([]string, error) { return []string{"bl-1"}, nil }
-func (g *fakeGW) LogLines(context.Context, string, int) ([]byte, error) {
-	return g.logs, g.logErr
-}
-func (g *fakeGW) PendingRules(context.Context, string) ([]byte, error) {
-	g.pendingCalls++
-	return g.rules, nil
-}
-func (g *fakeGW) RuleApprove(_ context.Context, _, chunk string) error {
-	g.approveCalls++
-	g.approved = chunk
-	return g.approveErr
-}
-func (g *fakeGW) RuleReject(context.Context, string, string, string) error { return nil }
-func (g *fakeGW) PolicySet(_ context.Context, _, file string) error {
-	g.set = true
-	b, err := os.ReadFile(file)
-	g.policy = b
-	return err
-}
-func (g *fakeGW) PolicyList(context.Context, string) ([]byte, error) { return g.list, nil }
 
-const baseDoc = `version: 1
-name: acme
-agents: [claude]
-workspace: read-write
-hosts:
-  - host: example.com
-    access: read-only
-approvals: person
-`
-
-const hostDoc = `version: 1
-name: acme
-agents: [claude]
-workspace: read-write
-hosts:
-  - host: example.com
-    access: read-only
-  - host: pypi.org
-    access: read-only
-approvals: person
-`
-
-const wallDoc = `version: 1
-name: acme
-agents: [claude]
-workspace: read-write
-paths:
-  read_only: [/etc]
-hosts:
-  - host: example.com
-    access: read-only
-approvals: person
-`
+func TestPushNoteNamesTheTenant(t *testing.T) {
+	_, opt, gw := teamFixture(t)
+	opt.Tenant = "globex"
+	if _, err := Pass(context.Background(), opt); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gw.policy), "from globex r2 (signed)") {
+		t.Fatalf("policy header:\n%s", gw.policy)
+	}
+}

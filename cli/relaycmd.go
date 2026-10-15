@@ -1,5 +1,3 @@
-//go:build team
-
 package main
 
 import (

@@ -1,6 +1,5 @@
-//go:build team
-
-// Package team is the CLI's client for the local Team server.
+// Package team is the CLI's client for the Team control plane: the hosted
+// service, or boundlane server on one machine.
 package team
 
 import (
@@ -14,11 +13,12 @@ import (
 	"net/http"
 	"time"
 
-	"boundlane/controlplane"
+	"boundlane/teamapi"
 )
 
-// DefaultServer is the local Team server.
-const DefaultServer = "http://127.0.0.1:8787"
+// DefaultServer is the hosted Team control plane. boundlane server on one
+// machine is http://127.0.0.1:8787; pass it with login --server.
+const DefaultServer = "https://boundlane.dev"
 
 // ErrNotEnrolled means this machine has not signed in.
 var ErrNotEnrolled = errors.New("not signed in")
@@ -109,12 +109,12 @@ func (c Client) Exchange(ctx context.Context, deviceCode string) (Enrollment, er
 
 // Take stores a newer verified bundle. The same revision is left as it is.
 // An older revision is refused.
-func (e *Enrollment) Take(b controlplane.Bundle) error {
+func (e *Enrollment) Take(b teamapi.Bundle) error {
 	pub, err := base64.StdEncoding.DecodeString(e.PublicKey)
 	if err != nil {
 		return err
 	}
-	if err := controlplane.Verify(pub, b); err != nil {
+	if err := teamapi.Verify(pub, b); err != nil {
 		return err
 	}
 	if e.Revision > 0 && b.Revision < e.Revision {
@@ -131,27 +131,27 @@ func (e *Enrollment) Take(b controlplane.Bundle) error {
 }
 
 // Policy fetches the current signed bundle. A 404 means nothing is published.
-func (c Client) Policy(ctx context.Context, token string) (controlplane.Bundle, bool, error) {
+func (c Client) Policy(ctx context.Context, token string) (teamapi.Bundle, bool, error) {
 	var raw json.RawMessage
 	status, err := c.callStatus(ctx, http.MethodGet, "/v1/policy", token, nil, &raw)
 	if status == http.StatusNotFound {
-		return controlplane.Bundle{}, false, nil
+		return teamapi.Bundle{}, false, nil
 	}
 	if err != nil {
-		return controlplane.Bundle{}, false, err
+		return teamapi.Bundle{}, false, err
 	}
-	b, err := controlplane.ParseBundle(raw)
+	b, err := teamapi.ParseBundle(raw)
 	return b, err == nil, err
 }
 
 // Publish sends an org policy. The server proves it before it stores it.
-func (c Client) Publish(ctx context.Context, token, document string) (controlplane.Bundle, error) {
+func (c Client) Publish(ctx context.Context, token, document string) (teamapi.Bundle, error) {
 	var raw json.RawMessage
 	err := c.call(ctx, http.MethodPost, "/v1/revisions", token, map[string]string{"document": document}, &raw)
 	if err != nil {
-		return controlplane.Bundle{}, err
+		return teamapi.Bundle{}, err
 	}
-	return controlplane.ParseBundle(raw)
+	return teamapi.ParseBundle(raw)
 }
 
 // Ingest posts decision records. The count is how many were new.
@@ -169,9 +169,9 @@ func (c Client) PutProposals(ctx context.Context, token, sandbox string, proposa
 }
 
 // Applies lists reviews this machine still has to send to OpenShell.
-func (c Client) Applies(ctx context.Context, token string) ([]controlplane.Proposal, error) {
+func (c Client) Applies(ctx context.Context, token string) ([]teamapi.Proposal, error) {
 	var out struct {
-		Applies []controlplane.Proposal `json:"applies"`
+		Applies []teamapi.Proposal `json:"applies"`
 	}
 	err := c.call(ctx, http.MethodGet, "/v1/applies", token, nil, &out)
 	return out.Applies, err
@@ -188,12 +188,12 @@ func (c Client) MarkApplied(ctx context.Context, token string, id int) error {
 }
 
 // Revision fetches one signed revision.
-func (c Client) Revision(ctx context.Context, token string, n int) (controlplane.Bundle, error) {
+func (c Client) Revision(ctx context.Context, token string, n int) (teamapi.Bundle, error) {
 	var raw json.RawMessage
 	if err := c.call(ctx, http.MethodGet, fmt.Sprintf("/v1/revisions/%d", n), token, nil, &raw); err != nil {
-		return controlplane.Bundle{}, err
+		return teamapi.Bundle{}, err
 	}
-	return controlplane.ParseBundle(raw)
+	return teamapi.ParseBundle(raw)
 }
 
 // Beat is what a machine reports on each heartbeat.
@@ -241,7 +241,7 @@ func Status(err error) int {
 }
 
 func (e *Enrollment) applyBundle(raw []byte) error {
-	b, err := controlplane.ParseBundle(raw)
+	b, err := teamapi.ParseBundle(raw)
 	if err != nil {
 		return err
 	}
@@ -249,9 +249,9 @@ func (e *Enrollment) applyBundle(raw []byte) error {
 }
 
 // Bundle rebuilds the signed policy and checks the signature.
-func (e Enrollment) Bundle() (controlplane.Bundle, error) {
+func (e Enrollment) Bundle() (teamapi.Bundle, error) {
 	if e.Revision == 0 || e.Document == "" {
-		return controlplane.Bundle{}, errors.New("no team policy cached")
+		return teamapi.Bundle{}, errors.New("no team policy cached")
 	}
 	raw, err := json.Marshal(struct {
 		Tenant    string `json:"tenant"`
@@ -261,18 +261,18 @@ func (e Enrollment) Bundle() (controlplane.Bundle, error) {
 		Signature string `json:"signature"`
 	}{e.Tenant, e.Revision, e.Document, e.Published, e.Signature})
 	if err != nil {
-		return controlplane.Bundle{}, err
+		return teamapi.Bundle{}, err
 	}
-	b, err := controlplane.ParseBundle(raw)
+	b, err := teamapi.ParseBundle(raw)
 	if err != nil {
-		return controlplane.Bundle{}, err
+		return teamapi.Bundle{}, err
 	}
 	pub, err := base64.StdEncoding.DecodeString(e.PublicKey)
 	if err != nil {
-		return controlplane.Bundle{}, err
+		return teamapi.Bundle{}, err
 	}
-	if err := controlplane.Verify(pub, b); err != nil {
-		return controlplane.Bundle{}, err
+	if err := teamapi.Verify(pub, b); err != nil {
+		return teamapi.Bundle{}, err
 	}
 	return b, nil
 }

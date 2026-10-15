@@ -1,5 +1,3 @@
-//go:build team
-
 package relay
 
 import (
@@ -144,44 +142,6 @@ func TestHeartbeatFailureDoesNotStopThePass(t *testing.T) {
 	}
 	if rep.Decisions != 1 || !strings.Contains(strings.Join(rep.Notes, " "), "heartbeat: heartbeat is broken") {
 		t.Fatalf("report %+v", rep)
-	}
-}
-
-func TestApprovalIsShippedWithItsChunk(t *testing.T) {
-	s, opt, gw := teamFixture(t)
-	// Recorded from a Codex session on OpenShell 0.1.2; the host is replaced.
-	gw.logs = append(gw.logs, "[1791297802.289] [sandbox] [OCSF ] [ocsf] CONFIG:APPROVED [INFO] chunk:fad7c2ed-3aca-4fb7-bb37-495820dd7562 approved on example.com:443 HEAD / by /usr/bin/curl\n"...)
-	gw.mode = "manual"
-	rep, err := Pass(context.Background(), opt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rep.Decisions != 2 {
-		t.Fatalf("report %+v", rep)
-	}
-	got, err := s.Decisions("acme", 10)
-	if err != nil || len(got) != 2 {
-		t.Fatalf("decisions %+v %v", got, err)
-	}
-	a := got[0]
-	if a.Class != "Config" || a.Action != "Approved" || a.Chunk != "fad7c2ed-3aca-4fb7-bb37-495820dd7562" ||
-		a.Destination != "example.com:443 HEAD /" || a.Process != "/usr/bin/curl" || a.Machine != "mbp" {
-		t.Fatalf("approval %+v", a)
-	}
-	machines, err := s.Machines("acme")
-	if err != nil || len(machines) != 1 || machines[0].ApprovalMode != "manual" || machines[0].Version != "0.1.2" || len(machines[0].Sandboxes) != 1 {
-		t.Fatalf("machines %+v %v", machines, err)
-	}
-}
-
-func TestPushNoteNamesTheTenant(t *testing.T) {
-	_, opt, gw := teamFixture(t)
-	opt.Tenant = "globex"
-	if _, err := Pass(context.Background(), opt); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(gw.policy), "from globex r2 (signed)") {
-		t.Fatalf("policy header:\n%s", gw.policy)
 	}
 }
 

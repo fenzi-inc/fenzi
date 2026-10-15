@@ -68,11 +68,11 @@ The site also has the [argument](https://boundlane.dev/beliefs), the [price](htt
 | [Workspace and changes](https://boundlane.dev/docs/workspace) | What is copied in, what is left out, and how changes come back through `diff` and `apply`. |
 | [Decision log](https://boundlane.dev/docs/log) | Every allow and deny `boundlane log` can show, and what the log never holds. |
 
-### A team, later
+### A team
 
-Free is this repository: one machine, the default policy, the log on that machine. Team is one policy and one deny log across many machines. License is that control plane in your own network. Both are a [waitlist](https://boundlane.dev/waitlist). There is no public price for either. See [Price](https://boundlane.dev/price).
+Free is this CLI on one machine, with the default policy and the log on that machine. No account. Team is one signed policy, one decision log, and approvals in one console across many machines. The console is hosted at https://boundlane.dev and is opened by invitation while Team is on the [waitlist](https://boundlane.dev/waitlist). License is that control plane in your own network. See [Price](https://boundlane.dev/price).
 
-The team docs describe that product. The commands they name are in the help text here, and this build answers that they are not included.
+The Team client is in this repository: `boundlane login` signs a machine in, `status` shows the sign-in, `sync` and `forward` keep it in step with the console, and `policy publish` publishes from an admin's machine. The control plane itself is not in this repository.
 
 | | |
 | --- | --- |
@@ -110,7 +110,7 @@ The program you run. `boundlane setup` is the guided first run. `boundlane docto
 
 `cli/internal/openshell` is the only package that talks to the sandbox runtime.
 
-These commands are in the help, and this build tells you they are not part of it: `server`, `login`, `logout`, `status`, `sync`, `forward`, and `policy publish`. This copy is the Free plan. It always uses the policy on the machine. It does not sign in, and it does not publish a team revision.
+`login`, `logout`, `status`, `sync`, `forward`, and `policy publish` are the Team client. A machine that has not signed in uses the policy on the machine. A signed-in machine uses its team's signed policy, checks the signature against the team's key with `teamapi`, and refuses a bad signature or an older revision. `server`, a local control plane, is not in this build and says so.
 
 ### `compiler/`
 

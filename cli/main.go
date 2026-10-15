@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"strings"
 
 	"boundlane/cli/internal/run"
 	"boundlane/cli/internal/tui"
@@ -51,23 +50,23 @@ var helpGroups = []struct {
 }
 
 var teamHelp = [][2]string{
-	{"server", "Local team server"},
-	{"login", "Sign this machine in"},
+	{"login", "Sign this machine in to a team"},
 	{"logout", "Forget the sign-in"},
 	{"status", "Show the sign-in and the policy"},
 	{"sync", "Load a host change onto running sandboxes"},
-	{"forward", "Send decisions to the team server"},
+	{"forward", "Send decisions to the console, apply reviews"},
 }
 
 func writeHelp(w io.Writer) {
 	u := tui.ForOutput(w)
-	groups := helpGroups
+	team := teamHelp
 	if includedTeam {
-		groups = append(groups[:len(groups):len(groups)], struct {
-			name string
-			rows [][2]string
-		}{"Team", teamHelp})
+		team = append([][2]string{{"server", "Local team server"}}, teamHelp...)
 	}
+	groups := append(helpGroups[:len(helpGroups):len(helpGroups)], struct {
+		name string
+		rows [][2]string
+	}{"Team", team})
 	u.Blank()
 	u.Println(fmt.Sprintf("  %s %s  %s", u.Accent("■"), u.Bold("Boundlane "+Version), u.Dim("the agent you already use, in a sandbox on your machine")))
 	u.Blank()
@@ -80,15 +79,8 @@ func writeHelp(w io.Writer) {
 		}
 	}
 	u.Blank()
-	if !includedTeam {
-		names := make([]string, len(teamHelp))
-		for i, r := range teamHelp {
-			names[i] = r[0]
-		}
-		u.Println("  " + u.Dim("Free plan: one machine, no account."))
-		u.Println("  " + u.Dim("Not in this build: "+strings.Join(names, ", ")+" (Team plan)."))
-		u.Blank()
-	}
+	u.Println("  " + u.Dim("Free on one machine with no account. Team: boundlane login, then the console at https://boundlane.dev/console."))
+	u.Blank()
 	u.Println("  " + u.Dim("boundlane <command> -h shows its flags. Docs: https://boundlane.dev/docs"))
 	u.Println("  " + u.Dim("Exit codes: 0 ok, 1 error, 2 policy check failed, 3 runtime not ready."))
 	u.Println("  " + u.Dim("run and connect exit with the agent's code."))

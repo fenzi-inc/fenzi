@@ -1,5 +1,3 @@
-//go:build team
-
 // Package relay pushes a signed policy onto running sandboxes and ships
 // decisions and requests to the team server. It runs on the machine with the
 // gateway. The server never connects in.
@@ -25,7 +23,7 @@ import (
 	"boundlane/cli/internal/run"
 	"boundlane/cli/internal/team"
 	"boundlane/compiler"
-	"boundlane/controlplane"
+	"boundlane/teamapi"
 )
 
 // Gateway is the local OpenShell gateway. openshell.Client implements it.
@@ -314,12 +312,12 @@ func (p *pass) ship(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		var props []controlplane.Proposal
+		var props []teamapi.Proposal
 		for _, r := range openshell.ParseRules(pending) {
 			if r.Chunk == "" {
 				continue
 			}
-			props = append(props, controlplane.Proposal{
+			props = append(props, teamapi.Proposal{
 				Chunk: r.Chunk, Sandbox: name, Destination: r.Destination(),
 				Binary: r.Binary, Rationale: r.Rationale, Prover: r.Prover,
 			})
@@ -572,7 +570,7 @@ func staleProposal(err error) bool {
 
 // releaseStale puts the request back on the console when the same chunk is still pending,
 // and drops it when OpenShell has already replaced the chunk.
-func (p *pass) releaseStale(ctx context.Context, r controlplane.Proposal) error {
+func (p *pass) releaseStale(ctx context.Context, r teamapi.Proposal) error {
 	opt := p.Option
 	fresh, still, err := currentProposal(ctx, opt, r.Sandbox, r.Chunk)
 	if err != nil {
@@ -583,7 +581,7 @@ func (p *pass) releaseStale(ctx context.Context, r controlplane.Proposal) error 
 		return nil
 	}
 	if still {
-		if err := opt.Client.PutProposals(ctx, opt.Token, r.Sandbox, []controlplane.Proposal{fresh}); err != nil {
+		if err := opt.Client.PutProposals(ctx, opt.Token, r.Sandbox, []teamapi.Proposal{fresh}); err != nil {
 			p.failed(r.Sandbox+": requests", err)
 			return nil
 		}
@@ -594,21 +592,21 @@ func (p *pass) releaseStale(ctx context.Context, r controlplane.Proposal) error 
 	return nil
 }
 
-func currentProposal(ctx context.Context, opt Option, sandbox, chunk string) (controlplane.Proposal, bool, error) {
+func currentProposal(ctx context.Context, opt Option, sandbox, chunk string) (teamapi.Proposal, bool, error) {
 	raw, err := opt.Gateway.PendingRules(ctx, sandbox)
 	if err != nil {
-		return controlplane.Proposal{}, false, err
+		return teamapi.Proposal{}, false, err
 	}
 	for _, p := range openshell.ParseRules(raw) {
 		if p.Chunk != chunk {
 			continue
 		}
-		return controlplane.Proposal{
+		return teamapi.Proposal{
 			Chunk: p.Chunk, Sandbox: sandbox, Destination: p.Destination(),
 			Binary: p.Binary, Rationale: p.Rationale, Prover: p.Prover,
 		}, true, nil
 	}
-	return controlplane.Proposal{}, false, nil
+	return teamapi.Proposal{}, false, nil
 }
 
 // cursorFile is where each sandbox's log was read up to. Seen is the newest
