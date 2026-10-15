@@ -46,7 +46,7 @@ var helpGroups = []struct {
 		{"policy", "Compile or check a policy file"},
 		{"agents", "List agents, or build an image"},
 		{"update", "Install the latest boundlane"},
-		{"version", "Show the version"},
+		{"version", "Show the version. --version does the same"},
 	}},
 }
 
@@ -150,6 +150,9 @@ func cli(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		writeHelp(stdout)
 		return 0
+	}
+	if args[0] == "--version" {
+		args[0] = "version"
 	}
 	// The agent owns Ctrl-C while it runs. Handled signals reset to default in
 	// child processes, so the agent still receives it.
