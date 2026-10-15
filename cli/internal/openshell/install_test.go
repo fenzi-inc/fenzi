@@ -34,3 +34,31 @@ func TestInstallVersionIsPinned(t *testing.T) {
 		t.Fatalf("%s is outside %s", InstallVersion, Pinned)
 	}
 }
+
+func TestInstallerIsPinnedToTheReleaseTag(t *testing.T) {
+	if !strings.Contains(upstreamInstaller, "/OpenShell/v"+InstallVersion+"/install.sh") {
+		t.Fatalf("installer %s is not at tag v%s", upstreamInstaller, InstallVersion)
+	}
+	if len(upstreamInstallerSHA256) != 64 {
+		t.Fatalf("installer sha256 %q is not a sha256", upstreamInstallerSHA256)
+	}
+	cmd := InstallCommand()
+	for _, want := range []string{upstreamInstaller, upstreamInstallerSHA256, "OPENSHELL_VERSION=v" + InstallVersion} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("missing %s in %s", want, cmd)
+		}
+	}
+}
+
+func TestCheckSHA256(t *testing.T) {
+	path := t.TempDir() + "/install.sh"
+	if err := os.WriteFile(path, []byte("echo hi\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkSHA256(path, "ab08508fdf5ca4da5c4995987bc41c56c048aaa5eeb046417ae4049b7d40286e"); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkSHA256(path, upstreamInstallerSHA256); err == nil {
+		t.Fatal("a script with another sha256 was accepted")
+	}
+}
