@@ -4,6 +4,7 @@ package team
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -114,3 +115,51 @@ hosts:
     access: read-only
 approvals: person
 `
+
+func TestServerErrorsAreClassified(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "too many decisions in one batch", http.StatusBadRequest)
+	}))
+	c := Client{Base: srv.URL}
+	_, err := c.Ingest(context.Background(), "t", []int{})
+	if Unreachable(err) || Status(err) != http.StatusBadRequest {
+		t.Fatalf("a refusal is an answer: %v", err)
+	}
+	srv.Close()
+	_, err = c.Ingest(context.Background(), "t", []int{})
+	if !Unreachable(err) || Status(err) != 0 {
+		t.Fatalf("a closed server is unreachable: %v", err)
+	}
+}
+
+func TestRefreshSaysWhenTheMachineWasSignedOut(t *testing.T) {
+	s, err := controlplane.Open(filepath.Join(t.TempDir(), "team.db"), checker{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	b, err := s.Publish(context.Background(), "acme", []byte("version: 1\nname: acme\nagents: [claude]\nworkspace: read-write\napprovals: person\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	en := Enrollment{Tenant: "acme", Token: "revoked", PublicKey: base64.StdEncoding.EncodeToString(s.PublicKey)}
+	if err := en.Take(b); err != nil {
+		t.Fatal(err)
+	}
+	// The hosted control plane answers a revoked machine token like this.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "sign in with boundlane login", http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	got, note, err := Refresh(context.Background(), Client{Base: srv.URL}, en)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Revision != 1 || !strings.Contains(note, "signed out of team acme, still using r1") {
+		t.Fatalf("revision %d note %q", got.Revision, note)
+	}
+	srv.Close()
+	if _, note, _ := Refresh(context.Background(), Client{Base: srv.URL}, en); !strings.Contains(note, "unreachable") {
+		t.Fatalf("a dead server is still unreachable: %q", note)
+	}
+}

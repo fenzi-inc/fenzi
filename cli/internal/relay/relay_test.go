@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -263,28 +264,49 @@ func (allow) Check(context.Context, []byte, []byte) (bool, string, error) { retu
 
 type fakeGW struct {
 	logs         []byte
+	logErr       error
 	rules        []byte
 	list         []byte
 	set          bool
+	policy       []byte
 	approved     string
 	approveCalls int
 	approveErr   error
+	pendingCalls int
+	mode         string
+	modeErr      error
 }
 
+// Version and ComputeDrivers return what OpenShell 0.1.2 gave on the test machine.
+func (g *fakeGW) Version(context.Context) (string, error) { return "openshell 0.1.2\n", nil }
+func (g *fakeGW) ComputeDrivers(context.Context) ([]string, error) {
+	return []string{"docker"}, nil
+}
+func (g *fakeGW) GlobalSetting(context.Context, string) (string, error) {
+	if g.mode == "" {
+		return "<unset>", g.modeErr
+	}
+	return g.mode, g.modeErr
+}
 func (g *fakeGW) Sandboxes(context.Context) ([]string, error) { return []string{"bl-1"}, nil }
 func (g *fakeGW) LogLines(context.Context, string, int) ([]byte, error) {
-	return g.logs, nil
+	return g.logs, g.logErr
 }
-func (g *fakeGW) PendingRules(context.Context, string) ([]byte, error) { return g.rules, nil }
+func (g *fakeGW) PendingRules(context.Context, string) ([]byte, error) {
+	g.pendingCalls++
+	return g.rules, nil
+}
 func (g *fakeGW) RuleApprove(_ context.Context, _, chunk string) error {
 	g.approveCalls++
 	g.approved = chunk
 	return g.approveErr
 }
 func (g *fakeGW) RuleReject(context.Context, string, string, string) error { return nil }
-func (g *fakeGW) PolicySet(context.Context, string, string) error {
+func (g *fakeGW) PolicySet(_ context.Context, _, file string) error {
 	g.set = true
-	return nil
+	b, err := os.ReadFile(file)
+	g.policy = b
+	return err
 }
 func (g *fakeGW) PolicyList(context.Context, string) ([]byte, error) { return g.list, nil }
 

@@ -6,12 +6,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"time"
 
 	"boundlane/cli/internal/config"
+	"boundlane/cli/internal/openshell"
 	"boundlane/cli/internal/relay"
 	"boundlane/cli/internal/team"
 	"boundlane/cli/internal/tui"
@@ -40,6 +42,10 @@ func cmdForward(e env, args []string) (int, error) {
 	defer stop()
 	for {
 		rep, err := relayOnce(ctx, e)
+		if err != nil && ctx.Err() != nil {
+			// Ctrl-C during a pass. What was spooled stays for the next run.
+			return 0, nil
+		}
 		if err != nil {
 			return 1, err
 		}
@@ -69,24 +75,39 @@ func relayOnce(ctx context.Context, e env) (relay.Report, error) {
 	if err != nil {
 		return relay.Report{}, err
 	}
-	en, note, err := team.Refresh(ctx, team.Client{Base: en.Server}, en)
-	if err != nil {
+	// A server that accepts the connection and never answers must not hold
+	// the pass, which also does the gateway's work.
+	tc := team.Client{Base: en.Server, HTTP: &http.Client{Timeout: 30 * time.Second}}
+	en, note, err := team.Refresh(ctx, tc, en)
+	switch {
+	case errors.Is(err, team.ErrNoPolicy):
+		// Nothing to sync, but decisions can still be spooled.
+		note = err.Error()
+	case err != nil:
 		return relay.Report{}, err
 	}
 	if err := en.Save(dirs); err != nil {
 		return relay.Report{}, err
 	}
-	b, err := en.Bundle()
-	if err != nil {
-		return relay.Report{}, err
+	var doc []byte
+	if en.Revision > 0 {
+		b, err := en.Bundle()
+		if err != nil {
+			return relay.Report{}, err
+		}
+		doc = b.Document
 	}
+	watch := openshell.NewWatch(client())
+	defer watch.Close()
 	rep, err := relay.Pass(ctx, relay.Option{
 		Gateway:  client(),
-		Client:   team.Client{Base: en.Server},
+		Stream:   watch,
+		Client:   tc,
 		Token:    en.Token,
+		Tenant:   en.Tenant,
 		Machine:  en.Machine,
 		Revision: en.Revision,
-		Document: b.Document,
+		Document: doc,
 		Dirs:     dirs,
 	})
 	if note != "" {

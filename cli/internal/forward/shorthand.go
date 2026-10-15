@@ -2,6 +2,7 @@ package forward
 
 import (
 	"bufio"
+	"bytes"
 	"io"
 	"regexp"
 	"strconv"
@@ -26,6 +27,15 @@ var (
 	shortReason = regexp.MustCompile(`\[reason:(.*)\]\s*$`)
 	// HTTP reasons repeat the request path; records never keep a query string.
 	query = regexp.MustCompile(`\?[^\s\]]*`)
+	// The one approval event recorded from OpenShell 0.1.2:
+	//
+	//	CONFIG:APPROVED [INFO] chunk:fad7c2ed-3aca-4fb7-bb37-495820dd7562 approved on example.com:443 HEAD / by /usr/bin/curl
+	//
+	// CONFIG:REJECTED and the other CONFIG events have not been recorded, so
+	// they are not mapped.
+	approval = regexp.MustCompile(`^CONFIG:APPROVED \[\w+\] chunk:(\S+) approved on (.+) by (\S+)$`)
+	// lineTime is the time prefix every line of `openshell logs` carries.
+	lineTime = regexp.MustCompile(`^\[(\d+(?:\.\d+)?)\] `)
 )
 
 // FromShorthand maps one shorthand log line. ok is false for lines that are
@@ -92,15 +102,80 @@ func FromStream(t time.Time, level, message, sandbox string) (Record, bool) {
 
 // ReadShorthand maps every decision line in a shorthand log.
 func ReadShorthand(rd io.Reader, sandbox string) ([]Record, error) {
+	return read(rd, sandbox, FromShorthand)
+}
+
+// AuditFromStream maps a decision or an approval. The forwarder ships both so
+// the control plane can match OpenShell's approvals to console reviews.
+// `boundlane log` reads decisions only.
+func AuditFromStream(t time.Time, level, message, sandbox string) (Record, bool) {
+	if r, ok := FromStream(t, level, message, sandbox); ok {
+		return r, true
+	}
+	if level != "OCSF" {
+		return Record{}, false
+	}
+	m := approval.FindStringSubmatch(strings.TrimSpace(message))
+	if m == nil {
+		return Record{}, false
+	}
+	return Record{
+		Time: t.UTC().Truncate(time.Millisecond), Sandbox: sandbox, Class: "Config", Action: "Approved",
+		Destination: m[2], Process: m[3], Chunk: m[1],
+	}, true
+}
+
+// AuditFromShorthand is AuditFromStream for one shorthand log line.
+func AuditFromShorthand(line, sandbox string) (Record, bool) {
+	m := shortLine.FindStringSubmatch(strings.TrimSpace(line))
+	if m == nil {
+		return Record{}, false
+	}
+	return AuditFromStream(epoch(m[1]), "OCSF", m[2], sandbox)
+}
+
+// ReadAudit maps every decision and approval line in a shorthand log.
+func ReadAudit(rd io.Reader, sandbox string) ([]Record, error) {
+	return read(rd, sandbox, AuditFromShorthand)
+}
+
+func read(rd io.Reader, sandbox string, from func(string, string) (Record, bool)) ([]Record, error) {
 	var out []Record
 	sc := bufio.NewScanner(rd)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
-		if r, ok := FromShorthand(sc.Text(), sandbox); ok {
+		if r, ok := from(sc.Text(), sandbox); ok {
 			out = append(out, r)
 		}
 	}
 	return out, sc.Err()
+}
+
+// Span counts the lines of a shorthand log and returns the times of the
+// oldest and newest ones, whatever their kind. Lines without a time prefix
+// are counted and have no time.
+func Span(raw []byte) (lines int, oldest, newest time.Time) {
+	sc := bufio.NewScanner(bytes.NewReader(raw))
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		lines++
+		m := lineTime.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		t := epoch(m[1]).UTC()
+		if oldest.IsZero() || t.Before(oldest) {
+			oldest = t
+		}
+		if t.After(newest) {
+			newest = t
+		}
+	}
+	return lines, oldest, newest
 }
 
 // hostPath turns http://host:443/path?q into host/path. The query is dropped.

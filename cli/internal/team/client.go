@@ -196,12 +196,48 @@ func (c Client) Revision(ctx context.Context, token string, n int) (controlplane
 	return controlplane.ParseBundle(raw)
 }
 
+// Beat is what a machine reports on each heartbeat.
+type Beat struct {
+	OpenShellVersion string `json:"openshell_version"`
+	Driver           string `json:"driver"`
+	PolicyRevision   int    `json:"policy_revision"`
+	// ApprovalMode is the gateway-wide proposal_approval_mode, "" when unset
+	// or unreadable.
+	ApprovalMode string        `json:"approval_mode"`
+	Sandboxes    []BeatSandbox `json:"sandboxes"`
+}
+
+// BeatSandbox is one sandbox in this machine's local state. Revision is the
+// team revision it was started from, 0 when it was not.
+type BeatSandbox struct {
+	Name     string `json:"name"`
+	Agent    string `json:"agent"`
+	Revision int    `json:"revision"`
+	Running  bool   `json:"running"`
+}
+
 // Heartbeat tells the server what this machine is running.
-func (c Client) Heartbeat(ctx context.Context, token, version, driver string, revision int) error {
-	_, err := c.callStatus(ctx, http.MethodPost, "/v1/heartbeat", token, map[string]any{
-		"openshell_version": version, "driver": driver, "policy_revision": revision,
-	}, nil)
+func (c Client) Heartbeat(ctx context.Context, token string, b Beat) error {
+	if b.Sandboxes == nil {
+		b.Sandboxes = []BeatSandbox{}
+	}
+	_, err := c.callStatus(ctx, http.MethodPost, "/v1/heartbeat", token, b, nil)
 	return err
+}
+
+// Unreachable reports an error that never got an HTTP status from the server.
+func Unreachable(err error) bool {
+	var h *httpError
+	return err != nil && !errors.As(err, &h) && !errors.Is(err, ErrPending)
+}
+
+// Status is the HTTP status of a server error, or 0.
+func Status(err error) int {
+	var h *httpError
+	if errors.As(err, &h) {
+		return h.Status
+	}
+	return 0
 }
 
 func (e *Enrollment) applyBundle(raw []byte) error {

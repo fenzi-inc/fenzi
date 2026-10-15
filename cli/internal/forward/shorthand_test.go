@@ -97,3 +97,61 @@ func TestShorthandReason(t *testing.T) {
 		t.Errorf("query string leaked into the reason: %s", r.Reason)
 	}
 }
+
+// Recorded from a Codex session on OpenShell 0.1.2; the host is replaced.
+const approvedLine = `[1791297802.289] [sandbox] [OCSF ] [ocsf] CONFIG:APPROVED [INFO] chunk:fad7c2ed-3aca-4fb7-bb37-495820dd7562 approved on example.com:443 HEAD / by /usr/bin/curl`
+
+func TestAuditMapsAnApproval(t *testing.T) {
+	r, ok := AuditFromShorthand(approvedLine, "bl-mouse-keepe-a3a6")
+	want := Record{
+		Time: time.Unix(1791297802, 289e6).UTC(), Sandbox: "bl-mouse-keepe-a3a6", Class: "Config", Action: "Approved",
+		Destination: "example.com:443 HEAD /", Process: "/usr/bin/curl", Chunk: "fad7c2ed-3aca-4fb7-bb37-495820dd7562",
+	}
+	if !ok || r != want {
+		t.Errorf("AuditFromShorthand = %+v, want %+v", r, want)
+	}
+	if _, ok := FromShorthand(approvedLine, "s"); ok {
+		t.Error("an approval is not a decision; boundlane log must not show it")
+	}
+	for _, other := range []string{
+		`[1791297778.239] [sandbox] [OCSF ] [ocsf] CONFIG:PROPOSED [INFO] agent_authored proposal chunk:fad7c2ed-3aca-4fb7-bb37-495820dd7562 on example.com:443 HEAD / by /usr/bin/curl`,
+		`[1791059016.500] [sandbox] [OCSF ] [ocsf] CONFIG:LOADED [INFO] Acknowledged initial policy revision as loaded [version:1] [hash:478a7ecf5859]`,
+	} {
+		if r, ok := AuditFromShorthand(other, "s"); ok {
+			t.Errorf("only CONFIG:APPROVED is recorded well enough to map: %+v", r)
+		}
+	}
+}
+
+func TestReadAuditKeepsDecisionsAndAddsApprovals(t *testing.T) {
+	log := recordedLog + approvedLine + "\n"
+	decisions, err := ReadShorthand(strings.NewReader(log), "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit, err := ReadAudit(strings.NewReader(log), "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) != 5 || len(audit) != 6 {
+		t.Fatalf("%d decisions, %d audit records", len(decisions), len(audit))
+	}
+	for i := range decisions {
+		if audit[i] != decisions[i] {
+			t.Errorf("record %d: %+v != %+v", i, audit[i], decisions[i])
+		}
+	}
+	if last := audit[5]; last.Class != "Config" || last.Chunk == "" {
+		t.Errorf("approval = %+v", last)
+	}
+}
+
+func TestSpan(t *testing.T) {
+	n, oldest, newest := Span([]byte(recordedLog + "\n"))
+	if n != 8 {
+		t.Errorf("lines = %d", n)
+	}
+	if oldest != time.Unix(1791059016, 500e6).UTC() || newest != time.Unix(1791059150, 996e6).UTC() {
+		t.Errorf("oldest %v newest %v", oldest, newest)
+	}
+}

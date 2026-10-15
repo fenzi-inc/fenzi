@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"time"
 
 	"boundlane/cli/internal/tui"
@@ -54,16 +55,23 @@ func Login(ctx context.Context, c Client, machine string, out io.Writer) (Enroll
 	}
 }
 
+// ErrNoPolicy means the server could not be reached and no policy is cached.
+var ErrNoPolicy = errors.New("control plane unreachable, and no policy is cached")
+
 // Refresh fetches the current policy. If the server cannot be reached, the
 // cached policy is kept after its signature is checked again.
 func Refresh(ctx context.Context, c Client, e Enrollment) (Enrollment, string, error) {
 	b, ok, err := c.Policy(ctx, e.Token)
 	if err != nil {
 		if e.Revision == 0 {
-			return e, "", fmt.Errorf("control plane unreachable, and no policy is cached")
+			return e, "", ErrNoPolicy
 		}
 		if _, verr := e.Bundle(); verr != nil {
 			return e, "", verr
+		}
+		if Status(err) == http.StatusUnauthorized {
+			// Signed out in the console. The gateway keeps enforcing what it has.
+			return e, fmt.Sprintf("this machine was signed out of team %s, still using r%d. Run boundlane login", e.Tenant, e.Revision), nil
 		}
 		return e, fmt.Sprintf("control plane unreachable, using %s r%d", e.Tenant, e.Revision), nil
 	}

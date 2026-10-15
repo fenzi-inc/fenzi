@@ -29,6 +29,8 @@ type Record struct {
 	Reason string `json:"reason,omitempty"`
 	// Gap is a hole in the log stream. The events inside it are gone.
 	Gap bool `json:"gap,omitempty"`
+	// Chunk is the OpenShell proposal an approval record is about.
+	Chunk string `json:"chunk,omitempty"`
 }
 
 // ocsf holds the OCSF fields the contract reads. Which of them OpenShell

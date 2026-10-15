@@ -11,10 +11,11 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
+	"syscall"
 	"time"
 
 	"boundlane/cli/internal/config"
+	"boundlane/cli/internal/relay"
 	"boundlane/cli/internal/run"
 	"boundlane/cli/internal/screen"
 	"boundlane/cli/internal/team"
@@ -87,6 +88,7 @@ func cmdPublish(e env, args []string) (int, error) {
 func cmdServer(e env, args []string) (int, error) {
 	fs := newFlags("server", e.stderr)
 	addr := fs.String("addr", "127.0.0.1:8787", "listen address, localhost only")
+	proveOnly := fs.Bool("prove", false, "serve only POST /v1/prove, for the hosted control plane")
 	if _, err := parse(fs, args); err != nil {
 		return 1, err
 	}
@@ -96,6 +98,9 @@ func cmdServer(e env, args []string) (int, error) {
 	}
 	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
 		return 1, errors.New("the local team server only listens on localhost")
+	}
+	if *proveOnly {
+		return serveProve(e, *addr)
 	}
 	dirs, err := config.Default()
 	if err != nil {
@@ -140,6 +145,32 @@ func cmdServer(e env, args []string) (int, error) {
 	u.Blank()
 	srv := &http.Server{Addr: *addr, Handler: controlplane.Handler(s)}
 	ctx, stop := signal.NotifyContext(e.ctx, os.Interrupt)
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		shut, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shut)
+	}()
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return 1, err
+	}
+	return 0, nil
+}
+
+// serveProve compiles and proves documents for the hosted control plane,
+// which does not run openshell-prover itself. BOUNDLANE_PROVE_TOKEN, when set,
+// must be sent as X-Prove-Token.
+func serveProve(e env, addr string) (int, error) {
+	u := tui.New(e.stdin, e.stdout)
+	u.Title("Prove server", "localhost only")
+	u.Done("Listen", "http://"+addr+"/v1/prove")
+	token := os.Getenv("BOUNDLANE_PROVE_TOKEN")
+	if token == "" {
+		u.Note("BOUNDLANE_PROVE_TOKEN is not set. Any local process can ask for a proof.")
+	}
+	srv := &http.Server{Addr: addr, Handler: controlplane.ProveHandler(proverChecker{}, token), ReadHeaderTimeout: 10 * time.Second}
+	ctx, stop := signal.NotifyContext(e.ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go func() {
 		<-ctx.Done()
@@ -237,9 +268,7 @@ func cmdStatus(e env, args []string) (int, error) {
 		u.Note(note)
 	}
 	u.Blank()
-	version, _ := client().Version(e.ctx)
-	drivers, _ := client().ComputeDrivers(e.ctx)
-	_ = team.Client{Base: en.Server}.Heartbeat(e.ctx, en.Token, strings.TrimSpace(version), strings.Join(drivers, ", "), en.Revision)
+	_ = team.Client{Base: en.Server}.Heartbeat(e.ctx, en.Token, relay.Beat(e.ctx, client(), dirs, en.Revision))
 	return 0, nil
 }
 
