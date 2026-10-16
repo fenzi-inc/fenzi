@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"time"
 
@@ -171,6 +172,14 @@ func followJSON(e env, sandbox, since string, denyOnly bool) error {
 			<-done
 			return err
 		}
+	}
+	if err := sc.Err(); err != nil {
+		// A line longer than the buffer stops the scanner while the runtime
+		// is still writing; unblock its write and end it, then say why.
+		cancel()
+		pr.Close()
+		<-done
+		return fmt.Errorf("reading the sandbox log: %w", err)
 	}
 	return <-done
 }

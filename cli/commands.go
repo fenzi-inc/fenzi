@@ -801,7 +801,7 @@ func cmdPolicy(e env, args []string) (int, error) {
 		return cmdPublish(e, args[1:])
 	}
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		subHelp(e, "policy", "The policy for this folder is developer-default plus ./boundlane.yaml, if there is one.", [][2]string{
+		subHelp(e, "policy", "The policy for this folder is the one boundlane run uses: developer-default plus ./boundlane.yaml, if there is one, or the team's signed revision on a signed-in machine.", [][2]string{
 			{"policy check [file]", "Prove it stays inside the org boundary"},
 			{"policy compile [file]", "Print the OpenShell policy it becomes"},
 			{"policy publish <file>", "Send an org policy to the team (Team plan)"},
@@ -852,6 +852,19 @@ func cmdPolicy(e env, args []string) (int, error) {
 			return 1, err
 		}
 		resolved = run.Resolved{Doc: doc, Sources: file}
+	} else if file == "" {
+		// The policy boundlane run uses here: the signed team revision on a
+		// signed-in machine, developer-default plus ./boundlane.yaml on the
+		// Free plan. Its labels go to standard error, so standard output keeps
+		// only the YAML or the JSON document.
+		dirs, err := config.Default()
+		if err != nil {
+			return 1, err
+		}
+		labels := env{ctx: e.ctx, stdin: e.stdin, stdout: e.stderr, stderr: e.stderr}
+		if resolved, err = resolvePolicy(labels, dirs, repo, ""); err != nil {
+			return 1, err
+		}
 	} else if resolved, err = run.ResolveFree(repo, file); err != nil {
 		return 1, err
 	}
@@ -1044,17 +1057,26 @@ func cmdPs(e env, args []string) (int, error) {
 	// The gateway is the source of truth; fix records of sandboxes deleted
 	// some other way.
 	known := map[string]bool{}
+	changed := false
 	for i := range s.Sandboxes {
 		sb := &s.Sandboxes[i]
 		known[sb.Name] = true
-		sb.Running = live[sb.Name]
+		if sb.Running != live[sb.Name] {
+			sb.Running = live[sb.Name]
+			changed = true
+		}
 	}
 	for _, n := range names {
 		if !known[n] {
 			s.Put(config.Sandbox{Name: n, Running: true})
+			changed = true
 		}
 	}
-	_ = dirs.SaveState(s)
+	// Written only when a record changed: a program that polls ps should not
+	// rewrite the state file every few seconds.
+	if changed {
+		_ = dirs.SaveState(s)
+	}
 
 	list := append([]config.Sandbox(nil), s.Sandboxes...)
 	sort.Slice(list, func(i, j int) bool { return list[i].Created.After(list[j].Created) })

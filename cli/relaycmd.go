@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"boundlane/cli/internal/config"
@@ -73,6 +75,13 @@ func relayOnce(ctx context.Context, e env) (relay.Report, error) {
 	if err != nil {
 		return relay.Report{}, err
 	}
+	// Two passes at once would each rewrite the spool and the cursors, and
+	// one could drop a record the other had read. Passes take turns.
+	unlock, err := lockRelay(ctx, dirs, relayLockWait)
+	if err != nil {
+		return relay.Report{}, err
+	}
+	defer unlock()
 	// A server that accepts the connection and never answers must not hold
 	// the pass, which also does the gateway's work.
 	tc := team.Client{Base: en.Server, HTTP: &http.Client{Timeout: 30 * time.Second}}
@@ -115,6 +124,45 @@ func relayOnce(ctx context.Context, e env) (relay.Report, error) {
 		return rep, errors.New("OpenShell gateway is not ready. Run boundlane doctor")
 	}
 	return rep, err
+}
+
+// relayLockWait is how long a pass waits for another one to finish.
+var relayLockWait = 60 * time.Second
+
+// lockRelay holds relay.lock in the config folder until unlock is called.
+// It waits while another boundlane sync or forward holds it, up to wait.
+func lockRelay(ctx context.Context, dirs config.Dirs, wait time.Duration) (unlock func(), err error) {
+	if err := os.MkdirAll(dirs.Config, 0o700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(dirs.Config, "relay.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return func() {
+				_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+				f.Close()
+			}, nil
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) {
+			f.Close()
+			return nil, err
+		}
+		if time.Now().After(deadline) {
+			f.Close()
+			return nil, errors.New("another boundlane sync or forward is running; try again when it finishes")
+		}
+		select {
+		case <-ctx.Done():
+			f.Close()
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 func printReport(e env, title string, rep relay.Report) {

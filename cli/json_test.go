@@ -15,6 +15,7 @@ import (
 	"boundlane/cli/internal/config"
 	"boundlane/cli/internal/forward"
 	"boundlane/cli/internal/run"
+	"boundlane/cli/internal/team"
 )
 
 // reply is what the fake runtime prints for a command line that starts with
@@ -416,5 +417,89 @@ func TestJSONUpdateCheck(t *testing.T) {
 	var none json.RawMessage
 	if stderr, code := runJSON(t, &none, "update", "--check", "--json"); code != 1 || none != nil || !strings.Contains(stderr, "could not reach") {
 		t.Errorf("unreachable: exit %d stdout %q stderr %q", code, none, stderr)
+	}
+}
+
+func TestJSONLogFollowLineTooLong(t *testing.T) {
+	// One line longer than the scanner's 4 MiB buffer, as an abnormal runtime
+	// could print. The command must end and say why, not wait forever on the
+	// runtime's blocked write.
+	long := strings.Repeat("x", 5*1024*1024) + "\n" + decisionLines
+	fakeRuntime(t, map[string]reply{"logs bl-web-1a2b --source sandbox --tail": {out: long}}, "")
+	seedState(t, config.Sandbox{Name: "bl-web-1a2b", Agent: "claude", Repo: "/Users/ana/web", Created: time.Now(), Running: true})
+	done := make(chan struct{})
+	var code int
+	var out, errOut bytes.Buffer
+	go func() {
+		code = cli([]string{"log", "--follow", "--sandbox", "bl-web-1a2b", "--json"}, strings.NewReader(""), &out, &errOut)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("log --follow --json did not return after an over-long line")
+	}
+	if code != 1 || !strings.Contains(errOut.String(), "reading the sandbox log") || !strings.Contains(errOut.String(), "too long") {
+		t.Fatalf("exit %d stderr %q", code, errOut.String())
+	}
+}
+
+func TestPsLeavesAnUnchangedStateFileAlone(t *testing.T) {
+	fakeRuntime(t, map[string]reply{"sandbox list": {out: "bl-web-1a2b\n"}}, "")
+	dirs := seedState(t, config.Sandbox{Name: "bl-web-1a2b", Agent: "claude", Repo: "/Users/ana/web", Created: time.Now(), Running: true})
+	path := filepath.Join(dirs.Config, "state.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Written by hand in a shape SaveState would not produce, so a rewrite shows.
+	compact := bytes.Join(bytes.Fields(raw), nil)
+	if err := os.WriteFile(path, compact, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var docs []jsonSandbox
+	if stderr, code := runJSON(t, &docs, "ps", "--all", "--json"); code != 0 || stderr != "" || len(docs) != 1 || !docs[0].Running {
+		t.Fatalf("exit %d stderr %q docs %+v", code, stderr, docs)
+	}
+	if after, _ := os.ReadFile(path); !bytes.Equal(after, compact) {
+		t.Errorf("ps rewrote a state file it did not change:\n%s", after)
+	}
+	// A sandbox that stopped is a change, and is written.
+	fakeRuntime(t, nil, "")
+	t.Setenv("XDG_CONFIG_HOME", filepath.Dir(dirs.Config))
+	if _, code := runJSON(t, &docs, "ps", "--all", "--json"); code != 0 || len(docs) != 1 || docs[0].Running {
+		t.Fatalf("exit %d docs %+v", code, docs)
+	}
+	if after, _ := os.ReadFile(path); bytes.Equal(after, compact) {
+		t.Error("ps did not record that the sandbox stopped")
+	}
+}
+
+func TestStatusDoesNotWaitForeverOnTheTeamServer(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	// A server that accepts the connection and never answers.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+	old := teamTimeout
+	teamTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { teamTimeout = old })
+	dirs, err := config.Default()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := (team.Enrollment{Server: srv.URL, Token: "t", Email: "ana@acme.dev", Tenant: "acme", Machine: "m"}).Save(dirs); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	var doc jsonStatus
+	stderr, code := runJSON(t, &doc, "status", "--json")
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("status took %s against a server that never answers", took)
+	}
+	if code != 1 || !strings.Contains(stderr, "control plane unreachable") {
+		t.Fatalf("exit %d stderr %q", code, stderr)
 	}
 }

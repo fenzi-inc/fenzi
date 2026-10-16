@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -94,6 +95,9 @@ func cmdLogin(e env, args []string) (int, error) {
 	ctx, cancel := context.WithTimeout(e.ctx, 2*time.Minute)
 	defer cancel()
 	en, err := team.Login(ctx, team.Client{Base: *server}, host, e.stdout)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return 1, errors.New("no approval after two minutes, nothing was stored. Run boundlane login for a new code")
+	}
 	if err != nil {
 		return 1, err
 	}
@@ -144,7 +148,8 @@ func cmdStatus(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	en, note, err := team.Refresh(e.ctx, team.Client{Base: en.Server}, en)
+	tc := teamClient(en.Server)
+	en, note, err := team.Refresh(e.ctx, tc, en)
 	if err != nil {
 		return 1, err
 	}
@@ -166,7 +171,7 @@ func cmdStatus(e env, args []string) (int, error) {
 		if err := writeJSON(e.stdout, doc); err != nil {
 			return 1, err
 		}
-		_ = team.Client{Base: en.Server}.Heartbeat(e.ctx, en.Token, relay.Beat(e.ctx, client(), dirs, en.Revision))
+		_ = tc.Heartbeat(e.ctx, en.Token, relay.Beat(e.ctx, client(), dirs, en.Revision))
 		return 0, nil
 	}
 	u.Title("This machine", "")
@@ -183,9 +188,18 @@ func cmdStatus(e env, args []string) (int, error) {
 		u.Note(note)
 	}
 	u.Blank()
-	_ = team.Client{Base: en.Server}.Heartbeat(e.ctx, en.Token, relay.Beat(e.ctx, client(), dirs, en.Revision))
+	_ = tc.Heartbeat(e.ctx, en.Token, relay.Beat(e.ctx, client(), dirs, en.Revision))
 	return 0, nil
 }
+
+// teamClient talks to the team server with a time limit: a server that
+// accepts the connection and never answers must not hold the command.
+func teamClient(server string) team.Client {
+	return team.Client{Base: server, HTTP: &http.Client{Timeout: teamTimeout}}
+}
+
+// teamTimeout bounds each request to the team server.
+var teamTimeout = 30 * time.Second
 
 // resolvePolicy uses the signed team policy when this machine is signed in,
 // and the Free plan otherwise.
@@ -200,7 +214,7 @@ func resolvePolicy(e env, dirs config.Dirs, repo, file string) (run.Resolved, er
 	if file != "" {
 		return run.Resolved{}, errors.New("this machine uses the team policy; --policy is for the Free plan")
 	}
-	en, note, err := team.Refresh(e.ctx, team.Client{Base: en.Server}, en)
+	en, note, err := team.Refresh(e.ctx, teamClient(en.Server), en)
 	if err != nil {
 		return run.Resolved{}, err
 	}
