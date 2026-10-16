@@ -297,6 +297,13 @@ func cmdRun(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
+	if *policyFile == "" {
+		if moved, err := run.MigrateProjectFile(repo); err != nil {
+			return 1, fmt.Errorf("renaming %s to %s: %w", run.LegacyProjectFile, run.ProjectFile, err)
+		} else if moved {
+			fmt.Fprintf(e.stderr, "Renamed %s to %s, the name since Boundlane became Fenzi.\n", run.LegacyProjectFile, run.ProjectFile)
+		}
+	}
 	resolved, err := resolvePolicy(e, dirs, repo, *policyFile)
 	if err != nil {
 		return 1, err
