@@ -68,6 +68,18 @@ func ParseRules(out []byte) []Proposal {
 	return list
 }
 
+// noRules is what `rule get <name> --status pending` printed in 0.1.2, with
+// exit 0, for a sandbox with nothing pending (recorded 16 October 2026):
+//
+//	No network rules for sandbox 'bl-mouse-keepe-5561'
+var noRules = regexp.MustCompile(`^No network rules for sandbox '[^']*'$`)
+
+// NoRules reports whether out is the recorded answer for no chunks. Output
+// that neither lists a chunk nor says this is not read as an empty list.
+func NoRules(out []byte) bool {
+	return noRules.Match(bytes.TrimSpace(out))
+}
+
 // agentFiled matches the sandbox log line OpenShell 0.1.2 writes when the
 // agent submits a proposal through policy.local:
 //

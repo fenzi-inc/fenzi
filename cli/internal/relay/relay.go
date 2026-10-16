@@ -145,6 +145,10 @@ type pass struct {
 	rep Report
 	// checks is how each sandbox compared on this pass, by name.
 	checks map[string]policyCheck
+	// addOnly is set once the control plane refused the full pending list:
+	// it predates PUT /v1/proposals, so the rest of the pass uses the older
+	// report.
+	addOnly bool
 }
 
 func (p *pass) note(n string) {
@@ -343,9 +347,9 @@ func push(ctx context.Context, opt Option, name, agent string, have int, res run
 }
 
 // ship reads each sandbox's new decisions and approvals into the spool,
-// reports pending requests, and uploads the spool. Records reach the spool
-// before the cursors move, so a crash sends some twice, which the server
-// ignores, and loses none.
+// reports every listed sandbox's pending requests, and uploads the spool.
+// Records reach the spool before the cursors move, so a crash sends some
+// twice, which the server ignores, and loses none.
 func (p *pass) ship(ctx context.Context) error {
 	names, err := p.Gateway.Sandboxes(ctx)
 	if err != nil {
@@ -366,23 +370,20 @@ func (p *pass) ship(ctx context.Context) error {
 			return err
 		}
 		fresh = append(fresh, recs...)
-		if !ok {
-			continue
-		}
 		pending, err := p.Gateway.PendingRules(ctx, name)
 		if err != nil {
+			if !ok {
+				// The log read failed too, and its note says so.
+				continue
+			}
 			return err
 		}
-		props := p.proposals(ctx, name, openshell.ParseRules(pending))
-		// Pending requests are read again on every pass, so one the server
-		// did not take is reported next time.
-		if len(props) > 0 && p.up() {
-			if err := p.Client.PutProposals(ctx, p.Token, name, props); err != nil {
-				p.failed(name+": requests", err)
-			} else {
-				p.rep.Requests += len(props)
-			}
-		}
+		rules := openshell.ParseRules(pending)
+		// Only output in a recorded shape is a full list. Anything else
+		// could be a format this forwarder cannot read, and an empty list
+		// read from it would close every request the console holds.
+		full := len(rules) > 0 || openshell.NoRules(pending)
+		p.report(ctx, name, p.proposals(ctx, name, rules), full)
 	}
 	ended, err := p.finished(names, &cur)
 	if err != nil {
@@ -400,6 +401,49 @@ func (p *pass) ship(ctx context.Context) error {
 		return err
 	}
 	return p.upload(ctx, sp)
+}
+
+// report sends one sandbox's pending requests. Pending requests are read
+// again on every pass, so one the server did not take is reported next time.
+//
+// A full list goes with PUT, an empty one too, so the console learns that a
+// request it holds was answered on the machine with boundlane approve or
+// deny, or in the Mac app. A console that predates the call answers 405; it
+// then gets the older report, which only adds and is skipped when empty.
+func (p *pass) report(ctx context.Context, name string, props []teamapi.Proposal, full bool) {
+	if !p.up() {
+		return
+	}
+	if full && !p.addOnly {
+		err := p.Client.ReplaceProposals(ctx, p.Token, name, props)
+		if err == nil {
+			p.rep.Requests += len(props)
+			return
+		}
+		if s := team.Status(err); s != http.StatusMethodNotAllowed && s != http.StatusNotFound {
+			p.failed(name+": requests", err)
+			return
+		}
+		p.addOnly = true
+	}
+	if len(props) == 0 {
+		return
+	}
+	if err := p.Client.PutProposals(ctx, p.Token, name, older(props)); err != nil {
+		p.failed(name+": requests", err)
+		return
+	}
+	p.rep.Requests += len(props)
+}
+
+// older drops the fields a server that predates the full list refuses.
+func older(props []teamapi.Proposal) []teamapi.Proposal {
+	out := make([]teamapi.Proposal, len(props))
+	for i, pr := range props {
+		pr.Rule = ""
+		out[i] = pr
+	}
+	return out
 }
 
 // proposals turns pending chunks into the requests the console lists. Draft
@@ -423,7 +467,7 @@ func (p *pass) proposals(ctx context.Context, sandbox string, rules []openshell.
 		out = append(out, teamapi.Proposal{
 			Chunk: r.Chunk, Sandbox: sandbox, Destination: r.Destination(),
 			Binary: r.Binary, Rationale: r.Rationale, Prover: r.Prover,
-			Draft: r.IsDraft(filed), Revision: p.Revision,
+			Draft: r.IsDraft(filed), Revision: p.Revision, Rule: r.Rule,
 		})
 	}
 	return out
@@ -776,7 +820,7 @@ func (p *pass) releaseStale(ctx context.Context, r teamapi.Proposal) error {
 		return nil
 	}
 	if still {
-		if err := opt.Client.PutProposals(ctx, opt.Token, r.Sandbox, []teamapi.Proposal{fresh}); err != nil {
+		if err := opt.Client.PutProposals(ctx, opt.Token, r.Sandbox, older([]teamapi.Proposal{fresh})); err != nil {
 			p.failed(r.Sandbox+": requests", err)
 			return nil
 		}

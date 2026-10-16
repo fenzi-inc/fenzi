@@ -30,6 +30,11 @@ type fakeTeam struct {
 	refuse  int
 	// proposals are the requests the forwarder reported.
 	proposals []teamapi.Proposal
+	// lists is the last full pending list per sandbox (PUT), and puts how
+	// many were sent. old makes the server one that predates the call.
+	lists map[string][]teamapi.Proposal
+	puts  int
+	old   bool
 }
 
 func (f *fakeTeam) start(t *testing.T) *httptest.Server {
@@ -76,6 +81,29 @@ func (f *fakeTeam) start(t *testing.T) *httptest.Server {
 		f.mu.Lock()
 		f.proposals = append(f.proposals, req.Proposals...)
 		f.mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("PUT /v1/proposals", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.puts++
+		if f.old {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Sandbox   string             `json:"sandbox"`
+			Proposals []teamapi.Proposal `json:"proposals"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if f.lists == nil {
+			f.lists = map[string][]teamapi.Proposal{}
+		}
+		f.lists[req.Sandbox] = append([]teamapi.Proposal{}, req.Proposals...)
+		f.proposals = append(f.proposals, req.Proposals...)
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /v1/applies", func(w http.ResponseWriter, r *http.Request) {

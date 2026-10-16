@@ -180,6 +180,11 @@ type Proposal struct {
 	// Revision is the team revision the machine held when it reported the
 	// request, 0 when it held none.
 	Revision int `json:"revision,omitempty"`
+	// Rule is the rule name OpenShell gave the request. Once the request is
+	// approved, the decisions it allows carry that name. Only the full list
+	// (PUT /v1/proposals) sends it: a server that predates the field refuses
+	// it on the older call.
+	Rule string `json:"rule,omitempty"`
 }
 
 // Results of the policy compare a machine reports for each sandbox in its
