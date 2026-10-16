@@ -140,7 +140,7 @@ func loadHosts(e env, dirs config.Dirs, sb config.Sandbox, next run.Resolved) (l
 		return "", "", err
 	}
 	defer os.RemoveAll(tmp)
-	c, err := run.WriteCompiled(next.Doc, entry, tmp, next.Sources)
+	c, err := run.WriteCompiled(next, entry, tmp)
 	if err != nil {
 		return "", "", err
 	}

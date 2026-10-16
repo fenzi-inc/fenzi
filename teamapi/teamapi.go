@@ -13,21 +13,62 @@ import (
 	"time"
 )
 
+// Bundle formats. Format 1 signs the policy document alone; every bundle
+// before team boundaries is format 1, and a bundle without a boundary still
+// is, so a CLI that knows only format 1 keeps verifying it. Format 2 also
+// signs the team's boundary document.
+const (
+	FormatDocument = 1
+	FormatBoundary = 2
+)
+
 // Bundle is one published policy revision. Document is the org policy as
-// submitted. The signature covers Tenant, Revision, Published, and Document.
+// submitted. Boundary, when set, is the team's boundary document: the most
+// any of its policies may allow, in the same schema. The signature covers
+// Tenant, Revision, Published, Document, and in format 2 Boundary.
 type Bundle struct {
-	Tenant    string
-	Revision  int
+	Tenant   string
+	Revision int
+	// Format is FormatDocument or FormatBoundary. Zero means FormatDocument.
+	Format    int
 	Document  []byte
+	Boundary  []byte
 	Published time.Time
 	Signature []byte
 }
 
-// Message is the signed bytes: the tenant, the revision, and the published
-// time in RFC 3339 with nanoseconds, each on its own line, then the document.
+// formatHead starts every format 2 message. A format 1 message starts with
+// the tenant and then the revision number, so the two cannot be confused:
+// a tenant cannot hold a space, and "acme" is not a revision number.
+const formatHead = "boundlane bundle 2\n"
+
+// Message is the signed bytes.
+//
+// Format 1: the tenant, the revision, and the published time in RFC 3339 with
+// nanoseconds, each on its own line, then the document.
+//
+// Format 2: the line "boundlane bundle 2", the same three lines, then the
+// document's length in bytes on its own line and the document, then the
+// boundary's length on its own line and the boundary.
 func Message(b Bundle) []byte {
-	head := fmt.Sprintf("%s\n%d\n%s\n", b.Tenant, b.Revision, b.Published.UTC().Format(time.RFC3339Nano))
+	published := b.Published.UTC().Format(time.RFC3339Nano)
+	if b.Format == FormatBoundary {
+		head := fmt.Sprintf("%s%s\n%d\n%s\n%d\n", formatHead, b.Tenant, b.Revision, published, len(b.Document))
+		out := append([]byte(head), b.Document...)
+		out = append(out, fmt.Sprintf("%d\n", len(b.Boundary))...)
+		return append(out, b.Boundary...)
+	}
+	head := fmt.Sprintf("%s\n%d\n%s\n", b.Tenant, b.Revision, published)
 	return append([]byte(head), b.Document...)
+}
+
+// FormatFor is the format a signer uses: 2 when there is a boundary, else 1,
+// which every CLI can verify.
+func FormatFor(boundary []byte) int {
+	if len(boundary) > 0 {
+		return FormatBoundary
+	}
+	return FormatDocument
 }
 
 // Verify checks the signature and the required fields. It does not compare
@@ -40,6 +81,12 @@ func Verify(pub ed25519.PublicKey, b Bundle) error {
 		return fmt.Errorf("bundle revision %d is not valid", b.Revision)
 	case len(b.Document) == 0:
 		return errors.New("bundle has no policy document")
+	case b.Format > FormatBoundary:
+		return fmt.Errorf("bundle format %d is newer than this boundlane knows; run boundlane update", b.Format)
+	case b.Format < 0:
+		return fmt.Errorf("bundle format %d is not valid", b.Format)
+	case b.Format != FormatBoundary && len(b.Boundary) > 0:
+		return errors.New("bundle carries a boundary its signature does not cover")
 	case len(pub) != ed25519.PublicKeySize:
 		return errors.New("team public key is missing")
 	case !ed25519.Verify(pub, Message(b), b.Signature):
@@ -60,24 +107,32 @@ func Accept(pub ed25519.PublicKey, have int, b Bundle) error {
 	return nil
 }
 
-// Wire is a bundle as the API sends it.
+// Wire is a bundle as the API sends it. A format 1 bundle has neither format
+// nor boundary, so it is the same JSON a CLI from before boundaries reads.
 type Wire struct {
 	Tenant    string `json:"tenant"`
 	Revision  int    `json:"revision"`
+	Format    int    `json:"format,omitempty"`
 	Document  string `json:"document"`
+	Boundary  string `json:"boundary,omitempty"`
 	Published string `json:"published"`
 	Signature string `json:"signature"`
 }
 
 // ToWire is the API form of a bundle.
 func ToWire(b Bundle) Wire {
-	return Wire{
+	w := Wire{
 		Tenant:    b.Tenant,
 		Revision:  b.Revision,
 		Document:  string(b.Document),
 		Published: b.Published.UTC().Format(time.RFC3339Nano),
 		Signature: base64.StdEncoding.EncodeToString(b.Signature),
 	}
+	if b.Format > FormatDocument {
+		w.Format = b.Format
+		w.Boundary = string(b.Boundary)
+	}
+	return w
 }
 
 // ParseBundle reads a bundle from the API's JSON form.
@@ -94,7 +149,11 @@ func ParseBundle(data []byte) (Bundle, error) {
 	if err != nil {
 		return Bundle{}, err
 	}
-	return Bundle{Tenant: w.Tenant, Revision: w.Revision, Document: []byte(w.Document), Published: published, Signature: sig}, nil
+	b := Bundle{Tenant: w.Tenant, Revision: w.Revision, Format: w.Format, Document: []byte(w.Document), Published: published, Signature: sig}
+	if w.Boundary != "" {
+		b.Boundary = []byte(w.Boundary)
+	}
+	return b, nil
 }
 
 // Proposal is a request for more access, filed on a machine and reviewed in

@@ -124,7 +124,10 @@ type jsonPolicyCheck struct {
 	// error, unsupported, or inconclusive.
 	Result string `json:"result"`
 	// Checked names the policy sources, and Agent the agent it was compiled for.
-	Checked    string   `json:"checked"`
+	Checked string `json:"checked"`
+	// Boundary names the team boundary the policy was proved against. It is
+	// absent when the boundary was derived from the same policy.
+	Boundary   string   `json:"boundary,omitempty"`
 	Agent      string   `json:"agent"`
 	Example    string   `json:"example"`
 	Reason     string   `json:"reason"`

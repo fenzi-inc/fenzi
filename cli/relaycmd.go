@@ -96,13 +96,13 @@ func relayOnce(ctx context.Context, e env) (relay.Report, error) {
 	if err := en.Save(dirs); err != nil {
 		return relay.Report{}, err
 	}
-	var doc []byte
+	var doc, boundary []byte
 	if en.Revision > 0 {
 		b, err := en.Bundle()
 		if err != nil {
 			return relay.Report{}, err
 		}
-		doc = b.Document
+		doc, boundary = b.Document, b.Boundary
 	}
 	watch := openshell.NewWatch(client())
 	defer watch.Close()
@@ -115,6 +115,7 @@ func relayOnce(ctx context.Context, e env) (relay.Report, error) {
 		Machine:   en.Machine,
 		Revision:  en.Revision,
 		Document:  doc,
+		Boundary:  boundary,
 		Dirs:      dirs,
 		Prover:    prover(),
 		BeatNotes: beatNotes(en),

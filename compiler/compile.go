@@ -130,7 +130,8 @@ func Compile(doc *Document, t Target) (*Policy, error) {
 
 // Boundary produces the most access the candidate may have once providers
 // have added their rules. On the Free plan it is derived from the same
-// document. On Team the security lead publishes it instead.
+// document. A team can publish a boundary document of its own instead;
+// TeamBoundary compiles that one.
 func Boundary(doc *Document, t Target) (*Policy, error) {
 	p, err := Compile(doc, t)
 	if err != nil {
@@ -169,6 +170,37 @@ func Boundary(doc *Document, t Target) (*Policy, error) {
 		p.NetworkPolicies = nil
 	}
 	return p, nil
+}
+
+// ErrNotInBoundary means the team boundary does not name the agent, so no
+// policy for that agent can be inside it.
+var ErrNotInBoundary = errors.New("the team boundary does not name this agent")
+
+// TeamBoundary compiles a team's boundary document for one agent. A boundary
+// uses the same schema as a policy and means the most any policy of the team
+// may allow. Its workspace, paths, and hosts compile exactly as a policy's
+// do, and the agent's model endpoints are added as Boundary adds them.
+func TeamBoundary(b *Document, t Target) (*Policy, error) {
+	if err := CheckBoundary(b); err != nil {
+		return nil, err
+	}
+	if !slices.Contains(b.Agents, t.Agent.Name) {
+		return nil, fmt.Errorf("%w: %s", ErrNotInBoundary, t.Agent.Name)
+	}
+	p, err := Boundary(b, t)
+	if err != nil {
+		return nil, fmt.Errorf("team boundary: %w", err)
+	}
+	return p, nil
+}
+
+// CheckBoundary checks what a boundary needs beyond what a policy needs: the
+// agents it covers. Its values are checked when it is compiled for each one.
+func CheckBoundary(b *Document) error {
+	if b == nil || len(b.Agents) == 0 {
+		return errors.New("team boundary: name the agents it covers")
+	}
+	return nil
 }
 
 func checkTarget(d *Document, t Target) error {

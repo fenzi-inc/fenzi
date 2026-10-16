@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"boundlane/teamapi"
 )
@@ -66,6 +65,10 @@ type Enrollment struct {
 	PublicKey string `json:"public_key"`
 	Revision  int    `json:"revision"`
 	Document  string `json:"document,omitempty"`
+	// Format and Boundary are set when the cached bundle carries the team's
+	// boundary (bundle format 2).
+	Format    int    `json:"format,omitempty"`
+	Boundary  string `json:"boundary,omitempty"`
 	Published string `json:"published,omitempty"`
 	Signature string `json:"signature,omitempty"`
 	// Refused says why the last bundle the server sent was not taken, while
@@ -132,10 +135,13 @@ func (e *Enrollment) Take(b teamapi.Bundle) error {
 	if b.Revision == e.Revision {
 		return nil
 	}
-	e.Revision = b.Revision
-	e.Document = string(b.Document)
-	e.Published = b.Published.UTC().Format(time.RFC3339Nano)
-	e.Signature = base64.StdEncoding.EncodeToString(b.Signature)
+	w := teamapi.ToWire(b)
+	e.Revision = w.Revision
+	e.Document = w.Document
+	e.Format = w.Format
+	e.Boundary = w.Boundary
+	e.Published = w.Published
+	e.Signature = w.Signature
 	return nil
 }
 
@@ -270,13 +276,10 @@ func (e Enrollment) Bundle() (teamapi.Bundle, error) {
 	if e.Revision == 0 || e.Document == "" {
 		return teamapi.Bundle{}, errors.New("no team policy cached")
 	}
-	raw, err := json.Marshal(struct {
-		Tenant    string `json:"tenant"`
-		Revision  int    `json:"revision"`
-		Document  string `json:"document"`
-		Published string `json:"published"`
-		Signature string `json:"signature"`
-	}{e.Tenant, e.Revision, e.Document, e.Published, e.Signature})
+	raw, err := json.Marshal(teamapi.Wire{
+		Tenant: e.Tenant, Revision: e.Revision, Format: e.Format, Document: e.Document,
+		Boundary: e.Boundary, Published: e.Published, Signature: e.Signature,
+	})
 	if err != nil {
 		return teamapi.Bundle{}, err
 	}

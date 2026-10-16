@@ -64,6 +64,9 @@ type Option struct {
 	Machine  string
 	Revision int
 	Document []byte
+	// Boundary is the team's boundary document from the same signed bundle,
+	// or empty. A revision is proved against it before it is loaded.
+	Boundary []byte
 	Dirs     config.Dirs
 	// SpoolLimit bounds the records kept while the control plane is away.
 	// Zero means spoolLimit.
@@ -201,6 +204,10 @@ func (p *pass) sync(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	resolved, err := run.Resolved{Doc: next, Sources: fmt.Sprintf("%s r%d (signed)", opt.Tenant, opt.Revision)}.WithTeamBoundary(opt.Boundary, opt.Tenant, opt.Revision)
+	if err != nil {
+		return err
+	}
 	state, err := opt.Dirs.LoadState()
 	if err != nil {
 		return err
@@ -235,7 +242,7 @@ func (p *pass) sync(ctx context.Context) error {
 		}
 		switch compiler.Effect(prev, next) {
 		case compiler.EffectNetwork:
-			note, loaded, err := push(ctx, opt, sb.Name, sb.Agent, sb.TeamRevision, next)
+			note, loaded, err := push(ctx, opt, sb.Name, sb.Agent, sb.TeamRevision, resolved)
 			if err != nil {
 				return err
 			}
@@ -270,8 +277,9 @@ func (p *pass) sync(ctx context.Context) error {
 // push compiles a network change for one running sandbox, proves it the way
 // run proves a policy before it creates a sandbox, and only then loads it.
 // loaded is false when the prover refused it or could not run; the sandbox
-// keeps the revision it has, and the note says why.
-func push(ctx context.Context, opt Option, name, agent string, have int, doc *compiler.Document) (note string, loaded bool, err error) {
+// keeps the revision it has, and the note says why. When the bundle carries
+// the team's boundary, the proof is against that boundary.
+func push(ctx context.Context, opt Option, name, agent string, have int, res run.Resolved) (note string, loaded bool, err error) {
 	entry, err := agents.Get(agent)
 	if err != nil {
 		return "", false, err
@@ -281,11 +289,14 @@ func push(ctx context.Context, opt Option, name, agent string, have int, doc *co
 		return "", false, err
 	}
 	defer os.RemoveAll(dir)
-	compiled, err := run.WriteCompiled(doc, entry, dir, fmt.Sprintf("%s r%d (signed)", opt.Tenant, opt.Revision))
+	keeps := fmt.Sprintf("It keeps r%d.", have)
+	compiled, err := run.WriteCompiled(res, entry, dir)
+	if errors.Is(err, compiler.ErrNotInBoundary) {
+		return fmt.Sprintf("%s: r%d not loaded, %v. %s", name, opt.Revision, err, keeps), false, nil
+	}
 	if err != nil {
 		return "", false, err
 	}
-	keeps := fmt.Sprintf("It keeps r%d.", have)
 	if _, err := run.Prove(ctx, opt.Prover, compiled, fmt.Sprintf("r%d for %s", opt.Revision, name)); err != nil {
 		var pe *run.PolicyError
 		if errors.As(err, &pe) {
@@ -640,6 +651,13 @@ func (p *pass) apply(ctx context.Context) error {
 		var err error
 		switch r.Status {
 		case "approved":
+			if why, cerr := p.outsideBoundary(r); cerr != nil {
+				return cerr
+			} else if why != "" {
+				// Left pending on the gateway, and listed again next pass.
+				rep.Notes = append(rep.Notes, fmt.Sprintf("%s %s not approved here: %s", r.Sandbox, r.Chunk, why))
+				continue
+			}
 			err = opt.Gateway.RuleApprove(ctx, r.Sandbox, r.Chunk)
 		case "denied":
 			reason := r.Reason
@@ -676,6 +694,46 @@ func (p *pass) apply(ctx context.Context) error {
 		rep.Notes = append(rep.Notes, fmt.Sprintf("%s %s %s", r.Sandbox, r.Status, r.Destination))
 	}
 	return nil
+}
+
+// outsideBoundary says why an approval from the console is not applied: its
+// destination has no rule in the team boundary from the signed bundle. Only
+// the host and port are compared. Empty means it may be applied, which is
+// always the case when the team has no boundary.
+func (p *pass) outsideBoundary(r teamapi.Proposal) (string, error) {
+	if len(p.Boundary) == 0 {
+		return "", nil
+	}
+	res, err := run.Resolved{}.WithTeamBoundary(p.Boundary, p.Tenant, p.Revision)
+	if err != nil {
+		return "", err
+	}
+	state, err := p.Dirs.LoadState()
+	if err != nil {
+		return "", err
+	}
+	agent := ""
+	for _, sb := range state.Sandboxes {
+		if sb.Name == r.Sandbox {
+			agent = sb.Agent
+		}
+	}
+	if agent == "" {
+		return "this machine has no record of the sandbox's agent, so the team boundary cannot be checked", nil
+	}
+	entry, err := agents.Get(agent)
+	if err != nil {
+		return "", err
+	}
+	ok, err := res.HostInBoundary(entry, r.Destination)
+	if err != nil || ok {
+		return "", err
+	}
+	dest := r.Destination
+	if dest == "" {
+		dest = "a request with no destination"
+	}
+	return dest + " is outside " + res.BoundarySource, nil
 }
 
 // staleProposal is OpenShell refusing a chunk because the evaluation was refreshed.

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"boundlane/agents"
 	"boundlane/cli/internal/config"
 	"boundlane/cli/internal/relay"
 	"boundlane/cli/internal/run"
@@ -216,6 +217,62 @@ func teamClient(server string) team.Client {
 // teamTimeout bounds each request to the team server.
 var teamTimeout = 30 * time.Second
 
+// withCachedBoundary adds the team boundary from the signed revision this
+// machine has cached. It does not ask the server. A machine that is not
+// signed in, or whose team has no boundary, leaves r as it is.
+func withCachedBoundary(r run.Resolved) (run.Resolved, error) {
+	dirs, err := config.Default()
+	if err != nil {
+		return r, err
+	}
+	en, err := team.Load(dirs)
+	if errors.Is(err, team.ErrNotEnrolled) {
+		return r, nil
+	}
+	if err != nil || en.Revision == 0 {
+		return r, err
+	}
+	b, err := en.Bundle()
+	if err != nil {
+		return r, err
+	}
+	return r.WithTeamBoundary(b.Boundary, en.Tenant, en.Revision)
+}
+
+// checkTeamBoundary refuses to approve a request for a destination
+// ("host:port") the team boundary cached on this machine has no rule for.
+// It compares the host and port only, not methods or paths. Without a team
+// boundary every destination passes, as before.
+func checkTeamBoundary(sb config.Sandbox, destination string) error {
+	res, err := withCachedBoundary(run.Resolved{})
+	if err != nil || res.Boundary == nil {
+		return err
+	}
+	name := sb.Agent
+	if name == "" {
+		name = defaultAgent()
+	}
+	entry, err := agents.Get(name)
+	if err != nil {
+		return err
+	}
+	ok, err := res.HostInBoundary(entry, destination)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("not approved: %s is outside %s. An admin adds it to the team boundary in the console before it can be approved", orUnknown(destination), res.BoundarySource)
+	}
+	return nil
+}
+
+func orUnknown(destination string) string {
+	if destination == "" {
+		return "a request with no destination"
+	}
+	return destination
+}
+
 // resolvePolicy uses the signed team policy when this machine is signed in,
 // and the Free plan otherwise.
 func resolvePolicy(e env, dirs config.Dirs, repo, file string) (run.Resolved, error) {
@@ -253,5 +310,6 @@ func resolvePolicy(e env, dirs config.Dirs, repo, file string) (run.Resolved, er
 	if _, err := os.Stat(filepath.Join(repo, run.ProjectFile)); err == nil {
 		screen.New(e.stdout).Label("policy", "project file not used; the team policy applies")
 	}
-	return run.Resolved{Doc: doc, Sources: fmt.Sprintf("%s r%d (signed)", en.Tenant, en.Revision), TeamRevision: en.Revision}, nil
+	res := run.Resolved{Doc: doc, Sources: fmt.Sprintf("%s r%d (signed)", en.Tenant, en.Revision), TeamRevision: en.Revision}
+	return res.WithTeamBoundary(b.Boundary, en.Tenant, en.Revision)
 }

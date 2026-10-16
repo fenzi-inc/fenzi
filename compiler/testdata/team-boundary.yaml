@@ -1,0 +1,17 @@
+version: 1
+name: acme-boundary
+agents: [claude, codex]
+workspace: read-write
+paths:
+  read_only: [/opt/fixtures]
+hosts:
+  - host: api.github.com
+    access: read-only
+  - host: registry.npmjs.org
+    access: read-only
+  - host: pypi.org
+    access: read-only
+  - host: files.pythonhosted.org
+    access: read-only
+  - host: api.stripe.com
+    access: read-only

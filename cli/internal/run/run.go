@@ -201,11 +201,14 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 	res.Staging = d.Dirs.Staging(name)
 
 	// 5 and 6. Resolve, compile, and prove the policy before anything is created.
-	c, err := WriteCompiled(o.Policy.Doc, a, runDir, o.Policy.Sources)
+	c, err := WriteCompiled(o.Policy, a, runDir)
 	if err != nil {
 		return res, err
 	}
 	say("policy", "%s, %s", o.Policy.Sources, c.Revision)
+	if o.Policy.Boundary != nil {
+		say("boundary", "%s", o.Policy.BoundarySource)
+	}
 	r, err := d.Prover.Check(ctx, c.Policy, c.Boundary)
 	if err != nil {
 		return res, err

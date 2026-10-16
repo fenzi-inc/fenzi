@@ -527,6 +527,11 @@ func cmdRequests(e env, args []string) (int, error) {
 				return 1, err
 			}
 			if i == 0 {
+				if err := checkTeamBoundary(sb, p.Destination()); err != nil {
+					u.Problem("Not approved", id+" "+p.Destination())
+					u.Note(err.Error())
+					break
+				}
 				if err := approveOne(e, u, sb, p.Chunk); err != nil {
 					return 1, err
 				}
@@ -651,6 +656,9 @@ func cmdApprove(e env, args []string) (int, error) {
 		return 1, err
 	}
 	id := p.Chunk
+	if err := checkTeamBoundary(sb, p.Destination()); err != nil {
+		return 1, err
+	}
 	if *asJSON {
 		if err := client().RuleApprove(e.ctx, sb.Name, id); err != nil {
 			return 1, err
@@ -738,7 +746,7 @@ func saveApproved(e env, u *tui.UI, sb config.Sandbox, repo string, file *projec
 	if err != nil {
 		return 1, err
 	}
-	printCheck(u, r, resolved.Sources, entry)
+	printCheck(u, r, resolved.Sources, "", entry)
 	if !r.Passed() {
 		return 0, &run.PolicyError{Stage: "policy check", Result: r}
 	}
@@ -1042,7 +1050,7 @@ func cmdPolicy(e env, args []string) (int, error) {
 	agentName := fs.String("agent", "claude", "agent to compile for")
 	org := fs.Bool("org", false, "the file is a complete org policy, not a project file merged over developer-default")
 	output := fs.String("o", "", "write the compiled policy to this file (compile)")
-	boundary := fs.String("boundary", "", "boundary file (check; default: derived from the same policy)")
+	boundary := fs.String("boundary", "", "boundary file (check; default: the team's boundary on a signed-in machine whose team has one, else derived from the same policy)")
 	emit := fs.String("emit", "policy", "what compile prints: policy or boundary")
 	asJSON := jsonFlag(fs)
 	pos, err := parse(fs, args[1:])
@@ -1094,6 +1102,17 @@ func cmdPolicy(e env, args []string) (int, error) {
 	} else if resolved, err = run.ResolveFree(repo, file); err != nil {
 		return 1, err
 	}
+	switch {
+	case *boundary != "":
+		// The file given replaces any team boundary.
+		resolved.Boundary, resolved.BoundarySource = nil, ""
+	case file != "":
+		// A file checked on a signed-in machine is proved against the
+		// team's boundary, as a revision built from it would be.
+		if resolved, err = withCachedBoundary(resolved); err != nil {
+			return 1, err
+		}
+	}
 
 	if sub == "check" {
 		r, err := proveResolved(e, resolved, entry, *boundary)
@@ -1109,12 +1128,12 @@ func cmdPolicy(e env, args []string) (int, error) {
 			if missing == nil {
 				missing = []string{}
 			}
-			doc := jsonPolicyCheck{Passed: r.Passed(), Result: r.Result, Checked: from, Agent: entry.Display, Example: r.Example(), Reason: r.Reason, NotChecked: missing}
+			doc := jsonPolicyCheck{Passed: r.Passed(), Result: r.Result, Checked: from, Boundary: resolved.BoundarySource, Agent: entry.Display, Example: r.Example(), Reason: r.Reason, NotChecked: missing}
 			if err := writeJSON(e.stdout, doc); err != nil {
 				return 1, err
 			}
 		} else {
-			printCheck(tui.New(e.stdin, e.stdout), r, from, entry)
+			printCheck(tui.New(e.stdin, e.stdout), r, from, resolved.BoundarySource, entry)
 		}
 		if !r.Passed() {
 			return 0, &run.PolicyError{Stage: "policy check", Result: r}
@@ -1127,7 +1146,7 @@ func cmdPolicy(e env, args []string) (int, error) {
 		return 1, err
 	}
 	defer os.RemoveAll(tmp)
-	c, err := run.WriteCompiled(resolved.Doc, entry, tmp, resolved.Sources)
+	c, err := run.WriteCompiled(resolved, entry, tmp)
 	if err != nil {
 		return 1, err
 	}
@@ -1160,7 +1179,7 @@ func proveResolved(e env, resolved run.Resolved, entry agents.Entry, boundary st
 		return openshell.Result{}, err
 	}
 	defer os.RemoveAll(tmp)
-	c, err := run.WriteCompiled(resolved.Doc, entry, tmp, resolved.Sources)
+	c, err := run.WriteCompiled(resolved, entry, tmp)
 	if err != nil {
 		return openshell.Result{}, err
 	}
@@ -1171,7 +1190,9 @@ func proveResolved(e env, resolved run.Resolved, entry agents.Entry, boundary st
 }
 
 // printCheck prints a policy check result as boundlane policy check does.
-func printCheck(u *tui.UI, r openshell.Result, from string, entry agents.Entry) {
+// against names the team boundary it was proved against, or is empty for the
+// boundary derived from the same policy.
+func printCheck(u *tui.UI, r openshell.Result, from, against string, entry agents.Entry) {
 	u.Blank()
 	if r.Passed() {
 		u.Done("Policy check", "inside the boundary")
@@ -1179,6 +1200,9 @@ func printCheck(u *tui.UI, r openshell.Result, from string, entry agents.Entry) 
 		u.Problem("Policy check", r.Result)
 	}
 	u.Note("Checked " + from + " for " + entry.Display + ".")
+	if against != "" {
+		u.Note("Proved against " + against + ".")
+	}
 	if ex := r.Example(); ex != "" {
 		u.Println("    " + u.Bold("Example") + "  " + ex)
 	}
