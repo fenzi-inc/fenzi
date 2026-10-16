@@ -1,5 +1,7 @@
 # Fenzi
 
+Fenzi was called Boundlane until 16 October 2026. A machine installed under that name keeps working: `boundlane update` moves it to the new release, and the CLI still reads `boundlane.yaml` and the old settings folders.
+
 Run the agent you already use. Keep it in bounds.
 
 The model will make bad calls. That is ordinary. Fenzi starts that agent inside a sandbox on your machine. You choose the files, the hosts, and whether a credential ever enters the sandbox. A bad prompt does not move the boundary. When a call is blocked, you get a log line.
