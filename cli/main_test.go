@@ -65,7 +65,7 @@ func TestSubcommandHelp(t *testing.T) {
 func TestHelpListsConnect(t *testing.T) {
 	var out bytes.Buffer
 	writeHelp(&out)
-	for _, want := range []string{"connect", "setup", "Exit codes"} {
+	for _, want := range []string{"connect", "setup", "rm", "Exit codes"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("help is missing %q", want)
 		}

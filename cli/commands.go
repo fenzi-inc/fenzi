@@ -1238,7 +1238,11 @@ func cmdKey(e env, args []string) (int, error) {
 		return 1, err
 	}
 	if args[0] == "remove" {
-		removed, err := run.RemoveKey(e.ctx, oc, a)
+		dirs, err := config.Default()
+		if err != nil {
+			return 1, err
+		}
+		removed, err := run.RemoveKey(e.ctx, oc, dirs, a)
 		if err != nil {
 			return 1, err
 		}

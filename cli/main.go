@@ -33,6 +33,7 @@ var helpGroups = []struct {
 		{"deny", "Deny a request"},
 		{"log", "Show allows and denies"},
 		{"stop", "End a sandbox and review its changes"},
+		{"rm", "Delete finished sandboxes"},
 	}},
 	{"Changes", [][2]string{
 		{"diff", "Show the agent's changes"},
@@ -171,6 +172,7 @@ func cli(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		"ps":       cmdPs,
 		"key":      cmdKey,
 		"stop":     cmdStop,
+		"rm":       cmdRm,
 		"server":   cmdServer,
 		"login":    cmdLogin,
 		"logout":   cmdLogout,

@@ -3,10 +3,12 @@ package run
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
 	"boundlane/agents"
+	"boundlane/cli/internal/config"
 	"boundlane/cli/internal/openshell"
 )
 
@@ -47,10 +49,12 @@ func SetKey(ctx context.Context, oc openshell.Client, a agents.Entry, value stri
 	return exists, oc.ProviderSetKey(ctx, ProviderName(a), a.Key.ProfileType, a.Key.Env, value, exists)
 }
 
-// RemoveKey deletes the agent's key from the gateway. It refuses while any
-// Boundlane sandbox runs, because what a running sandbox does when its
-// provider disappears is not documented.
-func RemoveKey(ctx context.Context, oc openshell.Client, a agents.Entry) (bool, error) {
+// RemoveKey deletes the agent's key from the gateway. It refuses while a
+// sandbox that was started for this agent is still running, because what a
+// running sandbox does when its provider disappears is not documented. The
+// running sandboxes come from the gateway; which agent each one runs comes
+// from the state Boundlane kept when it started them.
+func RemoveKey(ctx context.Context, oc openshell.Client, dirs config.Dirs, a agents.Entry) (bool, error) {
 	exists, err := KeyStored(ctx, oc, a)
 	if err != nil || !exists {
 		return false, err
@@ -59,8 +63,23 @@ func RemoveKey(ctx context.Context, oc openshell.Client, a agents.Entry) (bool, 
 	if err != nil {
 		return false, err
 	}
-	if len(running) > 0 {
-		return false, errors.New("a sandbox is still running; stop it first (boundlane ps, boundlane stop)")
+	if name := RunningWith(dirs, a, running); name != "" {
+		return false, fmt.Errorf("%s is running with the %s key; stop it first (boundlane stop %s)", name, a.Display, name)
 	}
 	return true, oc.ProviderDelete(ctx, ProviderName(a))
+}
+
+// RunningWith names the first of the running sandboxes that the state says
+// was started for the agent, or "" when none was.
+func RunningWith(dirs config.Dirs, a agents.Entry, running []string) string {
+	s, err := dirs.LoadState()
+	if err != nil {
+		return ""
+	}
+	for _, name := range running {
+		if sb, ok := s.Find(name); ok && sb.Agent == a.Name {
+			return name
+		}
+	}
+	return ""
 }
