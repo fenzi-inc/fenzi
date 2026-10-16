@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 
@@ -200,6 +201,60 @@ func tomlString(s string) string {
 	}
 	b.WriteByte('"')
 	return b.String()
+}
+
+// Arches are the processors an agent image is built for, as GOARCH and
+// Docker platform names use them.
+var Arches = []string{"amd64", "arm64"}
+
+// archNames are the spellings packages use in file and folder names.
+var archNames = map[string]string{
+	"amd64":   "amd64",
+	"x64":     "amd64",
+	"x86_64":  "amd64",
+	"arm64":   "arm64",
+	"aarch64": "arm64",
+}
+
+// BinaryArch returns the processor a binary path is built for, or "" when the
+// path names none and so is the same in every image. A path names a
+// processor when one of its folder or file names has a part such as
+// "aarch64" or "x64" between dashes or dots.
+func BinaryArch(p string) (string, error) {
+	found := ""
+	for _, elem := range strings.Split(p, "/") {
+		for _, part := range strings.FieldsFunc(elem, func(r rune) bool { return r == '-' || r == '.' }) {
+			a, ok := archNames[part]
+			if !ok {
+				continue
+			}
+			if found != "" && found != a {
+				return "", fmt.Errorf("%s names both %s and %s", p, found, a)
+			}
+			found = a
+		}
+	}
+	return found, nil
+}
+
+// BinariesFor returns the binaries an image built for arch must contain:
+// the paths that name that processor and the paths that name none. Codex
+// lists one native program per processor, and an image has only its own.
+func (e Entry) BinariesFor(arch string) ([]string, error) {
+	if !slices.Contains(Arches, arch) {
+		return nil, fmt.Errorf("unknown processor %q; use %s", arch, strings.Join(Arches, " or "))
+	}
+	var out []string
+	for _, b := range e.Binaries {
+		a, err := BinaryArch(b)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", e.Name, err)
+		}
+		if a == "" || a == arch {
+			out = append(out, b)
+		}
+	}
+	return out, nil
 }
 
 // Tag is the local image tag for the pinned version.

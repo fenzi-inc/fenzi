@@ -2,6 +2,8 @@ package agents
 
 import (
 	"errors"
+	"os"
+	"path"
 	"reflect"
 	"strings"
 	"testing"
@@ -157,5 +159,111 @@ func TestTOMLString(t *testing.T) {
 func TestUnknownAgent(t *testing.T) {
 	if _, err := Get("cursor-app"); err == nil {
 		t.Fatal("expected an error for an agent not in the catalog")
+	}
+}
+
+func TestBinaryArch(t *testing.T) {
+	for p, want := range map[string]string{
+		"/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe":                                                         "",
+		"/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex": "arm64",
+		"/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex":    "amd64",
+		"/opt/tool-amd64/bin/tool":        "amd64",
+		"/opt/x64tool/bin/tool":           "",
+		"/opt/tool/bin/tool.aarch64":      "arm64",
+		"/usr/local/bin/sixty-four-tools": "",
+	} {
+		got, err := BinaryArch(p)
+		if err != nil || got != want {
+			t.Errorf("BinaryArch(%q) = %q, %v; want %q", p, got, err, want)
+		}
+	}
+	if _, err := BinaryArch("/opt/tool-arm64/x86_64/bin/tool"); err == nil {
+		t.Error("a path that names two processors must be refused")
+	}
+}
+
+func TestBinariesFor(t *testing.T) {
+	codex, err := Get("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, arch := range Arches {
+		got, err := codex.BinariesFor(arch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("codex %s: want the one native program, got %q", arch, got)
+		}
+		if a, _ := BinaryArch(got[0]); a != arch {
+			t.Errorf("codex %s: got the %s program %s", arch, a, got[0])
+		}
+	}
+	if _, err := codex.BinariesFor("386"); err == nil {
+		t.Error("expected an error for a processor images are not built for")
+	}
+}
+
+// Every agent image must have at least one program to match on each
+// processor, or the policy names nothing the sandbox can run there.
+func TestBinariesPerArch(t *testing.T) {
+	all, err := All()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range all {
+		for _, arch := range Arches {
+			got, err := e.BinariesFor(arch)
+			if err != nil {
+				t.Errorf("%s %s: %v", e.Name, arch, err)
+				continue
+			}
+			if len(got) == 0 {
+				t.Errorf("%s: agent.yaml lists no binary for %s", e.Name, arch)
+			}
+			for _, b := range got {
+				if !path.IsAbs(b) {
+					t.Errorf("%s: binary %q is not an absolute path", e.Name, b)
+				}
+			}
+		}
+	}
+}
+
+// check-images.sh builds every folder that has an agent.yaml. The CLI only
+// knows the folders embedded in the binary, so the two lists must agree.
+func TestEveryFolderIsEmbedded(t *testing.T) {
+	dirs, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, err := All()
+	if err != nil {
+		t.Fatal(err)
+	}
+	embedded := map[string]bool{}
+	for _, e := range all {
+		embedded[e.Name] = true
+	}
+	n := 0
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		_, yamlErr := os.Stat(path.Join(d.Name(), "agent.yaml"))
+		_, dfErr := os.Stat(path.Join(d.Name(), "Dockerfile"))
+		if yamlErr != nil && dfErr != nil {
+			continue
+		}
+		n++
+		if yamlErr != nil || dfErr != nil {
+			t.Errorf("agents/%s needs both agent.yaml and Dockerfile", d.Name())
+		}
+		if !embedded[d.Name()] {
+			t.Errorf("agents/%s is not in the go:embed list in agents.go", d.Name())
+		}
+	}
+	if n != len(all) {
+		t.Errorf("%d agent folders on disk, %d in the catalog", n, len(all))
 	}
 }
