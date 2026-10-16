@@ -60,13 +60,17 @@ func announceUpdate(e env, n *update.Notifier) {
 func cmdUpdate(e env, args []string) (int, error) {
 	flags := newFlags("update", e.stderr)
 	check := flags.Bool("check", false, "only say whether a newer release is published")
+	asJSON := jsonFlag(flags)
 	if _, err := parse(flags, args); err != nil {
 		return 1, err
 	}
-	u := tui.New(e.stdin, e.stdout)
-	u.Blank()
 	base := update.Base()
 	client := &http.Client{Timeout: 2 * time.Minute}
+	if *asJSON {
+		return updateJSON(e, client, base, *check)
+	}
+	u := tui.New(e.stdin, e.stdout)
+	u.Blank()
 	latest, err := u.Spin("Latest release", "asking boundlane.dev", func() (string, error) {
 		return update.Latest(e.ctx, client, base)
 	})
@@ -105,4 +109,31 @@ func cmdUpdate(e env, args []string) (int, error) {
 	u.Note("Running sandboxes are not affected. The next command uses " + latest + ".")
 	u.Blank()
 	return 0, nil
+}
+
+// updateJSON is update with --json: the same steps, reported as one document.
+func updateJSON(e env, client *http.Client, base string, check bool) (int, error) {
+	latest, err := update.Latest(e.ctx, client, base)
+	if err != nil {
+		return 1, fmt.Errorf("could not reach %s: %w", base, err)
+	}
+	doc := jsonUpdate{Current: Version, Latest: latest, Available: update.Newer(latest, Version)}
+	if check || !doc.Available {
+		return 0, writeJSON(e.stdout, doc)
+	}
+	exe, err := os.Executable()
+	if err == nil {
+		exe, err = filepath.EvalSymlinks(exe)
+	}
+	if err != nil {
+		return 1, err
+	}
+	if err := update.Install(e.ctx, client, base, latest, runtime.GOOS, runtime.GOARCH, exe); err != nil {
+		if errors.Is(err, fs.ErrPermission) {
+			return 1, fmt.Errorf("%w. You cannot write to %s. Run sudo boundlane update, or run the installer again", err, filepath.Dir(exe))
+		}
+		return 1, err
+	}
+	doc.Installed = exe
+	return 0, writeJSON(e.stdout, doc)
 }

@@ -120,7 +120,9 @@ func cmdLogout(e env, args []string) (int, error) {
 }
 
 func cmdStatus(e env, args []string) (int, error) {
-	if _, err := parse(newFlags("status", e.stderr), args); err != nil {
+	fs := newFlags("status", e.stderr)
+	asJSON := jsonFlag(fs)
+	if _, err := parse(fs, args); err != nil {
 		return 1, err
 	}
 	dirs, err := config.Default()
@@ -130,6 +132,9 @@ func cmdStatus(e env, args []string) (int, error) {
 	u := tui.New(e.stdin, e.stdout)
 	en, err := team.Load(dirs)
 	if errors.Is(err, team.ErrNotEnrolled) {
+		if *asJSON {
+			return 0, writeJSON(e.stdout, jsonStatus{Notes: []string{}})
+		}
 		u.Title("This machine", "")
 		u.Skip("Account", "none, Free plan")
 		u.Command("boundlane login", "sign this machine in")
@@ -149,6 +154,20 @@ func cmdStatus(e env, args []string) (int, error) {
 	role := "member"
 	if en.Admin {
 		role = "admin"
+	}
+	if *asJSON {
+		doc := jsonStatus{
+			SignedIn: true, Email: en.Email, Role: role, Team: en.Tenant, Machine: en.Machine,
+			Server: en.Server, ConsoleURL: en.Server + "/console", PolicyRevision: en.Revision, Notes: []string{},
+		}
+		if note != "" {
+			doc.Notes = append(doc.Notes, note)
+		}
+		if err := writeJSON(e.stdout, doc); err != nil {
+			return 1, err
+		}
+		_ = team.Client{Base: en.Server}.Heartbeat(e.ctx, en.Token, relay.Beat(e.ctx, client(), dirs, en.Revision))
+		return 0, nil
 	}
 	u.Title("This machine", "")
 	u.Done("Account", fmt.Sprintf("%s, %s, team %s", en.Email, role, en.Tenant))

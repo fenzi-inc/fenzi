@@ -31,21 +31,34 @@ func prover() openshell.Prover { return openshell.Prover{R: openshell.Exec{Bin: 
 func cmdDoctor(e env, args []string) (int, error) {
 	fs := newFlags("doctor", e.stderr)
 	fix := fs.Bool("fix", false, "remove gateway-wide settings that weaken or block Boundlane")
+	asJSON := jsonFlag(fs)
 	if _, err := parse(fs, args); err != nil {
 		return 1, err
 	}
 	failed := false
 	u := tui.New(e.stdin, e.stdout)
-	u.Title("Checking this machine", "")
+	if !*asJSON {
+		u.Title("Checking this machine", "")
+	}
+	checks := []jsonCheck{}
 	line := func(status, check, detail string) {
 		switch status {
 		case "FAIL":
 			failed = true
-			u.Problem(check, detail)
+			checks = append(checks, jsonCheck{check, "fail", detail})
+			if !*asJSON {
+				u.Problem(check, detail)
+			}
 		case "ok":
-			u.Done(check, detail)
+			checks = append(checks, jsonCheck{check, "ok", detail})
+			if !*asJSON {
+				u.Done(check, detail)
+			}
 		default:
-			u.Skip(check, detail)
+			checks = append(checks, jsonCheck{check, "skip", detail})
+			if !*asJSON {
+				u.Skip(check, detail)
+			}
 		}
 	}
 	oc := client()
@@ -123,6 +136,15 @@ func cmdDoctor(e env, args []string) (int, error) {
 		line("ok", "Image builds", b.Bin+" is available")
 	}
 	reportAccount(e, line)
+	if *asJSON {
+		if err := writeJSON(e.stdout, jsonDoctor{Checks: checks, Ready: !failed}); err != nil {
+			return 1, err
+		}
+		if failed {
+			return 3, nil
+		}
+		return 0, nil
+	}
 	u.Blank()
 	if failed {
 		u.Println("  " + u.Bold("Some checks need you.") + " " + u.Dim("Each ! line says what to change."))
@@ -323,6 +345,7 @@ func cmdRequests(e env, args []string) (int, error) {
 	fs := newFlags("requests", e.stderr)
 	sandbox := fs.String("sandbox", "", "sandbox name (default: the latest running one for this folder)")
 	all := fs.Bool("all", false, "also list the drafts the sandbox made from refused connections")
+	asJSON := jsonFlag(fs)
 	if _, err := parse(fs, args); err != nil {
 		return 1, err
 	}
@@ -347,9 +370,15 @@ func cmdRequests(e env, args []string) (int, error) {
 	list := openshell.ParseRules(out)
 	if len(list) == 0 {
 		if strings.Contains(string(out), "Chunk") {
+			if *asJSON {
+				return 1, errors.New("the runtime listed requests in a form this release does not read; run boundlane requests without --json")
+			}
 			// The text format changed; show it rather than hide requests.
 			e.stdout.Write(out)
 			return 0, nil
+		}
+		if *asJSON {
+			return 0, writeJSON(e.stdout, []jsonRequest{})
 		}
 		u.Blank()
 		u.Done("No requests", "waiting in "+sb.Name)
@@ -372,6 +401,13 @@ func cmdRequests(e env, args []string) (int, error) {
 	shown := asked
 	if *all {
 		shown = append(append([]openshell.Proposal(nil), asked...), drafts...)
+	}
+	if *asJSON {
+		docs := make([]jsonRequest, 0, len(shown))
+		for i, p := range shown {
+			docs = append(docs, jsonRequest{ID: p.Chunk, Destination: p.Destination(), Binary: p.Binary, Rationale: p.Rationale, Draft: i >= len(asked)})
+		}
+		return 0, writeJSON(e.stdout, docs)
 	}
 	flag := ""
 	if *sandbox != "" {
@@ -499,12 +535,17 @@ func showRequest(u *tui.UI, p openshell.Proposal) {
 	u.Blank()
 }
 
+// approvedNote is what approve says after the runtime took the approval.
+const approvedNote = "The sandbox loads it on its next poll, about 10 seconds. The agent can retry then."
+
+func deniedNote(reason string) string { return "The agent sees: " + reason }
+
 func approveOne(e env, u *tui.UI, sb config.Sandbox, id string) error {
 	if err := client().RuleApprove(e.ctx, sb.Name, id); err != nil {
 		return err
 	}
 	u.Println(fmt.Sprintf("  %s %s %s in %s", u.Allow("✓"), u.Allow(fmt.Sprintf("%-*s", tui.LabelWidth, "Approved")), shortID(id), sb.Name))
-	u.Note("The sandbox loads it on its next poll, about 10 seconds. The agent can retry then.")
+	u.Note(approvedNote)
 	return nil
 }
 
@@ -513,7 +554,7 @@ func denyOne(e env, u *tui.UI, sb config.Sandbox, id, reason string) error {
 		return err
 	}
 	u.Denied("Denied", shortID(id)+" in "+sb.Name)
-	u.Note("The agent sees: " + reason)
+	u.Note(deniedNote(reason))
 	return nil
 }
 
@@ -529,6 +570,7 @@ func chunk(e env, sandbox, prefix string) (string, error) {
 func cmdApprove(e env, args []string) (int, error) {
 	fs := newFlags("approve", e.stderr)
 	sandbox := fs.String("sandbox", "", "sandbox name (default: the latest running one for this folder)")
+	asJSON := jsonFlag(fs)
 	pos, err := parse(fs, args)
 	if err != nil {
 		return 1, err
@@ -548,6 +590,12 @@ func cmdApprove(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
+	if *asJSON {
+		if err := client().RuleApprove(e.ctx, sb.Name, id); err != nil {
+			return 1, err
+		}
+		return 0, writeJSON(e.stdout, jsonAnswer{ID: id, Sandbox: sb.Name, Result: "approved", Note: approvedNote})
+	}
 	u := tui.New(e.stdin, e.stdout)
 	if err := approveOne(e, u, sb, id); err != nil {
 		return 1, err
@@ -559,6 +607,7 @@ func cmdDeny(e env, args []string) (int, error) {
 	fs := newFlags("deny", e.stderr)
 	sandbox := fs.String("sandbox", "", "sandbox name (default: the latest running one for this folder)")
 	reason := fs.String("reason", "", "why; the agent sees this")
+	asJSON := jsonFlag(fs)
 	pos, err := parse(fs, args)
 	if err != nil {
 		return 1, err
@@ -578,6 +627,12 @@ func cmdDeny(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
+	if *asJSON {
+		if err := client().RuleReject(e.ctx, sb.Name, id, *reason); err != nil {
+			return 1, err
+		}
+		return 0, writeJSON(e.stdout, jsonAnswer{ID: id, Sandbox: sb.Name, Result: "denied", Note: deniedNote(*reason)})
+	}
 	if err := denyOne(e, tui.New(e.stdin, e.stdout), sb, id, *reason); err != nil {
 		return 1, err
 	}
@@ -591,8 +646,12 @@ func cmdLog(e env, args []string) (int, error) {
 	since := fs.String("since", "", "for example 10m or 2h (running sandboxes)")
 	follow := fs.Bool("follow", false, "keep printing new events (running sandboxes)")
 	rawOut := fs.Bool("raw", false, "print the sandbox's full log as OpenShell wrote it, not only decisions")
+	asJSON := jsonFlag(fs)
 	if _, err := parse(fs, args); err != nil {
 		return 1, err
+	}
+	if *rawOut && *asJSON {
+		return 1, errors.New("--raw prints the runtime's own lines; drop it or drop --json")
 	}
 	dirs, err := config.Default()
 	if err != nil {
@@ -604,6 +663,9 @@ func cmdLog(e env, args []string) (int, error) {
 	}
 	c := client()
 	if sb.Running && *follow {
+		if *asJSON {
+			return 0, followJSON(e, sb.Name, *since, *deny)
+		}
 		return 0, c.Logs(e.ctx, sb.Name, *since, true)
 	}
 	var raw []byte
@@ -636,6 +698,15 @@ func cmdLog(e env, args []string) (int, error) {
 			}
 		}
 		recs = kept
+	}
+	if *asJSON {
+		docs := []forward.Record{}
+		for _, r := range recs {
+			if !*deny || (r.Denied() && !r.Reset()) {
+				docs = append(docs, r)
+			}
+		}
+		return 0, writeJSON(e.stdout, docs)
 	}
 	proc := func(p string) string {
 		if p == "" {
@@ -747,9 +818,13 @@ func cmdPolicy(e env, args []string) (int, error) {
 	output := fs.String("o", "", "write the compiled policy to this file (compile)")
 	boundary := fs.String("boundary", "", "boundary file (check; default: derived from the same policy)")
 	emit := fs.String("emit", "policy", "what compile prints: policy or boundary")
+	asJSON := jsonFlag(fs)
 	pos, err := parse(fs, args[1:])
 	if err != nil {
 		return 1, err
+	}
+	if sub == "compile" && *asJSON {
+		return 1, errors.New("--json is for boundlane policy check; compile prints the policy as YAML")
 	}
 	file := ""
 	if len(pos) > 0 {
@@ -819,12 +894,26 @@ func cmdPolicy(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	u := tui.New(e.stdin, e.stdout)
-	u.Blank()
 	from := resolved.Sources
 	if from == "" {
 		from = "developer-default"
 	}
+	if *asJSON {
+		missing := r.MissingDomains()
+		if missing == nil {
+			missing = []string{}
+		}
+		doc := jsonPolicyCheck{Passed: r.Passed(), Result: r.Result, Checked: from, Agent: entry.Display, Example: r.Example(), Reason: r.Reason, NotChecked: missing}
+		if err := writeJSON(e.stdout, doc); err != nil {
+			return 1, err
+		}
+		if !r.Passed() {
+			return 0, &run.PolicyError{Stage: "policy check", Result: r}
+		}
+		return 0, nil
+	}
+	u := tui.New(e.stdin, e.stdout)
+	u.Blank()
 	if r.Passed() {
 		u.Done("Policy check", "inside the boundary")
 		u.Note("Checked " + from + " for " + entry.Display + ".")
@@ -891,12 +980,26 @@ func cmdAgents(e env, args []string) (int, error) {
 		u.Title("Building "+entry.Display, entry.Tag())
 		return 0, b.Build(e.ctx, entry.Tag(), df)
 	}
-	if len(args) > 0 {
-		return 1, fmt.Errorf("%q is not an agents command; boundlane agents lists them, boundlane agents build <name> builds an image", args[0])
+	fs := newFlags("agents", e.stderr)
+	asJSON := jsonFlag(fs)
+	pos, err := parse(fs, args)
+	if err != nil {
+		return 1, err
+	}
+	if len(pos) > 0 {
+		return 1, fmt.Errorf("%q is not an agents command; boundlane agents lists them, boundlane agents build <name> builds an image", pos[0])
 	}
 	all, err := agents.All()
 	if err != nil {
 		return 1, err
+	}
+	if *asJSON {
+		docs := make([]jsonAgent, 0, len(all))
+		for _, a := range all {
+			_, perr := a.Profile()
+			docs = append(docs, jsonAgent{Name: a.Name, Display: a.Display, Version: a.Version, KeyEnv: a.Key.Env, Status: a.Status, Available: perr == nil})
+		}
+		return 0, writeJSON(e.stdout, docs)
 	}
 	u := tui.New(e.stdin, e.stdout)
 	u.Title("Agents", "allowed by developer-default: "+strings.Join(policies.DeveloperDefault().Agents, ", "))
@@ -918,6 +1021,7 @@ func cmdAgents(e env, args []string) (int, error) {
 func cmdPs(e env, args []string) (int, error) {
 	fs := newFlags("ps", e.stderr)
 	all := fs.Bool("all", false, "include finished sandboxes")
+	asJSON := jsonFlag(fs)
 	if _, err := parse(fs, args); err != nil {
 		return 1, err
 	}
@@ -954,6 +1058,15 @@ func cmdPs(e env, args []string) (int, error) {
 
 	list := append([]config.Sandbox(nil), s.Sandboxes...)
 	sort.Slice(list, func(i, j int) bool { return list[i].Created.After(list[j].Created) })
+	if *asJSON {
+		docs := []jsonSandbox{}
+		for _, sb := range list {
+			if sb.Running || *all {
+				docs = append(docs, sandboxJSON(sb))
+			}
+		}
+		return 0, writeJSON(e.stdout, docs)
+	}
 	u := tui.New(e.stdin, e.stdout)
 	home := homeDir()
 	rows := [][]screen.Cell{{{Text: "sandbox"}, {Text: "agent"}, {Text: "folder"}, {Text: "started"}, {Text: "state"}}}
@@ -1072,9 +1185,28 @@ func cmdKey(e env, args []string) (int, error) {
 	u := tui.New(e.stdin, e.stdout)
 	switch args[0] {
 	case "list":
+		fs := newFlags("key list", e.stderr)
+		asJSON := jsonFlag(fs)
+		if _, err := parse(fs, args[1:]); err != nil {
+			return 1, err
+		}
 		all, err := agents.All()
 		if err != nil {
 			return 1, err
+		}
+		if *asJSON {
+			docs := make([]jsonKey, 0, len(all))
+			for _, a := range all {
+				k := jsonKey{Name: a.Name, Display: a.Display, KeyEnv: a.Key.Env}
+				if _, err := a.Profile(); err == nil {
+					k.Available = true
+					if k.Stored, err = run.KeyStored(e.ctx, oc, a); err != nil {
+						return 1, err
+					}
+				}
+				docs = append(docs, k)
+			}
+			return 0, writeJSON(e.stdout, docs)
 		}
 		u.Title("Model keys", "on this machine")
 		for _, a := range all {
@@ -1150,7 +1282,15 @@ func cmdKey(e env, args []string) (int, error) {
 	return 0, nil
 }
 
-func cmdVersion(e env, _ []string) (int, error) {
+func cmdVersion(e env, args []string) (int, error) {
+	fs := newFlags("version", e.stderr)
+	asJSON := jsonFlag(fs)
+	if _, err := parse(fs, args); err != nil {
+		return 1, err
+	}
+	if *asJSON {
+		return 0, writeJSON(e.stdout, jsonVersion{Version: Version})
+	}
 	u := tui.New(e.stdin, e.stdout)
 	u.Title("Version", "")
 	u.Done("Boundlane", Version)
