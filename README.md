@@ -33,7 +33,7 @@ The installer is for macOS and Linux, arm64 and amd64. It checks the download's 
 Five steps: this machine, agent, model key, project folder, agent image. If the sandbox runtime is missing, setup offers to install the pinned release. If the gateway is stopped, it offers to start it. Nothing is installed or changed without a yes from you. At the end it shows what the agent can reach and offers to start it. Next time:
 
 ```bash
-boundlane run -- claude
+boundlane run claude
 ```
 
 Run `boundlane setup` again at any time. `BOUNDLANE_NO_SETUP=1` installs the command and stops. If the install folder is not on your `PATH`, the installer adds one marked line to your shell profile; `BOUNDLANE_NO_MODIFY_PATH=1` prevents that. `boundlane update` installs a newer release, and commands mention one at most once a day (`BOUNDLANE_NO_UPDATE_CHECK=1` turns that off).
@@ -106,7 +106,7 @@ install.sh    the installer published at boundlane.dev/install.sh
 
 ### `cli/`
 
-The program you run. `boundlane setup` is the guided first run. `boundlane doctor` checks the machine. `boundlane init` writes a starter `boundlane.yaml`. `boundlane run -- claude` starts Claude Code in a new sandbox. `requests`, `approve`, and `deny` are how a person grants a host the policy did not name. `log` shows allows and denies. `diff` and `apply` bring the agent's edits back into your repo. `policy compile` and `policy check` show what a policy file becomes, and whether it stays inside its boundary. `agents` lists the catalog. `agents build claude` builds that agent's image.
+The program you run. `boundlane setup` is the guided first run. `boundlane doctor` checks the machine. `boundlane init` writes a starter `boundlane.yaml`. `boundlane run claude` starts Claude Code in a new sandbox. `requests`, `approve`, and `deny` are how a person grants a host the policy did not name. `log` shows allows and denies. `diff` and `apply` bring the agent's edits back into your repo. `policy compile` and `policy check` show what a policy file becomes, and whether it stays inside its boundary. `agents` lists the catalog. `agents build claude` builds that agent's image.
 
 `cli/internal/openshell` is the only package that talks to the sandbox runtime.
 

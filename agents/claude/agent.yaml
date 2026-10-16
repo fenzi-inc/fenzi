@@ -35,7 +35,7 @@ guide_flag: --append-system-prompt
 # claude --help in 2.1.288 lists "auto" and "manual" among the modes. In auto,
 # Claude's own check can refuse a command before it reaches the sandbox; in
 # manual a person approves each action and the policy decides the rest.
-# `boundlane run -- claude --permission-mode auto` still picks auto.
+# `boundlane run claude --permission-mode auto` still picks auto.
 default_flags:
   --permission-mode: manual
 # Claude asks whether to use the API key it finds in the environment, with No
