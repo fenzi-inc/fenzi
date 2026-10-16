@@ -191,6 +191,11 @@ type Proposal struct {
 	// any traffic through to the host and port, while the policy entry it
 	// maps to is read-only.
 	L4 bool `json:"l4,omitempty"`
+	// Rule is the rule name OpenShell gave the request. Once the request is
+	// approved, the decisions it allows carry that name. Only the full list
+	// (PUT /v1/proposals) sends it: a server that predates the field refuses
+	// it on the older call.
+	Rule string `json:"rule,omitempty"`
 }
 
 // Results of the policy compare a machine reports for each sandbox in its

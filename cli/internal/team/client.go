@@ -223,9 +223,18 @@ func (c Client) Ingest(ctx context.Context, token string, records any) (int, err
 	return out.Stored, err
 }
 
-// PutProposals reports pending requests for one sandbox.
+// PutProposals reports pending requests for one sandbox. The server adds
+// or refreshes them and leaves the others as they are.
 func (c Client) PutProposals(ctx context.Context, token, sandbox string, proposals any) error {
 	return c.call(ctx, http.MethodPost, "/v1/proposals", token, map[string]any{"sandbox": sandbox, "proposals": proposals}, nil)
+}
+
+// ReplaceProposals reports every request pending on one sandbox, an empty
+// list included. The server takes a request it holds as pending for this
+// machine and sandbox, and that is not in the list, as answered on the
+// machine. A server that predates the call answers 405.
+func (c Client) ReplaceProposals(ctx context.Context, token, sandbox string, proposals any) error {
+	return c.call(ctx, http.MethodPut, "/v1/proposals", token, map[string]any{"sandbox": sandbox, "proposals": proposals}, nil)
 }
 
 // Applies lists reviews this machine still has to send to OpenShell.
