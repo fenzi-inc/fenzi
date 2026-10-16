@@ -50,6 +50,9 @@ func TestDetectLinux(t *testing.T) {
 	if len(rts) != 2 || rts[0].Name != "Docker Engine" || !rts[0].Attach || rts[1].Name != "Podman" {
 		t.Fatalf("got %+v", rts)
 	}
+	if rts[0].Tested || rts[1].Tested {
+		t.Errorf("Docker Engine and Podman have not been run with Boundlane: %+v", rts)
+	}
 	rootless := detect(fakeProbe("linux", []string{"docker"}, []string{"/run/user/1000/docker.sock"}, nil))
 	if rootless[0].Socket != "/run/user/1000/docker.sock" || rootless[0].Attach {
 		t.Fatalf("rootless Docker should use the user socket without sudo: %+v", rootless[0])

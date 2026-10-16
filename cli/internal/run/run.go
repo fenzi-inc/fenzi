@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -86,7 +87,18 @@ type Options struct {
 	// Keep is false. Returning true leaves the sandbox running. Nil deletes
 	// it, which is what a script does.
 	OnExit func(name string) (keep bool, err error)
+	// ConfirmSecrets runs after the warning about files that look like
+	// secrets, before anything is built or created. Returning false stops the
+	// run with ErrSecretsDeclined. Nil continues, which is what a script does.
+	ConfirmSecrets func(files []string) (bool, error)
 }
+
+// ErrSecretsDeclined means the person chose not to copy files that look like
+// secrets. Nothing was built or created.
+var ErrSecretsDeclined = errors.New("stopped before the copy; nothing was created")
+
+// shownSecrets is how many secret-looking files the warning names.
+const shownSecrets = 10
 
 type Result struct {
 	Sandbox  string
@@ -203,6 +215,28 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 	}
 	say("prover", "%s", r.Result)
 
+	// Snapshot the project before upload, so changes can be compared later,
+	// and warn about files that look like secrets while nothing is created.
+	filter := d.Filter(o.Repo)
+	base, err := workspace.Snapshot(o.Repo, filter)
+	if err != nil {
+		return res, err
+	}
+	if !o.NoUpload {
+		if found := base.Secrets(); len(found) > 0 {
+			warnSecrets(say, found)
+			if o.ConfirmSecrets != nil {
+				ok, err := o.ConfirmSecrets(found)
+				if err != nil {
+					return res, err
+				}
+				if !ok {
+					return res, ErrSecretsDeclined
+				}
+			}
+		}
+	}
+
 	// 3. Ensure the image.
 	if !d.Images.Exists(ctx, a.Tag()) {
 		df, err := a.Dockerfile()
@@ -243,13 +277,6 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		say("key", "%s, created from %s", provider, a.Key.Env)
 	}
 	state, err := d.Dirs.LoadState()
-	if err != nil {
-		return res, err
-	}
-
-	// Snapshot the project before upload, so changes can be compared later.
-	filter := d.Filter(o.Repo)
-	base, err := workspace.Snapshot(o.Repo, filter)
 	if err != nil {
 		return res, err
 	}
@@ -328,7 +355,11 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 			return res, err
 		}
 		say("upload", "project copied to %s, .gitignore respected, .git left out", project)
-		say("", "your home directory is not copied")
+		// True only for a folder that does not hold the home folder; the
+		// CLI refuses those, but this package does not assume it.
+		if home, err := os.UserHomeDir(); err == nil && !workspace.ContainsHome(o.Repo, home) {
+			say("", "your home directory is not copied")
+		}
 	}
 
 	if !settingsLoaded(ctx, d, name) {
@@ -428,6 +459,24 @@ func writeGuide(ctx context.Context, d Deps, sandbox, dest string) error {
 		return fmt.Errorf("writing the request guide: %w", err)
 	}
 	return nil
+}
+
+// warnSecrets names files that look like secrets: the first shownSecrets,
+// then how many more.
+func warnSecrets(say func(label, format string, args ...any), found []string) {
+	head, why := "%d files look like secrets and will be copied into the sandbox:", "They are copied because .gitignore does not exclude them. Add them to .gitignore to keep them out."
+	if len(found) == 1 {
+		head, why = "%d file looks like a secret and will be copied into the sandbox:", "It is copied because .gitignore does not exclude it. Add it to .gitignore to keep it out."
+	}
+	say("secrets", head, len(found))
+	for i, f := range found {
+		if i == shownSecrets {
+			say("", "  and %d more", len(found)-shownSecrets)
+			break
+		}
+		say("", "  %s", f)
+	}
+	say("", "%s", why)
 }
 
 func files1(n int) string {

@@ -140,10 +140,26 @@ type jsonUpdate struct {
 }
 
 // followJSON is log --follow with --json: the running sandbox's decisions,
-// one JSON object per line, read from the same `openshell logs --tail` as the
-// text output and mapped to the forwarder's record. Other log lines are not
-// printed.
+// one JSON object per line. Other log lines are not printed.
 func followJSON(e env, sandbox, since string, denyOnly bool) error {
+	return followRecords(e, sandbox, since, func(r forward.Record) error {
+		if denyOnly && !(r.Denied() && !r.Reset()) {
+			return nil
+		}
+		b, err := json.Marshal(r)
+		if err != nil {
+			return err
+		}
+		_, err = e.stdout.Write(append(b, '\n'))
+		return err
+	})
+}
+
+// followRecords reads `openshell logs --tail` for a running sandbox and
+// passes each network or HTTP decision, mapped to the forwarder's record,
+// to emit. Other log lines are skipped. An error from emit, such as a
+// closed reader, ends the runtime's command too.
+func followRecords(e env, sandbox, since string, emit func(forward.Record) error) error {
 	ctx, cancel := context.WithCancel(e.ctx)
 	defer cancel()
 	pr, pw := io.Pipe()
@@ -158,14 +174,10 @@ func followJSON(e env, sandbox, since string, denyOnly bool) error {
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
 		r, ok := forward.FromShorthand(sc.Text(), sandbox)
-		if !ok || (denyOnly && !(r.Denied() && !r.Reset())) {
+		if !ok {
 			continue
 		}
-		b, err := json.Marshal(r)
-		if err != nil {
-			return err
-		}
-		if _, err := e.stdout.Write(append(b, '\n')); err != nil {
+		if err := emit(r); err != nil {
 			// The reader is gone; stop the runtime's command too.
 			cancel()
 			pr.Close()
