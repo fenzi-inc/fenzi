@@ -2,7 +2,7 @@
 
 # Raise this for every release. The installer and `boundlane update` read
 # latest.txt, and a release that keeps the old number is never offered.
-VERSION ?= 0.1.15
+VERSION ?= 0.1.16
 
 build:
 	go build -trimpath -o bin/boundlane ./cli
