@@ -181,3 +181,19 @@ type Proposal struct {
 	// request, 0 when it held none.
 	Revision int `json:"revision,omitempty"`
 }
+
+// Results of the policy compare a machine reports for each sandbox in its
+// heartbeat, as "policy_check", with the top-level sections that differ in
+// "policy_differs". The forwarder reads the policy the runtime holds for a
+// running sandbox and compares it, section by section, with the policy
+// compiled from the team revision the sandbox runs, leaving out the rules the
+// runtime adds for a provider. A sandbox that was not compared on a pass
+// carries neither field, and a server keeps the last result it had for it.
+// A server that predates the fields ignores them.
+const (
+	PolicyMatch    = "match"
+	PolicyMismatch = "mismatch"
+	// PolicyPending means the forwarder loaded the revision and the runtime
+	// has not confirmed it Loaded, so the sandbox was not compared.
+	PolicyPending = "pending"
+)

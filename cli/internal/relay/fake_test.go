@@ -5,6 +5,7 @@ package relay
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 
@@ -40,6 +41,11 @@ type fakeGW struct {
 	modeErr      error
 	listed       []string
 	logCalls     int
+	// effective is what sandbox get --policy-only prints; nil fails the
+	// read, so a test that sets nothing compares nothing.
+	effective      []byte
+	effectiveCalls int
+	listCalls      int
 }
 
 // Recorded output of openshell-prover 0.1.2.
@@ -99,7 +105,17 @@ func (g *fakeGW) PolicySet(_ context.Context, _, file string) error {
 	g.policy = b
 	return err
 }
-func (g *fakeGW) PolicyList(context.Context, string) ([]byte, error) { return g.list, nil }
+func (g *fakeGW) PolicyList(context.Context, string) ([]byte, error) {
+	g.listCalls++
+	return g.list, nil
+}
+func (g *fakeGW) EffectivePolicy(context.Context, string) ([]byte, error) {
+	g.effectiveCalls++
+	if g.effective == nil {
+		return nil, errors.New("no effective policy in this test")
+	}
+	return g.effective, nil
+}
 
 const baseDoc = `version: 1
 name: acme

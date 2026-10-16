@@ -234,6 +234,12 @@ type BeatSandbox struct {
 	Agent    string `json:"agent"`
 	Revision int    `json:"revision"`
 	Running  bool   `json:"running"`
+	// PolicyCheck is teamapi.PolicyMatch, PolicyMismatch, or PolicyPending
+	// for a sandbox the forwarder compared against Revision on this pass, and
+	// empty otherwise. PolicyDiffers names the top-level policy sections that
+	// differ. Neither carries any policy content.
+	PolicyCheck   string   `json:"policy_check,omitempty"`
+	PolicyDiffers []string `json:"policy_differs,omitempty"`
 }
 
 // Heartbeat tells the server what this machine is running.

@@ -76,13 +76,19 @@ func LoadNetwork(ctx context.Context, gw Loader, name, policy string) (LoadState
 	if err != nil {
 		return LoadAccepted, err
 	}
+	return ListState(list), nil
+}
+
+// ListState reads the output of `policy list` the way LoadNetwork does: only
+// the words Loaded and Pending, since the full text was not recorded.
+func ListState(list []byte) LoadState {
 	switch {
 	case bytes.Contains(list, []byte("Loaded")):
-		return LoadLoaded, nil
+		return LoadLoaded
 	case bytes.Contains(list, []byte("Pending")):
-		return LoadPending, nil
+		return LoadPending
 	default:
-		return LoadAccepted, nil
+		return LoadAccepted
 	}
 }
 

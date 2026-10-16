@@ -50,14 +50,18 @@ type State struct {
 }
 
 type Sandbox struct {
-	Name         string    `json:"name"`
-	Agent        string    `json:"agent"`
-	Repo         string    `json:"repo"`
-	Revision     string    `json:"policy_revision"`
-	TeamRevision int       `json:"team_revision,omitempty"`
-	Notified     int       `json:"notified_revision,omitempty"`
-	Created      time.Time `json:"created"`
-	Running      bool      `json:"running"`
+	Name         string `json:"name"`
+	Agent        string `json:"agent"`
+	Repo         string `json:"repo"`
+	Revision     string `json:"policy_revision"`
+	TeamRevision int    `json:"team_revision,omitempty"`
+	Notified     int    `json:"notified_revision,omitempty"`
+	// PendingLoad is the team revision the forwarder loaded with policy set
+	// whose load policy list has not shown Loaded yet, 0 when there is none.
+	// Until it is confirmed, the policy the sandbox holds is not compared.
+	PendingLoad int       `json:"pending_load,omitempty"`
+	Created     time.Time `json:"created"`
+	Running     bool      `json:"running"`
 }
 
 func (d Dirs) LoadState() (*State, error) {

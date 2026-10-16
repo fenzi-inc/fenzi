@@ -37,6 +37,7 @@ type Gateway interface {
 	RuleReject(ctx context.Context, name, chunk, reason string) error
 	PolicySet(ctx context.Context, name, file string) error
 	PolicyList(ctx context.Context, name string) ([]byte, error)
+	EffectivePolicy(ctx context.Context, name string) ([]byte, error)
 }
 
 // Runtime is what a heartbeat reads from the gateway.
@@ -111,7 +112,11 @@ func Pass(ctx context.Context, opt Option) (Report, error) {
 	if err := p.sync(ctx); err != nil {
 		return p.rep, err
 	}
-	// After sync, so the report carries the revision each sandbox now holds.
+	if err := p.compare(ctx); err != nil {
+		return p.rep, err
+	}
+	// After sync and compare, so the report carries the revision each sandbox
+	// now holds and how the policy it holds compared.
 	p.heartbeat(ctx)
 	if err := p.ship(ctx); err != nil {
 		return p.rep, err
@@ -138,6 +143,8 @@ func records(n int) string {
 type pass struct {
 	Option
 	rep Report
+	// checks is how each sandbox compared on this pass, by name.
+	checks map[string]policyCheck
 }
 
 func (p *pass) note(n string) {
@@ -165,6 +172,12 @@ func (p *pass) failed(what string, err error) {
 func (p *pass) heartbeat(ctx context.Context) {
 	b := Beat(ctx, p.Gateway, p.Dirs, p.Revision)
 	b.Notes = append([]string{}, p.BeatNotes...)
+	for i := range b.Sandboxes {
+		if c, ok := p.checks[b.Sandboxes[i].Name]; ok && c.revision == b.Sandboxes[i].Revision {
+			b.Sandboxes[i].PolicyCheck = c.result
+			b.Sandboxes[i].PolicyDiffers = c.differs
+		}
+	}
 	if err := p.Client.Heartbeat(ctx, p.Token, b); err != nil {
 		p.failed("heartbeat", err)
 	}
@@ -242,7 +255,7 @@ func (p *pass) sync(ctx context.Context) error {
 		}
 		switch compiler.Effect(prev, next) {
 		case compiler.EffectNetwork:
-			note, loaded, err := push(ctx, opt, sb.Name, sb.Agent, sb.TeamRevision, resolved)
+			note, loaded, how, err := push(ctx, opt, sb.Name, sb.Agent, sb.TeamRevision, resolved)
 			if err != nil {
 				return err
 			}
@@ -250,6 +263,12 @@ func (p *pass) sync(ctx context.Context) error {
 			case loaded:
 				rep.Notes = append(rep.Notes, note)
 				sb.TeamRevision = opt.Revision
+				// Until policy list says Loaded, the runtime may still hold
+				// the revision before, so the compare waits.
+				sb.PendingLoad = 0
+				if how != run.LoadLoaded {
+					sb.PendingLoad = opt.Revision
+				}
 				changed = true
 			case sb.Notified != opt.Revision:
 				// Not loaded. The next pass checks again; the note is given once.
@@ -278,24 +297,25 @@ func (p *pass) sync(ctx context.Context) error {
 // run proves a policy before it creates a sandbox, and only then loads it.
 // loaded is false when the prover refused it or could not run; the sandbox
 // keeps the revision it has, and the note says why. When the bundle carries
-// the team's boundary, the proof is against that boundary.
-func push(ctx context.Context, opt Option, name, agent string, have int, res run.Resolved) (note string, loaded bool, err error) {
+// the team's boundary, the proof is against that boundary. how is what policy
+// list said after a load.
+func push(ctx context.Context, opt Option, name, agent string, have int, res run.Resolved) (note string, loaded bool, how run.LoadState, err error) {
 	entry, err := agents.Get(agent)
 	if err != nil {
-		return "", false, err
+		return "", false, 0, err
 	}
 	dir, err := os.MkdirTemp("", "boundlane-sync-")
 	if err != nil {
-		return "", false, err
+		return "", false, 0, err
 	}
 	defer os.RemoveAll(dir)
 	keeps := fmt.Sprintf("It keeps r%d.", have)
 	compiled, err := run.WriteCompiled(res, entry, dir)
 	if errors.Is(err, compiler.ErrNotInBoundary) {
-		return fmt.Sprintf("%s: r%d not loaded, %v. %s", name, opt.Revision, err, keeps), false, nil
+		return fmt.Sprintf("%s: r%d not loaded, %v. %s", name, opt.Revision, err, keeps), false, 0, nil
 	}
 	if err != nil {
-		return "", false, err
+		return "", false, 0, err
 	}
 	if _, err := run.Prove(ctx, opt.Prover, compiled, fmt.Sprintf("r%d for %s", opt.Revision, name)); err != nil {
 		var pe *run.PolicyError
@@ -304,21 +324,21 @@ func push(ctx context.Context, opt Option, name, agent string, have int, res run
 			if ex := pe.Result.Example(); ex != "" {
 				msg += " (" + ex + ")"
 			}
-			return msg + ". " + keeps, false, nil
+			return msg + ". " + keeps, false, 0, nil
 		}
-		return fmt.Sprintf("%s: r%d not loaded, %v. %s", name, opt.Revision, err, keeps), false, nil
+		return fmt.Sprintf("%s: r%d not loaded, %v. %s", name, opt.Revision, err, keeps), false, 0, nil
 	}
 	state, err := run.LoadNetwork(ctx, opt.Gateway, name, compiled.Policy)
 	if err != nil {
-		return "", false, err
+		return "", false, 0, err
 	}
 	switch state {
 	case run.LoadLoaded:
-		return fmt.Sprintf("%s loaded r%d. %s", name, opt.Revision, compiler.EffectNote(compiler.EffectNetwork)), true, nil
+		return fmt.Sprintf("%s loaded r%d. %s", name, opt.Revision, compiler.EffectNote(compiler.EffectNetwork)), true, state, nil
 	case run.LoadPending:
-		return fmt.Sprintf("%s has r%d pending. The supervisor loads it on its next poll.", name, opt.Revision), true, nil
+		return fmt.Sprintf("%s has r%d pending. The supervisor loads it on its next poll.", name, opt.Revision), true, state, nil
 	default:
-		return fmt.Sprintf("%s accepted r%d. policy list did not say Loaded.", name, opt.Revision), true, nil
+		return fmt.Sprintf("%s accepted r%d. policy list did not say Loaded.", name, opt.Revision), true, state, nil
 	}
 }
 
