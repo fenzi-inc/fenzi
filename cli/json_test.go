@@ -38,7 +38,8 @@ func fakeRuntime(t *testing.T, replies map[string]reply, prover string) {
 	}
 	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
 	var script strings.Builder
-	script.WriteString("#!/bin/sh\ncase \"$*\" in\n")
+	runtimeLog = filepath.Join(dir, "calls.log")
+	script.WriteString("#!/bin/sh\necho \"$*\" >> '" + runtimeLog + "'\ncase \"$*\" in\n")
 	for i, k := range keys {
 		p := filepath.Join(dir, "reply"+string(rune('a'+i)))
 		if err := os.WriteFile(p, []byte(replies[k].out), 0o600); err != nil {
@@ -65,6 +66,22 @@ func fakeRuntime(t *testing.T, replies map[string]reply, prover string) {
 }
 
 func itoa(n int) string { return string(rune('0' + n)) }
+
+// runtimeLog is where the fake openshell writes each argument list it got.
+var runtimeLog string
+
+// runtimeCalls returns the argument lists the fake openshell got, in order.
+func runtimeCalls(t *testing.T) []string {
+	t.Helper()
+	b, err := os.ReadFile(runtimeLog)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSpace(string(b)), "\n")
+}
 
 // runJSON runs the CLI with standard output and standard error apart, and
 // checks that standard output holds exactly one JSON value.

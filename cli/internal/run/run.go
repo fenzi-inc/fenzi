@@ -202,6 +202,11 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		return res, &PolicyError{Stage: "compiled policy", Result: r}
 	}
 	say("prover", "%s", r.Result)
+	// Kept so boundlane policy apply can tell a host change from one that
+	// needs a new sandbox.
+	if err := SaveResolved(runDir, o.Policy.Doc); err != nil {
+		return res, err
+	}
 
 	// 3. Ensure the image.
 	if !d.Images.Exists(ctx, a.Tag()) {

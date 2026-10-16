@@ -18,6 +18,7 @@ import (
 	"boundlane/cli/internal/forward"
 	"boundlane/cli/internal/openshell"
 	"boundlane/cli/internal/team"
+	"boundlane/teamapi"
 )
 
 // fakeTeam is a team server that records what the forwarder sends.
@@ -27,6 +28,8 @@ type fakeTeam struct {
 	batches []int
 	records []forward.Record
 	refuse  int
+	// proposals are the requests the forwarder reported.
+	proposals []teamapi.Proposal
 }
 
 func (f *fakeTeam) start(t *testing.T) *httptest.Server {
@@ -63,6 +66,16 @@ func (f *fakeTeam) start(t *testing.T) *httptest.Server {
 		json.NewEncoder(w).Encode(map[string]int{"stored": len(req.Records)})
 	})
 	mux.HandleFunc("POST /v1/proposals", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Proposals []teamapi.Proposal `json:"proposals"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		f.mu.Lock()
+		f.proposals = append(f.proposals, req.Proposals...)
+		f.mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /v1/applies", func(w http.ResponseWriter, r *http.Request) {
@@ -107,9 +120,17 @@ func TestHeartbeatOnEveryPass(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	want := `{"openshell_version":"0.1.2","driver":"docker","policy_revision":0,"approval_mode":"","sandboxes":[{"name":"bl-1","agent":"claude","revision":1,"running":true}]}`
+	want := `{"openshell_version":"0.1.2","driver":"docker","policy_revision":0,"approval_mode":"","sandboxes":[{"name":"bl-1","agent":"claude","revision":1,"running":true}],"notes":[]}`
 	if len(f.beats) != 2 || f.beats[0] != want {
 		t.Fatalf("beats %q", f.beats)
+	}
+
+	opt.BeatNotes = []string{"the server sent r3, which failed the signature check; still on r2"}
+	if _, err := Pass(context.Background(), opt); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(f.beats[2], `"notes":["the server sent r3, which failed the signature check; still on r2"]}`) {
+		t.Fatalf("beat without the note: %s", f.beats[2])
 	}
 
 	gw.mode = "auto"

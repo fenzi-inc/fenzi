@@ -4,6 +4,7 @@ package relay
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"boundlane/cli/internal/config"
+	"boundlane/cli/internal/openshell"
 	"boundlane/cli/internal/team"
 	"boundlane/controlplane"
 )
@@ -47,7 +49,7 @@ func TestPassLoadsAHostChangeAndShipsADeny(t *testing.T) {
 	}
 	opt := Option{
 		Gateway: gw, Client: team.Client{Base: srv.URL}, Token: tok, Machine: "mbp",
-		Revision: second.Revision, Document: second.Document, Dirs: dirs,
+		Revision: second.Revision, Document: second.Document, Dirs: dirs, Prover: passing(),
 	}
 	rep, err := Pass(context.Background(), opt)
 	if err != nil {
@@ -67,6 +69,9 @@ func TestPassLoadsAHostChangeAndShipsADeny(t *testing.T) {
 	pending, err := s.Proposals("acme", "pending")
 	if err != nil || len(pending) != 1 {
 		t.Fatalf("pending %+v %v", pending, err)
+	}
+	if pending[0].Draft || pending[0].Revision != 2 {
+		t.Fatalf("a request with the agent's own rationale: %+v", pending[0])
 	}
 	if err := s.Review(pending[0].ID, "dana@acme.dev", "approved", ""); err != nil {
 		t.Fatal(err)
@@ -175,7 +180,7 @@ func teamFixture(t *testing.T) (*controlplane.Service, Option, *fakeGW) {
 	}
 	opt := Option{
 		Gateway: gw, Client: team.Client{Base: srv.URL}, Token: signIn(t, srv, "mbp"), Machine: "mbp",
-		Revision: second.Revision, Document: second.Document, Dirs: dirs,
+		Revision: second.Revision, Document: second.Document, Dirs: dirs, Prover: passing(),
 	}
 	return s, opt, gw
 }
@@ -252,6 +257,7 @@ func TestApprovalIsShippedWithItsChunk(t *testing.T) {
 	// Recorded from a Codex session on OpenShell 0.1.2; the host is replaced.
 	gw.logs = append(gw.logs, "[1791297802.289] [sandbox] [OCSF ] [ocsf] CONFIG:APPROVED [INFO] chunk:fad7c2ed-3aca-4fb7-bb37-495820dd7562 approved on example.com:443 HEAD / by /usr/bin/curl\n"...)
 	gw.mode = "manual"
+	opt.BeatNotes = []string{"the server sent r1, older than r2; still on r2"}
 	rep, err := Pass(context.Background(), opt)
 	if err != nil {
 		t.Fatal(err)
@@ -272,6 +278,16 @@ func TestApprovalIsShippedWithItsChunk(t *testing.T) {
 	if err != nil || len(machines) != 1 || machines[0].ApprovalMode != "manual" || machines[0].Version != "0.1.2" || len(machines[0].Sandboxes) != 1 {
 		t.Fatalf("machines %+v %v", machines, err)
 	}
+	if len(machines[0].Notes) != 1 || machines[0].Notes[0] != opt.BeatNotes[0] {
+		t.Fatalf("notes %+v", machines[0].Notes)
+	}
+	opt.BeatNotes = nil
+	if _, err := Pass(context.Background(), opt); err != nil {
+		t.Fatal(err)
+	}
+	if machines, _ := s.Machines("acme"); len(machines[0].Notes) != 0 {
+		t.Fatalf("a cleared note stayed: %+v", machines[0].Notes)
+	}
 }
 
 func TestPushNoteNamesTheTenant(t *testing.T) {
@@ -283,4 +299,73 @@ func TestPushNoteNamesTheTenant(t *testing.T) {
 	if !strings.Contains(string(gw.policy), "from globex r2 (signed)") {
 		t.Fatalf("policy header:\n%s", gw.policy)
 	}
+}
+
+func TestPushIsProvedFirst(t *testing.T) {
+	_, opt, gw := teamFixture(t)
+	prover, calls := fakeProver(proverExceeds, 1)
+	opt.Prover = prover
+	rep, err := Pass(context.Background(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gw.set {
+		t.Fatal("a revision the prover refused was loaded")
+	}
+	if len(calls.Calls) != 1 {
+		t.Fatalf("prover calls %v", calls.Calls)
+	}
+	want := "bl-1: r2 not loaded, the policy check on this machine returned exceeds_boundary (any program can GET paste.example.net:443/). It keeps r1."
+	if !strings.Contains(strings.Join(rep.Notes, "\n"), want) {
+		t.Fatalf("notes %q", rep.Notes)
+	}
+	state, err := opt.Dirs.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sb, _ := state.Find("bl-1"); sb.TeamRevision != 1 {
+		t.Fatalf("sandbox recorded as r%d", sb.TeamRevision)
+	}
+
+	// The next pass checks again and says nothing new.
+	rep, err = Pass(context.Background(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gw.set || len(calls.Calls) != 2 || strings.Contains(strings.Join(rep.Notes, "\n"), "not loaded") {
+		t.Fatalf("set %v calls %d notes %q", gw.set, len(calls.Calls), rep.Notes)
+	}
+}
+
+func TestPushWithoutAProverLoadsNothing(t *testing.T) {
+	_, opt, gw := teamFixture(t)
+	opt.Prover = nil
+	rep, err := Pass(context.Background(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gw.set {
+		t.Fatal("loaded without a prover")
+	}
+	if !strings.Contains(strings.Join(rep.Notes, "\n"), "bl-1: r2 not loaded, the policy prover could not run: no prover on this machine. It keeps r1.") {
+		t.Fatalf("notes %q", rep.Notes)
+	}
+
+	// A prover that is not installed is the same.
+	missing := &openshell.Fake{Replies: map[string]openshell.Reply{}}
+	opt.Prover = openshell.Prover{R: missingRunner{missing}}
+	if _, err := Pass(context.Background(), opt); err != nil {
+		t.Fatal(err)
+	}
+	if gw.set {
+		t.Fatal("loaded when the prover is not installed")
+	}
+}
+
+// missingRunner fails every command the way Exec does when the binary is
+// not on PATH.
+type missingRunner struct{ *openshell.Fake }
+
+func (missingRunner) Output(context.Context, ...string) ([]byte, error) {
+	return nil, errors.New("openshell-prover is not installed or not on PATH: exec: \"openshell-prover\": executable file not found in $PATH")
 }

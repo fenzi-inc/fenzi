@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -67,6 +68,12 @@ type Option struct {
 	// SpoolLimit bounds the records kept while the control plane is away.
 	// Zero means spoolLimit.
 	SpoolLimit int
+	// Prover checks a revision before it is loaded onto a running sandbox.
+	// Nil means there is none, and nothing is loaded.
+	Prover run.Checker
+	// BeatNotes go to the console with the heartbeat, such as a bundle this
+	// machine refused while it keeps its cached revision.
+	BeatNotes []string
 }
 
 // Report is what one pass did.
@@ -153,7 +160,9 @@ func (p *pass) failed(what string, err error) {
 }
 
 func (p *pass) heartbeat(ctx context.Context) {
-	if err := p.Client.Heartbeat(ctx, p.Token, Beat(ctx, p.Gateway, p.Dirs, p.Revision)); err != nil {
+	b := Beat(ctx, p.Gateway, p.Dirs, p.Revision)
+	b.Notes = append([]string{}, p.BeatNotes...)
+	if err := p.Client.Heartbeat(ctx, p.Token, b); err != nil {
 		p.failed("heartbeat", err)
 	}
 }
@@ -226,13 +235,21 @@ func (p *pass) sync(ctx context.Context) error {
 		}
 		switch compiler.Effect(prev, next) {
 		case compiler.EffectNetwork:
-			note, err := push(ctx, opt, sb.Name, sb.Agent, next)
+			note, loaded, err := push(ctx, opt, sb.Name, sb.Agent, sb.TeamRevision, next)
 			if err != nil {
 				return err
 			}
-			rep.Notes = append(rep.Notes, note)
-			sb.TeamRevision = opt.Revision
-			changed = true
+			switch {
+			case loaded:
+				rep.Notes = append(rep.Notes, note)
+				sb.TeamRevision = opt.Revision
+				changed = true
+			case sb.Notified != opt.Revision:
+				// Not loaded. The next pass checks again; the note is given once.
+				rep.Notes = append(rep.Notes, note)
+				sb.Notified = opt.Revision
+				changed = true
+			}
 		case compiler.EffectWall:
 			if sb.Notified != opt.Revision {
 				rep.Notes = append(rep.Notes, sb.Name+": "+compiler.EffectNote(compiler.EffectWall))
@@ -250,34 +267,47 @@ func (p *pass) sync(ctx context.Context) error {
 	return nil
 }
 
-func push(ctx context.Context, opt Option, name, agent string, doc *compiler.Document) (string, error) {
+// push compiles a network change for one running sandbox, proves it the way
+// run proves a policy before it creates a sandbox, and only then loads it.
+// loaded is false when the prover refused it or could not run; the sandbox
+// keeps the revision it has, and the note says why.
+func push(ctx context.Context, opt Option, name, agent string, have int, doc *compiler.Document) (note string, loaded bool, err error) {
 	entry, err := agents.Get(agent)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	dir, err := os.MkdirTemp("", "boundlane-sync-")
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	defer os.RemoveAll(dir)
 	compiled, err := run.WriteCompiled(doc, entry, dir, fmt.Sprintf("%s r%d (signed)", opt.Tenant, opt.Revision))
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	if err := opt.Gateway.PolicySet(ctx, name, compiled.Policy); err != nil {
-		return "", err
+	keeps := fmt.Sprintf("It keeps r%d.", have)
+	if _, err := run.Prove(ctx, opt.Prover, compiled, fmt.Sprintf("r%d for %s", opt.Revision, name)); err != nil {
+		var pe *run.PolicyError
+		if errors.As(err, &pe) {
+			msg := fmt.Sprintf("%s: r%d not loaded, the policy check on this machine returned %s", name, opt.Revision, pe.Result.Result)
+			if ex := pe.Result.Example(); ex != "" {
+				msg += " (" + ex + ")"
+			}
+			return msg + ". " + keeps, false, nil
+		}
+		return fmt.Sprintf("%s: r%d not loaded, %v. %s", name, opt.Revision, err, keeps), false, nil
 	}
-	list, err := opt.Gateway.PolicyList(ctx, name)
+	state, err := run.LoadNetwork(ctx, opt.Gateway, name, compiled.Policy)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	switch {
-	case bytes.Contains(list, []byte("Loaded")):
-		return fmt.Sprintf("%s loaded r%d. %s", name, opt.Revision, compiler.EffectNote(compiler.EffectNetwork)), nil
-	case bytes.Contains(list, []byte("Pending")):
-		return fmt.Sprintf("%s has r%d pending. The supervisor loads it on its next poll.", name, opt.Revision), nil
+	switch state {
+	case run.LoadLoaded:
+		return fmt.Sprintf("%s loaded r%d. %s", name, opt.Revision, compiler.EffectNote(compiler.EffectNetwork)), true, nil
+	case run.LoadPending:
+		return fmt.Sprintf("%s has r%d pending. The supervisor loads it on its next poll.", name, opt.Revision), true, nil
 	default:
-		return fmt.Sprintf("%s accepted r%d. policy list did not say Loaded.", name, opt.Revision), nil
+		return fmt.Sprintf("%s accepted r%d. policy list did not say Loaded.", name, opt.Revision), true, nil
 	}
 }
 
@@ -312,16 +342,7 @@ func (p *pass) ship(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		var props []teamapi.Proposal
-		for _, r := range openshell.ParseRules(pending) {
-			if r.Chunk == "" {
-				continue
-			}
-			props = append(props, teamapi.Proposal{
-				Chunk: r.Chunk, Sandbox: name, Destination: r.Destination(),
-				Binary: r.Binary, Rationale: r.Rationale, Prover: r.Prover,
-			})
-		}
+		props := p.proposals(ctx, name, openshell.ParseRules(pending))
 		// Pending requests are read again on every pass, so one the server
 		// did not take is reported next time.
 		if len(props) > 0 && p.up() {
@@ -332,6 +353,11 @@ func (p *pass) ship(ctx context.Context) error {
 			}
 		}
 	}
+	ended, err := p.finished(names, &cur)
+	if err != nil {
+		return err
+	}
+	fresh = append(fresh, ended...)
 	if dropped := sp.add(fresh); dropped > 0 {
 		p.rep.Dropped += dropped
 		p.note(fmt.Sprintf("spool full: %s dropped. The console shows the gap.", records(dropped)))
@@ -343,6 +369,92 @@ func (p *pass) ship(ctx context.Context) error {
 		return err
 	}
 	return p.upload(ctx, sp)
+}
+
+// proposals turns pending chunks into the requests the console lists. Draft
+// follows the rule boundlane requests uses: the log is read only when a
+// chunk looks drafted, to see whether the agent filed it after all.
+func (p *pass) proposals(ctx context.Context, sandbox string, rules []openshell.Proposal) []teamapi.Proposal {
+	var filed map[string]bool
+	for _, r := range rules {
+		if r.Chunk != "" && r.Drafted() {
+			if log, err := p.Gateway.LogLines(ctx, sandbox, openshell.RequestLogWindow); err == nil {
+				filed = openshell.AgentFiled(log)
+			}
+			break
+		}
+	}
+	var out []teamapi.Proposal
+	for _, r := range rules {
+		if r.Chunk == "" {
+			continue
+		}
+		out = append(out, teamapi.Proposal{
+			Chunk: r.Chunk, Sandbox: sandbox, Destination: r.Destination(),
+			Binary: r.Binary, Rationale: r.Rationale, Prover: r.Prover,
+			Draft: r.IsDraft(filed), Revision: p.Revision,
+		})
+	}
+	return out
+}
+
+// finished reads the log run and stop saved for each sandbox that ended
+// since the last pass, once. run deletes a sandbox seconds after its agent
+// exits, so a short session can end between two passes; its saved log is
+// the only copy left. Records the stream already sent are dropped by the
+// same cursor, and the sandbox is then marked done.
+//
+// A sandbox counts when it was started from a team revision, or when this
+// forwarder read it while it ran. A Free-plan session that ended before this
+// machine signed in is not sent.
+func (p *pass) finished(listed []string, cur *cursorFile) ([]forward.Record, error) {
+	state, err := p.Dirs.LoadState()
+	if err != nil {
+		return nil, err
+	}
+	live := map[string]bool{}
+	for _, n := range listed {
+		live[n] = true
+	}
+	known := map[string]bool{}
+	var out []forward.Record
+	for _, sb := range state.Sandboxes {
+		known[sb.Name] = true
+		if live[sb.Name] || cur.Done[sb.Name] != "" {
+			continue
+		}
+		if sb.TeamRevision == 0 && !cur.read(sb.Name) {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(p.Dirs.Run(sb.Name), run.LogFile))
+		if errors.Is(err, fs.ErrNotExist) {
+			// Not saved yet, or the run could not save it.
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		recs, err := forward.ReadAudit(bytes.NewReader(raw), sb.Name)
+		if err != nil {
+			return nil, err
+		}
+		rev := p.Revision
+		if sb.TeamRevision > 0 {
+			rev = sb.TeamRevision
+		}
+		out = append(out, p.unsentAt(recs, sb.Name, rev, cur)...)
+		cur.Done[sb.Name] = time.Now().UTC().Format(time.RFC3339Nano)
+		delete(cur.Seen, sb.Name)
+		delete(cur.Last, sb.Name)
+		delete(cur.Stream, sb.Name)
+	}
+	// A sandbox boundlane rm forgot has no saved log left to read.
+	for name := range cur.Done {
+		if !known[name] {
+			delete(cur.Done, name)
+		}
+	}
+	return out, nil
 }
 
 // read gets a sandbox's new records from the gateway's log stream when this
@@ -452,6 +564,11 @@ func (p *pass) skipped(name string, lines int, oldest time.Time, cur *cursorFile
 // unsent drops records at or before the newest one already sent, labels the
 // rest with this machine and revision, and moves the cursor.
 func (p *pass) unsent(recs []forward.Record, name string, cur *cursorFile) []forward.Record {
+	return p.unsentAt(recs, name, p.Revision, cur)
+}
+
+// unsentAt is unsent with the revision the records are labelled with.
+func (p *pass) unsentAt(recs []forward.Record, name string, revision int, cur *cursorFile) []forward.Record {
 	seen, hasSeen := stamp(cur.Seen[name])
 	newest := seen
 	var out []forward.Record
@@ -460,7 +577,7 @@ func (p *pass) unsent(recs []forward.Record, name string, cur *cursorFile) []for
 			continue
 		}
 		rec.Machine = p.Machine
-		rec.PolicyRevision = strconv.Itoa(p.Revision)
+		rec.PolicyRevision = strconv.Itoa(revision)
 		out = append(out, rec)
 		if rec.Time.After(newest) {
 			newest = rec.Time
@@ -572,7 +689,7 @@ func staleProposal(err error) bool {
 // and drops it when OpenShell has already replaced the chunk.
 func (p *pass) releaseStale(ctx context.Context, r teamapi.Proposal) error {
 	opt := p.Option
-	fresh, still, err := currentProposal(ctx, opt, r.Sandbox, r.Chunk)
+	fresh, still, err := p.currentProposal(ctx, r.Sandbox, r.Chunk)
 	if err != nil {
 		return err
 	}
@@ -592,19 +709,16 @@ func (p *pass) releaseStale(ctx context.Context, r teamapi.Proposal) error {
 	return nil
 }
 
-func currentProposal(ctx context.Context, opt Option, sandbox, chunk string) (teamapi.Proposal, bool, error) {
-	raw, err := opt.Gateway.PendingRules(ctx, sandbox)
+func (p *pass) currentProposal(ctx context.Context, sandbox, chunk string) (teamapi.Proposal, bool, error) {
+	raw, err := p.Gateway.PendingRules(ctx, sandbox)
 	if err != nil {
 		return teamapi.Proposal{}, false, err
 	}
-	for _, p := range openshell.ParseRules(raw) {
-		if p.Chunk != chunk {
+	for _, r := range openshell.ParseRules(raw) {
+		if r.Chunk != chunk {
 			continue
 		}
-		return teamapi.Proposal{
-			Chunk: p.Chunk, Sandbox: sandbox, Destination: p.Destination(),
-			Binary: p.Binary, Rationale: p.Rationale, Prover: p.Prover,
-		}, true, nil
+		return p.proposals(ctx, sandbox, []openshell.Proposal{r})[0], true, nil
 	}
 	return teamapi.Proposal{}, false, nil
 }
@@ -616,6 +730,14 @@ type cursorFile struct {
 	Seen   map[string]string `json:"seen"`
 	Last   map[string]string `json:"last,omitempty"`
 	Stream map[string]string `json:"stream,omitempty"`
+	// Done is when a finished sandbox's saved log was read, by name. Its
+	// records are never read again.
+	Done map[string]string `json:"done,omitempty"`
+}
+
+// read reports whether a pass has read this sandbox's log before.
+func (c cursorFile) read(name string) bool {
+	return c.Seen[name] != "" || c.Last[name] != "" || c.Stream[name] != ""
 }
 
 // stamp parses a cursor time. Cursors are compared as times: RFC 3339 strings
@@ -630,7 +752,7 @@ func cursorPath(dirs config.Dirs) string { return filepath.Join(dirs.Config, "fo
 func loadCursors(dirs config.Dirs) (cursorFile, error) {
 	b, err := os.ReadFile(cursorPath(dirs))
 	if os.IsNotExist(err) {
-		return cursorFile{Seen: map[string]string{}, Last: map[string]string{}, Stream: map[string]string{}}, nil
+		return cursorFile{Seen: map[string]string{}, Last: map[string]string{}, Stream: map[string]string{}, Done: map[string]string{}}, nil
 	}
 	if err != nil {
 		return cursorFile{}, err
@@ -645,6 +767,9 @@ func loadCursors(dirs config.Dirs) (cursorFile, error) {
 	}
 	if c.Stream == nil {
 		c.Stream = map[string]string{}
+	}
+	if c.Done == nil {
+		c.Done = map[string]string{}
 	}
 	return c, err
 }

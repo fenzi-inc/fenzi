@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -159,6 +160,13 @@ func TestRunSequence(t *testing.T) {
 
 	if len(h.prover.Calls) != 2 {
 		t.Errorf("prover ran %d times, want 2 (compiled and effective)", len(h.prover.Calls))
+	}
+	saved, err := LoadResolved(h.deps.Dirs.Run("bl-test-0001"))
+	if err != nil {
+		t.Fatalf("the document the sandbox started with was not saved: %v", err)
+	}
+	if !reflect.DeepEqual(saved.WithDefaults(), h.opts.Policy.Doc.WithDefaults()) {
+		t.Errorf("saved document differs:\n%+v\n%+v", saved, h.opts.Policy.Doc)
 	}
 	if len(h.images.built) != 1 {
 		t.Errorf("image built %d times", len(h.images.built))
