@@ -155,6 +155,10 @@ make dist    # the binaries the installer downloads
 
 Which agents and platforms have been checked is on the [Agents](https://boundlane.dev/docs/agents) and [Install](https://boundlane.dev/docs/install) pages.
 
+## Security
+
+Report a vulnerability privately to security@boundlane.dev, not in a public issue. See [SECURITY.md](SECURITY.md).
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
