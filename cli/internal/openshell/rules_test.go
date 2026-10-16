@@ -134,3 +134,42 @@ func TestResolveChunk(t *testing.T) {
 		t.Error("an unknown prefix must fail")
 	}
 }
+
+func TestRequestedAccess(t *testing.T) {
+	byHost := map[string]RequestAccess{}
+	for _, p := range append(ParseRules([]byte(recordedRules)), ParseRules([]byte(recordedMixed))...) {
+		byHost[p.Destination()] = p.RequestedAccess()
+	}
+	for host, want := range map[string]RequestAccess{
+		"registry.npmjs.org:443":  {Access: AccessReadOnly},
+		"api.github.com:443":      {Access: AccessReadOnly},
+		"paste.example.net:443":   {Access: AccessReadOnly, L4: true},
+		"github.com:443":          {Access: AccessReadOnly, L4: true},
+		"downloads.claude.ai:443": {Access: AccessReadOnly, L4: true},
+		"www.example.com:443":     {Access: AccessReadOnly},
+	} {
+		got, ok := byHost[host]
+		if !ok || got.Access != want.Access || got.L4 != want.L4 || got.Allow != nil {
+			t.Errorf("%s: %+v, want %+v", host, got, want)
+		}
+	}
+	// The recorded allow shape with HEAD, then with a write method.
+	if got := (Proposal{Endpoints: "example.com:443 [L7 rest, allow HEAD /]"}).RequestedAccess(); got.Access != AccessReadOnly || got.L4 || got.Allow != nil {
+		t.Errorf("allow HEAD: %+v", got)
+	}
+	post := Proposal{Endpoints: "api.example.com:8443 [L7 rest, allow POST /v1/things]"}.RequestedAccess()
+	if post.Access != AccessReadWrite || post.L4 || len(post.Allow) != 1 || post.Allow[0] != "POST /v1/things" {
+		t.Errorf("allow POST: %+v", post)
+	}
+	for _, unknown := range []string{
+		"api.example.com:443 [L7 rest, access=full]",
+		"api.example.com:443 [L7 rest, allow GET /, allow POST /x]",
+		"api.example.com:443, api.example.org:443 [L4]",
+		"paste.example.net:443 [L7]",
+		"",
+	} {
+		if got := (Proposal{Endpoints: unknown}).RequestedAccess(); got.Access != "" || got.L4 || got.Allow != nil {
+			t.Errorf("%q: %+v", unknown, got)
+		}
+	}
+}

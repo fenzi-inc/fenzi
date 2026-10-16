@@ -134,3 +134,62 @@ func ResolveChunk(list []Proposal, prefix string) (string, error) {
 	}
 	return "", fmt.Errorf("%q matches %d requests; use more characters", prefix, len(match))
 }
+
+// Access levels of a hosts entry in the org document.
+const (
+	AccessReadOnly  = "read-only"
+	AccessReadWrite = "read-write"
+)
+
+// RequestAccess is what a request's rule asks for, in the org document's
+// terms: the access level of a hosts entry and, for read-write, the allow
+// line the entry needs.
+type RequestAccess struct {
+	// Access is read-only or read-write, or empty when the rule is in a
+	// shape that has not been recorded.
+	Access string
+	// Allow is the rule's "METHOD /path" for a read-write request.
+	Allow []string
+	// L4 means the rule names no method or path, so the approved rule lets
+	// any traffic through to the host and port. It maps to read-only, the
+	// narrowest entry the org document has.
+	L4 bool
+}
+
+// endpointShape is the Endpoints line of `openshell rule get`. The shapes
+// recorded from OpenShell 0.1.2 are:
+//
+//	paste.example.net:443 [L4]
+//	registry.npmjs.org:443 [L7 rest, access=read-only]
+//	www.example.com:443 [L7 rest, allow GET /]
+//
+// A line with more than one endpoint, more than one allow rule, or another
+// access level has not been recorded, so its access is left empty.
+var (
+	endpointShape = regexp.MustCompile(`^([a-z0-9][a-z0-9.-]*):(\d+) \[([^\]]+)\]$`)
+	l7ReadOnly    = regexp.MustCompile(`^L7 rest, access=read-only$`)
+	l7AllowOne    = regexp.MustCompile(`^L7 rest, allow ([A-Z]+) (/\S*)$`)
+)
+
+// RequestedAccess maps the rule's endpoints to an access level: GET or HEAD
+// is read-only, any other method is read-write with the rule's allow line,
+// and a rule with no L7 detail is read-only and flagged L4.
+func (p Proposal) RequestedAccess() RequestAccess {
+	m := endpointShape.FindStringSubmatch(strings.TrimSpace(p.Endpoints))
+	if m == nil {
+		return RequestAccess{}
+	}
+	switch rule := m[3]; {
+	case rule == "L4":
+		return RequestAccess{Access: AccessReadOnly, L4: true}
+	case l7ReadOnly.MatchString(rule):
+		return RequestAccess{Access: AccessReadOnly}
+	case l7AllowOne.MatchString(rule):
+		a := l7AllowOne.FindStringSubmatch(rule)
+		if a[1] == "GET" || a[1] == "HEAD" {
+			return RequestAccess{Access: AccessReadOnly}
+		}
+		return RequestAccess{Access: AccessReadWrite, Allow: []string{a[1] + " " + a[2]}}
+	}
+	return RequestAccess{}
+}

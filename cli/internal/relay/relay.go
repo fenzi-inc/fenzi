@@ -420,10 +420,12 @@ func (p *pass) proposals(ctx context.Context, sandbox string, rules []openshell.
 		if r.Chunk == "" {
 			continue
 		}
+		acc := r.RequestedAccess()
 		out = append(out, teamapi.Proposal{
 			Chunk: r.Chunk, Sandbox: sandbox, Destination: r.Destination(),
 			Binary: r.Binary, Rationale: r.Rationale, Prover: r.Prover,
 			Draft: r.IsDraft(filed), Revision: p.Revision,
+			Access: acc.Access, Allow: acc.Allow, L4: acc.L4,
 		})
 	}
 	return out

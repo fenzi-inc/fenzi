@@ -180,6 +180,17 @@ type Proposal struct {
 	// Revision is the team revision the machine held when it reported the
 	// request, 0 when it held none.
 	Revision int `json:"revision,omitempty"`
+	// Access is the hosts entry the request needs, "read-only" or
+	// "read-write", or empty when the machine could not tell from the rule.
+	// A console adding the host to the policy reads an empty one as
+	// read-only and says so. A server that predates the field ignores it.
+	Access string `json:"access,omitempty"`
+	// Allow is the "METHOD /path" line a read-write entry needs.
+	Allow []string `json:"allow,omitempty"`
+	// L4 is true when the rule names no method or path: the approval lets
+	// any traffic through to the host and port, while the policy entry it
+	// maps to is read-only.
+	L4 bool `json:"l4,omitempty"`
 }
 
 // Results of the policy compare a machine reports for each sandbox in its
