@@ -84,7 +84,16 @@ func cmdPolicyApply(e env, args []string) (int, error) {
 		if err != nil {
 			return 1, err
 		}
-		switch compiler.Effect(prev, next.Doc) {
+		// Hosts approved for this sandbox while it ran stay with it.
+		mine := next
+		if hosts, err := run.LoadApproved(sbRun); err == nil {
+			for _, h := range hosts {
+				if doc, _, err := run.WithHost(mine.Doc, h); err == nil {
+					mine.Doc = doc
+				}
+			}
+		}
+		switch compiler.Effect(prev, mine.Doc) {
 		case compiler.EffectSame:
 			u.Done(sb.Name, "already runs this policy")
 			continue
@@ -93,7 +102,7 @@ func cmdPolicyApply(e env, args []string) (int, error) {
 			u.Note("Workspace and path rules are fixed when a sandbox is created. fenzi stop " + sb.Name + ", then fenzi run, starts one with them.")
 			continue
 		}
-		line, rev, err := loadHosts(e, dirs, sb, next)
+		line, rev, err := loadHosts(e, dirs, sb, mine)
 		var pe *run.PolicyError
 		switch {
 		case errors.As(err, &pe):

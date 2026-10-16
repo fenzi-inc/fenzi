@@ -32,6 +32,9 @@ env:
 # code.claude.com/docs/en/cli-reference: "Append custom text to the end of the
 # default system prompt".
 guide_flag: --append-system-prompt
+# `claude --help` in 2.1.288: "-c, --continue  Continue the most recent
+# conversation in the current directory".
+resume: [--continue]
 # claude --help in 2.1.288 lists "auto" and "manual" among the modes. In auto,
 # Claude's own check can refuse a command before it reaches the sandbox; in
 # manual a person approves each action and the policy decides the rest.

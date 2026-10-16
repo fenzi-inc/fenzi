@@ -55,7 +55,7 @@ func (r *release) serve(t *testing.T) *httptest.Server {
 func newRelease(bin []byte) *release {
 	sum := sha256.Sum256(bin)
 	return &release{files: map[string][]byte{
-		"latest.txt":                  []byte("0.1.2\n"),
+		"latest.txt":              []byte("0.1.2\n"),
 		"fenzi-0.1.2-linux-amd64": bin,
 		"fenzi-0.1.2-sha256.txt":  []byte(hex.EncodeToString(sum[:]) + "  fenzi-0.1.2-linux-amd64\n"),
 	}}

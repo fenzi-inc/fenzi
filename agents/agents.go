@@ -53,6 +53,9 @@ type Entry struct {
 	// run writes the guide, for agents that read instruction files. With none
 	// of them, the agent is not told about policy.local.
 	GuideFlag   string `yaml:"guide_flag"`
+	// Resume goes right after the command when fenzi connect opens the agent
+	// again, so it continues its last session in the project folder.
+	Resume []string `yaml:"resume"`
 	GuideConfig string `yaml:"guide_config"`
 	GuideFile   string `yaml:"guide_file"`
 	Key         Key    `yaml:"key"`
@@ -142,6 +145,16 @@ func (e Entry) Argv(args []string) []string {
 		argv = append(argv, "-c", e.GuideConfig+"="+tomlString(Guide))
 	}
 	return append(argv, args...)
+}
+
+// ResumeArgv is Argv with Resume right after the command, or nil for an
+// agent with no way to resume.
+func (e Entry) ResumeArgv(args []string) []string {
+	if len(e.Resume) == 0 {
+		return nil
+	}
+	argv := e.Argv(args)
+	return append(append([]string{argv[0]}, e.Resume...), argv[1:]...)
 }
 
 // CommandLine is Argv without the guide text, for showing what starts.

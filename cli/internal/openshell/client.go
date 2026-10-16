@@ -326,12 +326,24 @@ func (c Client) ExecOutput(ctx context.Context, name string, cmd ...string) ([]b
 
 // Sandboxes: `openshell sandbox list --names --selector fenzi=1`, one name
 // per line (0.1.2 help text). Every sandbox run creates carries that label.
+// Sandboxes created before the rename from Boundlane carry boundlane=1
+// instead, so both are listed.
 func (c Client) Sandboxes(ctx context.Context) ([]string, error) {
-	out, err := c.R.Output(ctx, "sandbox", "list", "--names", "--selector", "fenzi=1")
-	if err != nil {
-		return nil, err
+	var names []string
+	seen := map[string]bool{}
+	for _, label := range []string{"fenzi=1", "boundlane=1"} {
+		out, err := c.R.Output(ctx, "sandbox", "list", "--names", "--selector", label)
+		if err != nil {
+			return nil, err
+		}
+		for _, n := range strings.Fields(string(out)) {
+			if !seen[n] {
+				seen[n] = true
+				names = append(names, n)
+			}
+		}
 	}
-	return strings.Fields(string(out)), nil
+	return names, nil
 }
 
 // Delete: `openshell sandbox delete <name>`. Deletes the sandbox's logs too.

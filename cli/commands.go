@@ -267,7 +267,9 @@ func cmdInit(e env, args []string) (int, error) {
 
 func cmdRun(e env, args []string) (int, error) {
 	fs := newFlags("run", e.stderr)
-	keep := fs.Bool("keep", false, "keep the sandbox when the agent exits, without asking")
+	keep := fs.Bool("keep", false, "keep the sandbox when the agent exits (the default)")
+	remove := fs.Bool("rm", false, "delete the sandbox when the agent exits, after the review of its changes")
+	fresh := fs.Bool("new", false, "start a new sandbox even when one for this folder and agent is still running")
 	name := fs.String("name", "", "sandbox name, at most 19 characters (default bl-<folder>-<id>)")
 	policyFile := fs.String("policy", "", "policy file to use instead of ./fenzi.yaml")
 	noUpload := fs.Bool("no-upload", false, "start with an empty working folder")
@@ -308,11 +310,31 @@ func cmdRun(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
+	u := tui.New(e.stdin, e.stdout)
+	// A sandbox already running for this folder and agent holds the agent's
+	// session; going back to it keeps the conversation.
+	if !*fresh && *name == "" && *policyFile == "" && u.Interactive() {
+		if sb, ok := runningFor(e, dirs, repo, entry.Name); ok {
+			u.Title(sb.Name+" is still running", tilde(repo, homeDir()))
+			i, err := u.Select("Go back to it?", []tui.Option{
+				{Label: "Resume " + sb.Name, Hint: entry.Display + " continues its last session there, with the files as it left them"},
+				{Label: "Start a new sandbox", Hint: "copies this folder again; fenzi run --new skips this question"},
+			}, 0)
+			if errors.Is(err, tui.ErrCancelled) {
+				return 1, nil
+			}
+			if err != nil {
+				return 1, err
+			}
+			if i == 0 {
+				return connectTo(e, u, sb, rest[1:], false, false)
+			}
+		}
+	}
 	images, err := imageBuilder(e, e.stdout)
 	if err != nil {
 		return 1, err
 	}
-	u := tui.New(e.stdin, e.stdout)
 	var confirmSecrets func([]string) (bool, error)
 	if !*allowSecrets && u.Interactive() {
 		confirmSecrets = func([]string) (bool, error) {
@@ -356,27 +378,19 @@ func cmdRun(e env, args []string) (int, error) {
 			// The agent has exited: send its last decisions and requests before
 			// the questions, while the sandbox still exists.
 			finishForward()
-			if !u.Interactive() {
-				return false, nil
-			}
-			u.Title(entry.Display+" exited", sandbox)
-			if sb, base, files, changes, err := staged(e, sandbox); err == nil && len(changes) > 0 {
-				reviewed = true
-				if _, err := newReview(sb, base, files, changes, "").offer(e); err != nil {
-					return true, err
+			if u.Interactive() {
+				u.Title(entry.Display+" exited", sandbox)
+				if sb, base, files, changes, err := staged(e, sandbox); err == nil && len(changes) > 0 {
+					reviewed = true
+					if _, err := newReview(sb, base, files, changes, "").offer(e); err != nil {
+						return true, err
+					}
+					u.Blank()
 				}
-				u.Blank()
 			}
-			u.Println(fmt.Sprintf("  %s %s", u.Accent("■"), u.Bold("The sandbox")))
-			u.Note("It still has this session, its files, and any approvals from this run. Keep it to come back with fenzi connect. Deleting it does not touch changes that are staged or applied.")
-			i, err := u.Select("What should happen to "+sandbox+"?", []tui.Option{
-				{Label: "Keep it running", Hint: "fenzi connect opens the agent again"},
-				{Label: "Delete it", Hint: "ends the session and its pending requests"},
-			}, 0)
-			if errors.Is(err, tui.ErrCancelled) {
-				return true, nil
-			}
-			return i == 0, err
+			// The sandbox stays by default: it holds the agent's session, its
+			// files, and the approvals from this run.
+			return !*remove, nil
 		},
 	})
 	if errors.Is(err, run.ErrSecretsDeclined) {
@@ -390,8 +404,9 @@ func cmdRun(e env, args []string) (int, error) {
 		return 1, err
 	}
 	if res.Kept {
+		u.Note("The sandbox keeps " + entry.Display + "'s session, its files and the approvals from this run. fenzi run --rm deletes it when the agent exits.")
 		u.Commands(
-			[2]string{"fenzi connect " + res.Sandbox, "open the agent again"},
+			[2]string{"fenzi connect " + res.Sandbox, "resume " + entry.Display + " where it stopped"},
 			[2]string{"fenzi stop " + res.Sandbox, "end it and bring the changes back"},
 		)
 		u.Blank()
@@ -556,7 +571,7 @@ func cmdRequests(e env, args []string) (int, error) {
 					u.Note(err.Error())
 					break
 				}
-				if err := approveOne(e, u, sb, p.Chunk); err != nil {
+				if err := approveOne(e, u, sb, p); err != nil {
 					return 1, err
 				}
 			} else if i == 1 {
@@ -623,12 +638,21 @@ const approvedNote = "The sandbox loads it on its next poll, about 10 seconds. T
 
 func deniedNote(reason string) string { return "The agent sees: " + reason }
 
-func approveOne(e env, u *tui.UI, sb config.Sandbox, id string) error {
+func approveOne(e env, u *tui.UI, sb config.Sandbox, p openshell.Proposal) error {
+	id := p.Chunk
 	if err := client().RuleApprove(e.ctx, sb.Name, id); err != nil {
 		return err
 	}
 	u.Println(fmt.Sprintf("  %s %s %s in %s", u.Allow("✓"), u.Allow(fmt.Sprintf("%-*s", tui.LabelWidth, "Approved")), shortID(id), sb.Name))
 	u.Note(approvedNote)
+	if dirs, err := config.Default(); err == nil {
+		r := sameKind(e, dirs, sb, p)
+		if line := r.line(p.Destination()); line != "" {
+			u.Note(line)
+		} else if r.Skipped != "" {
+			u.Note(r.Skipped + ".")
+		}
+	}
 	return nil
 }
 
@@ -697,7 +721,12 @@ func cmdApprove(e env, args []string) (int, error) {
 		if err := client().RuleApprove(e.ctx, sb.Name, id); err != nil {
 			return 1, err
 		}
-		return 0, writeJSON(e.stdout, jsonAnswer{ID: id, Sandbox: sb.Name, Result: "approved", Note: approvedNote})
+		r := sameKind(e, dirs, sb, p)
+		note := approvedNote
+		if line := r.line(p.Destination()); line != "" {
+			note += " " + line
+		}
+		return 0, writeJSON(e.stdout, jsonAnswer{ID: id, Sandbox: sb.Name, Result: "approved", Note: note, SameKind: r.Loaded, AlsoApproved: r.Also, Skipped: r.Skipped})
 	}
 	// With --save, everything that could stop the save is checked before
 	// the approval, so a refusal leaves nothing half done.
@@ -723,7 +752,7 @@ func cmdApprove(e env, args []string) (int, error) {
 		}
 	}
 	u := tui.New(e.stdin, e.stdout)
-	if err := approveOne(e, u, sb, id); err != nil {
+	if err := approveOne(e, u, sb, p); err != nil {
 		return 1, err
 	}
 	if !*save {
@@ -765,7 +794,7 @@ func approveFromPreview(e env, sb config.Sandbox, p openshell.Proposal, from str
 		u.Blank()
 		return 0, fail
 	}
-	if err := approveOne(e, u, sb, p.Chunk); err != nil {
+	if err := approveOne(e, u, sb, p); err != nil {
 		return 1, err
 	}
 	if !pv.Changed() {

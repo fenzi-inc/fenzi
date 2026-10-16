@@ -95,6 +95,11 @@ type jsonAnswer struct {
 	Sandbox string `json:"sandbox"`
 	Result  string `json:"result"`
 	Note    string `json:"note"`
+	// SameKind is the host rule an approval added to the running sandbox,
+	// so calls of the same kind pass without another request.
+	SameKind     string   `json:"same_kind,omitempty"`
+	AlsoApproved []string `json:"also_approved,omitempty"`
+	Skipped      string   `json:"same_kind_skipped,omitempty"`
 }
 
 type jsonKey struct {

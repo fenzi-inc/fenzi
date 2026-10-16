@@ -2,6 +2,7 @@ package openshell
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -104,5 +105,17 @@ func TestCreateArgs(t *testing.T) {
 	want := "sandbox create --name n --from img:1 --policy p.yaml --provider bl-claude --label fenzi=1 --label policy_rev=r1 --approval-mode manual --no-auto-providers --detach --output json"
 	if f.Calls[0] != want {
 		t.Errorf("got  %s\nwant %s", f.Calls[0], want)
+	}
+}
+
+// Sandboxes created before the rename from Boundlane carry boundlane=1.
+func TestSandboxesListsBothLabels(t *testing.T) {
+	f := &Fake{Replies: map[string]Reply{
+		"sandbox list --names --selector fenzi=1":     {Out: "bl-new-1a2b\n"},
+		"sandbox list --names --selector boundlane=1": {Out: "bl-old-3c4d\nbl-new-1a2b\n"},
+	}}
+	got, err := Client{R: f}.Sandboxes(context.Background())
+	if err != nil || strings.Join(got, " ") != "bl-new-1a2b bl-old-3c4d" {
+		t.Fatalf("%q %v", got, err)
 	}
 }

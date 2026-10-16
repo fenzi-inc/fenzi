@@ -267,3 +267,33 @@ func TestEveryFolderIsEmbedded(t *testing.T) {
 		t.Errorf("%d agent folders on disk, %d in the catalog", n, len(all))
 	}
 }
+
+func TestResumeArgvPutsTheResumeWordsAfterTheCommand(t *testing.T) {
+	for name, want := range map[string][]string{
+		"claude":   {"claude", "--continue"},
+		"opencode": {"opencode", "--continue"},
+		"grok":     {"grok", "--continue"},
+		"codex":    {"codex", "resume", "--last", "--no-daemon"},
+	} {
+		e, err := Get(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := e.ResumeArgv(nil)
+		if len(got) < len(want) {
+			t.Fatalf("%s: %q", name, got)
+		}
+		for i, w := range want {
+			if got[i] != w {
+				t.Errorf("%s: %q, want it to start %q", name, got, want)
+				break
+			}
+		}
+		if len(got) != len(e.Argv(nil))+len(e.Resume) {
+			t.Errorf("%s: resume dropped arguments: %q", name, got)
+		}
+	}
+	if (Entry{Command: "x"}).ResumeArgv(nil) != nil {
+		t.Error("an agent with no resume words resumed")
+	}
+}

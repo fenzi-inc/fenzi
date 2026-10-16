@@ -62,6 +62,10 @@ args:
   - feedback.enabled=false
 # "Additional developer instructions injected into the session".
 guide_config: developer_instructions
+# `codex resume --help` in 0.160.1: "--last  Continue the most recent session
+# without showing the picker". resume takes the same --no-daemon, --disable
+# and -c options as the top-level command.
+resume: [resume, --last]
 key:
   env: OPENAI_API_KEY
   profile_type: fenzi-codex

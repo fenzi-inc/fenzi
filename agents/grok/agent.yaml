@@ -33,6 +33,10 @@ env:
   GROK_CRASH_HANDLER: "0"
 # "Extra rules appended to the system prompt" (docs.x.ai/build/cli/reference).
 guide_flag: --rules
+# `grok --help` in 1.0.46: "-c, --continue  Continue the most recent session
+# for the current working directory". With no session it prints "No session
+# found for current directory" and exits 1; fenzi connect then starts a new one.
+resume: [--continue]
 key:
   env: XAI_API_KEY
   profile_type: fenzi-grok

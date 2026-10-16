@@ -35,6 +35,8 @@ env:
 # OpenCode loads extra instructions from files named in its config. It has no
 # flag that appends text.
 guide_file: /sandbox/.fenzi/guide.md
+# `opencode --help` in 1.18.34: "-c, --continue  continue the last session".
+resume: [--continue]
 key:
   env: ANTHROPIC_API_KEY
   profile_type: fenzi-opencode
