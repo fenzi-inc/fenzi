@@ -70,7 +70,7 @@ The site also has the [argument](https://boundlane.dev/beliefs), the [price](htt
 
 ### A team
 
-Free is this CLI on one machine, with the default policy and the log on that machine. No account. Team is one signed policy, one decision log, and approvals in one console across many machines. The console is hosted at https://boundlane.dev and is opened by invitation while Team is on the [waitlist](https://boundlane.dev/waitlist). License is that control plane in your own network. See [Price](https://boundlane.dev/price).
+Free is this CLI on one machine, with the default policy and the log on that machine. No account. Team is one signed policy, one decision log, and approvals in one console across many machines. The console is hosted at https://boundlane.dev and is opened by invitation; [request access](https://boundlane.dev/request-access) for a new team. License is that control plane in your own network. See [Price](https://boundlane.dev/price).
 
 The Team client is in this repository: `boundlane login` signs a machine in, `status` shows the sign-in, `sync` and `forward` keep it in step with the console, and `policy publish` publishes from an admin's machine. The control plane itself is not in this repository.
 
