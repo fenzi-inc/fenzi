@@ -49,7 +49,7 @@ func TestLoginCachesASignedPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if en.Email != "dana@acme.dev" || !en.Admin || en.Revision != 1 {
+	if en.Email != "dana@acme.dev" || !en.Admin || en.Role != "admin" || en.Revision != 1 {
 		t.Fatalf("enrollment %+v", en)
 	}
 	if _, err := en.Bundle(); err != nil {
@@ -72,8 +72,11 @@ func TestLoginCachesASignedPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if li.Admin {
-		t.Fatal("li is a member")
+	if li.Admin || li.RoleName() != "developer" {
+		t.Fatalf("li is a developer, got admin=%v role %q", li.Admin, li.RoleName())
+	}
+	if me, err := c.Me(context.Background(), li.Token); err != nil || me.Role != "developer" || me.Admin {
+		t.Fatalf("me %+v err %v", me, err)
 	}
 	if _, err := c.Publish(context.Background(), li.Token, org); err == nil {
 		t.Fatal("a member must not publish")

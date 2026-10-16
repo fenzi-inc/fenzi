@@ -72,11 +72,7 @@ func cmdServer(e env, args []string) (int, error) {
 		return 1, err
 	}
 	for _, user := range users {
-		role := "member"
-		if user.Admin {
-			role = "admin"
-		}
-		u.Done("User", user.Email+", "+role)
+		u.Done("User", user.Email+", "+user.Role())
 	}
 	u.Note("Press Ctrl-C to stop. Sign in from another terminal with boundlane login --server http://" + *addr + ".")
 	u.Blank()

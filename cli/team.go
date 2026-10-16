@@ -58,6 +58,12 @@ func cmdPublish(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
+	// The role may have changed in the console since login. Ask; when the
+	// server cannot be reached, the stored role decides and the publish
+	// below fails on its own.
+	if me, err := teamClient(en.Server).Me(e.ctx, en.Token); err == nil {
+		en = en.WithRole(me)
+	}
 	if !en.Admin {
 		who, where := "this account", "the console"
 		if en.Email != "" {
@@ -66,7 +72,7 @@ func cmdPublish(e env, args []string) (int, error) {
 		if en.Server != "" {
 			where = en.Server + "/console"
 		}
-		return 1, fmt.Errorf("publishing needs a team admin, and %s is a member. An admin publishes from %s, or signs in on this machine with boundlane login", who, where)
+		return 1, fmt.Errorf("publishing needs a team admin, and %s is %s. An admin publishes from %s, or signs in on this machine with boundlane login", who, withArticle(en.RoleName()), where)
 	}
 	raw, err := os.ReadFile(pos[0])
 	if err != nil {
@@ -161,13 +167,14 @@ func cmdStatus(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
+	// An admin may have changed the role since login.
+	if me, err := tc.Me(e.ctx, en.Token); err == nil {
+		en = en.WithRole(me)
+	}
 	if err := en.Save(dirs); err != nil {
 		return 1, err
 	}
-	role := "member"
-	if en.Admin {
-		role = "admin"
-	}
+	role := en.RoleName()
 	if *asJSON {
 		doc := jsonStatus{
 			SignedIn: true, Email: en.Email, Role: role, Team: en.Tenant, Machine: en.Machine,
@@ -212,6 +219,16 @@ func statusBeat(e env, dirs config.Dirs, en team.Enrollment) team.Beat {
 // accepts the connection and never answers must not hold the command.
 func teamClient(server string) team.Client {
 	return team.Client{Base: server, HTTP: &http.Client{Timeout: teamTimeout}}
+}
+
+// withArticle reads a role in a sentence: "an admin", "a reviewer".
+func withArticle(role string) string {
+	switch role {
+	case "admin", "auditor":
+		return "an " + role
+	default:
+		return "a " + role
+	}
 }
 
 // teamTimeout bounds each request to the team server.

@@ -55,13 +55,16 @@ type Start struct {
 
 // Enrollment is what this machine keeps after login. The token never leaves it.
 type Enrollment struct {
-	Server    string `json:"server"`
-	Token     string `json:"token"`
-	Email     string `json:"email"`
-	Name      string `json:"name"`
-	Tenant    string `json:"tenant"`
-	Machine   string `json:"machine"`
-	Admin     bool   `json:"admin"`
+	Server  string `json:"server"`
+	Token   string `json:"token"`
+	Email   string `json:"email"`
+	Name    string `json:"name"`
+	Tenant  string `json:"tenant"`
+	Machine string `json:"machine"`
+	Admin   bool   `json:"admin"`
+	// Role is admin, reviewer, developer, or auditor. Empty when the server
+	// predates roles and sent only Admin; RoleName covers both.
+	Role      string `json:"role,omitempty"`
 	PublicKey string `json:"public_key"`
 	Revision  int    `json:"revision"`
 	Document  string `json:"document,omitempty"`
@@ -96,6 +99,7 @@ func (c Client) Exchange(ctx context.Context, deviceCode string) (Enrollment, er
 		Tenant    string          `json:"tenant"`
 		Machine   string          `json:"machine"`
 		Admin     bool            `json:"admin"`
+		Role      string          `json:"role"`
 		PublicKey string          `json:"public_key"`
 		Error     string          `json:"error"`
 		Bundle    json.RawMessage `json:"bundle"`
@@ -109,7 +113,7 @@ func (c Client) Exchange(ctx context.Context, deviceCode string) (Enrollment, er
 	}
 	en := Enrollment{
 		Server: c.base(), Token: raw.Token, Email: raw.Email, Name: raw.Name,
-		Tenant: raw.Tenant, Machine: raw.Machine, Admin: raw.Admin, PublicKey: raw.PublicKey,
+		Tenant: raw.Tenant, Machine: raw.Machine, Admin: raw.Admin, Role: raw.Role, PublicKey: raw.PublicKey,
 	}
 	if len(raw.Bundle) > 0 && string(raw.Bundle) != "null" {
 		if err := en.applyBundle(raw.Bundle); err != nil {
@@ -143,6 +147,47 @@ func (e *Enrollment) Take(b teamapi.Bundle) error {
 	e.Published = w.Published
 	e.Signature = w.Signature
 	return nil
+}
+
+// Me is the member this machine acts for, as the server sees them now.
+type Me struct {
+	Email   string `json:"email"`
+	Name    string `json:"name"`
+	Tenant  string `json:"tenant"`
+	Machine string `json:"machine"`
+	Admin   bool   `json:"admin"`
+	// Role is empty from a server that predates roles.
+	Role string `json:"role"`
+}
+
+// Me asks who this machine acts for. Roles change in the console after
+// login, so status and publish ask rather than trust the enrollment.
+func (c Client) Me(ctx context.Context, token string) (Me, error) {
+	var out Me
+	err := c.call(ctx, http.MethodGet, "/v1/me", token, nil, &out)
+	return out, err
+}
+
+// RoleName is the member's role: admin, reviewer, developer, or auditor.
+// A server that predates roles sends only the admin flag, which reads as
+// admin or member.
+func (e Enrollment) RoleName() string { return roleName(e.Role, e.Admin) }
+
+// WithRole copies what the server said now over what login stored.
+func (e Enrollment) WithRole(m Me) Enrollment {
+	e.Admin, e.Role = m.Admin, m.Role
+	return e
+}
+
+func roleName(role string, admin bool) string {
+	switch {
+	case role != "":
+		return role
+	case admin:
+		return "admin"
+	default:
+		return "member"
+	}
 }
 
 // Policy fetches the current signed bundle. A 404 means nothing is published.
