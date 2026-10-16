@@ -90,7 +90,7 @@ func TestLoginWaitsForApprovalAndVerifiesThePolicy(t *testing.T) {
 	}
 }
 
-func TestRefreshTakesNewerAndRefusesForgedOrOlder(t *testing.T) {
+func TestRefreshTakesNewerAndKeepsTheCacheOnAForgedOrOlderBundle(t *testing.T) {
 	f, c := newFake(t)
 	en, err := Login(context.Background(), c, "mbp", &strings.Builder{})
 	if err != nil {
@@ -100,14 +100,47 @@ func TestRefreshTakesNewerAndRefusesForgedOrOlder(t *testing.T) {
 	if en, _, err = Refresh(context.Background(), c, en); err != nil || en.Revision != 2 {
 		t.Fatalf("revision %d err %v", en.Revision, err)
 	}
+
+	// A lower revision: r2 stays, checked again, and the note says why.
 	f.revision = 1
-	if _, _, err := Refresh(context.Background(), c, en); err == nil || !strings.Contains(err.Error(), "older") {
-		t.Fatalf("older revision accepted: %v", err)
+	got, note, err := Refresh(context.Background(), c, en)
+	if err != nil || got.Revision != 2 || note != "the server sent r1, older than r2; still on r2" || got.Refused != note {
+		t.Fatalf("older: revision %d note %q refused %q err %v", got.Revision, note, got.Refused, err)
 	}
+	if _, err := got.Bundle(); err != nil {
+		t.Fatalf("cached bundle after a refusal: %v", err)
+	}
+
+	// A tampered bundle: signed with another key.
 	_, other, _ := ed25519.GenerateKey(rand.Reader)
+	good := f.key
 	f.key, f.revision = other, 3
-	if _, _, err := Refresh(context.Background(), c, en); err == nil || !strings.Contains(err.Error(), "does not verify") {
-		t.Fatalf("forged revision accepted: %v", err)
+	got, note, err = Refresh(context.Background(), c, got)
+	if err != nil || got.Revision != 2 || note != "the server sent r3, which failed the signature check; still on r2" || got.Refused != note {
+		t.Fatalf("forged: revision %d note %q err %v", got.Revision, note, err)
+	}
+
+	// A good bundle clears the note.
+	f.key = good
+	got, note, err = Refresh(context.Background(), c, got)
+	if err != nil || got.Revision != 3 || note != "" || got.Refused != "" {
+		t.Fatalf("good after forged: revision %d note %q refused %q err %v", got.Revision, note, got.Refused, err)
+	}
+
+	// With nothing cached, a forged bundle is still refused outright.
+	empty := got
+	empty.Revision, empty.Document, empty.Published, empty.Signature = 0, "", "", ""
+	f.key = other
+	if _, _, err := Refresh(context.Background(), c, empty); err == nil || !strings.Contains(err.Error(), "does not verify") {
+		t.Fatalf("forged revision accepted with nothing cached: %v", err)
+	}
+
+	// A cached bundle that no longer verifies is not kept either.
+	f.key, f.revision = good, 1
+	broken := got
+	broken.Document = "version: 1\nname: changed\n"
+	if _, _, err := Refresh(context.Background(), c, broken); err == nil {
+		t.Fatal("a tampered cache was kept")
 	}
 }
 

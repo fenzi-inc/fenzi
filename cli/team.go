@@ -178,7 +178,7 @@ func cmdStatus(e env, args []string) (int, error) {
 		if err := writeJSON(e.stdout, doc); err != nil {
 			return 1, err
 		}
-		_ = tc.Heartbeat(e.ctx, en.Token, relay.Beat(e.ctx, client(), dirs, en.Revision))
+		_ = tc.Heartbeat(e.ctx, en.Token, statusBeat(e, dirs, en))
 		return 0, nil
 	}
 	u.Title("This machine", "")
@@ -195,8 +195,16 @@ func cmdStatus(e env, args []string) (int, error) {
 		u.Note(note)
 	}
 	u.Blank()
-	_ = tc.Heartbeat(e.ctx, en.Token, relay.Beat(e.ctx, client(), dirs, en.Revision))
+	_ = tc.Heartbeat(e.ctx, en.Token, statusBeat(e, dirs, en))
 	return 0, nil
+}
+
+// statusBeat is the heartbeat status sends, with the same notes as a
+// forwarder pass.
+func statusBeat(e env, dirs config.Dirs, en team.Enrollment) team.Beat {
+	b := relay.Beat(e.ctx, client(), dirs, en.Revision)
+	b.Notes = beatNotes(en)
+	return b
 }
 
 // teamClient talks to the team server with a time limit: a server that

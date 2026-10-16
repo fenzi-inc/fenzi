@@ -68,7 +68,16 @@ type Enrollment struct {
 	Document  string `json:"document,omitempty"`
 	Published string `json:"published,omitempty"`
 	Signature string `json:"signature,omitempty"`
+	// Refused says why the last bundle the server sent was not taken, while
+	// the cached revision stays in use. Empty once a good bundle arrives.
+	Refused string `json:"refused,omitempty"`
 }
+
+// ErrUnverified means a bundle failed the signature check.
+var ErrUnverified = errors.New("failed the signature check")
+
+// ErrOlder means a bundle is older than the revision already cached.
+var ErrOlder = errors.New("older than the cached revision")
 
 func (c Client) StartDevice(ctx context.Context, machine string) (Start, error) {
 	var out Start
@@ -108,17 +117,17 @@ func (c Client) Exchange(ctx context.Context, deviceCode string) (Enrollment, er
 }
 
 // Take stores a newer verified bundle. The same revision is left as it is.
-// An older revision is refused.
+// An older revision is refused with ErrOlder, a bad one with ErrUnverified.
 func (e *Enrollment) Take(b teamapi.Bundle) error {
 	pub, err := base64.StdEncoding.DecodeString(e.PublicKey)
 	if err != nil {
 		return err
 	}
 	if err := teamapi.Verify(pub, b); err != nil {
-		return err
+		return fmt.Errorf("revision %d %w: %v", b.Revision, ErrUnverified, err)
 	}
 	if e.Revision > 0 && b.Revision < e.Revision {
-		return fmt.Errorf("revision %d is older than %d", b.Revision, e.Revision)
+		return fmt.Errorf("revision %d is %w (%d)", b.Revision, ErrOlder, e.Revision)
 	}
 	if b.Revision == e.Revision {
 		return nil
@@ -205,6 +214,11 @@ type Beat struct {
 	// or unreadable.
 	ApprovalMode string        `json:"approval_mode"`
 	Sandboxes    []BeatSandbox `json:"sandboxes"`
+	// Notes are what the machine wants the console to see, such as a bundle
+	// it refused while it keeps its cached revision. Always sent, empty when
+	// there is nothing, so the server can clear an earlier note. A server
+	// that predates the field ignores it; an older CLI does not send it.
+	Notes []string `json:"notes"`
 }
 
 // BeatSandbox is one sandbox in this machine's local state. Revision is the
@@ -220,6 +234,9 @@ type BeatSandbox struct {
 func (c Client) Heartbeat(ctx context.Context, token string, b Beat) error {
 	if b.Sandboxes == nil {
 		b.Sandboxes = []BeatSandbox{}
+	}
+	if b.Notes == nil {
+		b.Notes = []string{}
 	}
 	_, err := c.callStatus(ctx, http.MethodPost, "/v1/heartbeat", token, b, nil)
 	return err

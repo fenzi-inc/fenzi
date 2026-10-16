@@ -113,4 +113,12 @@ type Proposal struct {
 	Reviewer    string `json:"reviewer,omitempty"`
 	Reason      string `json:"reason,omitempty"`
 	Applied     bool   `json:"applied"`
+	// Draft is true when the sandbox drafted the request from a refused
+	// connection, and false when the agent filed it. The machine decides with
+	// the rule boundlane requests uses. A server that predates the field
+	// reads every request as filed by the agent.
+	Draft bool `json:"draft"`
+	// Revision is the team revision the machine held when it reported the
+	// request, 0 when it held none.
+	Revision int `json:"revision,omitempty"`
 }

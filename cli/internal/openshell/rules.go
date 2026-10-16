@@ -98,6 +98,18 @@ func (p Proposal) Drafted() bool {
 	return p.Rationale == "" || drafted.MatchString(p.Rationale)
 }
 
+// IsDraft is the rule boundlane requests uses to split requests: a chunk the
+// log shows the agent filed is the agent's, and so is one whose rationale is
+// not a generated one. Everything else was drafted from a refused connection.
+// filed comes from AgentFiled and may be nil when the log could not be read.
+func (p Proposal) IsDraft(filed map[string]bool) bool {
+	return !filed[p.Chunk] && p.Drafted()
+}
+
+// RequestLogWindow is how many log lines are read to find the requests the
+// agent filed.
+const RequestLogWindow = 2000
+
 // Destination is the first host:port in Endpoints.
 func (p Proposal) Destination() string {
 	if f := strings.Fields(p.Endpoints); len(f) > 0 {

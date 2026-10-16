@@ -57,7 +57,11 @@ func Login(ctx context.Context, c Client, machine string, out io.Writer) (Enroll
 var ErrNoPolicy = errors.New("control plane unreachable, and no policy is cached")
 
 // Refresh fetches the current policy. If the server cannot be reached, the
-// cached policy is kept after its signature is checked again.
+// cached policy is kept after its signature is checked again. A bundle that
+// fails the signature check or is older than the cached one is not taken:
+// the cached revision stays in use, is checked again, and the note says so,
+// and e.Refused keeps the note for the heartbeat. With nothing cached such a
+// bundle is still an error.
 func Refresh(ctx context.Context, c Client, e Enrollment) (Enrollment, string, error) {
 	b, ok, err := c.Policy(ctx, e.Token)
 	if err != nil {
@@ -80,7 +84,24 @@ func Refresh(ctx context.Context, c Client, e Enrollment) (Enrollment, string, e
 		return e, "", nil
 	}
 	if err := e.Take(b); err != nil {
-		return e, "", err
+		var note string
+		switch {
+		case errors.Is(err, ErrUnverified):
+			note = fmt.Sprintf("the server sent r%d, which failed the signature check; still on r%d", b.Revision, e.Revision)
+		case errors.Is(err, ErrOlder):
+			note = fmt.Sprintf("the server sent r%d, older than r%d; still on r%d", b.Revision, e.Revision, e.Revision)
+		default:
+			return e, "", err
+		}
+		if e.Revision == 0 {
+			return e, "", err
+		}
+		if _, verr := e.Bundle(); verr != nil {
+			return e, "", verr
+		}
+		e.Refused = note
+		return e, note, nil
 	}
+	e.Refused = ""
 	return e, "", nil
 }

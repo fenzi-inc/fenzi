@@ -107,15 +107,17 @@ func relayOnce(ctx context.Context, e env) (relay.Report, error) {
 	watch := openshell.NewWatch(client())
 	defer watch.Close()
 	rep, err := relay.Pass(ctx, relay.Option{
-		Gateway:  client(),
-		Stream:   watch,
-		Client:   tc,
-		Token:    en.Token,
-		Tenant:   en.Tenant,
-		Machine:  en.Machine,
-		Revision: en.Revision,
-		Document: doc,
-		Dirs:     dirs,
+		Gateway:   client(),
+		Stream:    watch,
+		Client:    tc,
+		Token:     en.Token,
+		Tenant:    en.Tenant,
+		Machine:   en.Machine,
+		Revision:  en.Revision,
+		Document:  doc,
+		Dirs:      dirs,
+		Prover:    prover(),
+		BeatNotes: beatNotes(en),
 	})
 	if note != "" {
 		rep.Notes = append([]string{note}, rep.Notes...)
@@ -124,6 +126,15 @@ func relayOnce(ctx context.Context, e env) (relay.Report, error) {
 		return rep, errors.New("OpenShell gateway is not ready. Run boundlane doctor")
 	}
 	return rep, err
+}
+
+// beatNotes is what the heartbeat tells the console about this machine's
+// policy: a bundle it refused while it keeps the cached revision.
+func beatNotes(en team.Enrollment) []string {
+	if en.Refused == "" {
+		return []string{}
+	}
+	return []string{en.Refused}
 }
 
 // relayLockWait is how long a pass waits for another one to finish.

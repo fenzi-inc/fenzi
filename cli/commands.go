@@ -441,12 +441,12 @@ func cmdRequests(e env, args []string) (int, error) {
 		return 0, nil
 	}
 	var filed map[string]bool
-	if log, err := client().LogLines(e.ctx, sb.Name, 2000); err == nil {
+	if log, err := client().LogLines(e.ctx, sb.Name, openshell.RequestLogWindow); err == nil {
 		filed = openshell.AgentFiled(log)
 	}
 	var asked, drafts []openshell.Proposal
 	for _, p := range list {
-		if filed[p.Chunk] || !p.Drafted() {
+		if !p.IsDraft(filed) {
 			asked = append(asked, p)
 		} else {
 			drafts = append(drafts, p)
@@ -1022,16 +1022,20 @@ func cmdPolicy(e env, args []string) (int, error) {
 	if len(args) > 0 && args[0] == "publish" {
 		return cmdPublish(e, args[1:])
 	}
+	if len(args) > 0 && args[0] == "apply" {
+		return cmdPolicyApply(e, args[1:])
+	}
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		subHelp(e, "policy", "The policy for this folder is the one boundlane run uses: developer-default plus ./boundlane.yaml, if there is one, or the team's signed revision on a signed-in machine.", [][2]string{
 			{"policy check [file]", "Prove it stays inside the org boundary"},
 			{"policy compile [file]", "Print the OpenShell policy it becomes"},
+			{"policy apply", "Load host changes onto running sandboxes (Free plan)"},
 			{"policy publish <file>", "Send an org policy to the team (Team plan)"},
 		}, "--org treats the file as a whole org policy. --agent picks the agent, claude by default.")
 		return 0, nil
 	}
 	if args[0] != "compile" && args[0] != "check" {
-		return 1, fmt.Errorf("%q is not a policy command; try boundlane policy check, compile, or publish", args[0])
+		return 1, fmt.Errorf("%q is not a policy command; try boundlane policy check, compile, apply, or publish", args[0])
 	}
 	sub := args[0]
 	fs := newFlags("policy "+sub, e.stderr)

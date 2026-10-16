@@ -214,6 +214,11 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		return res, &PolicyError{Stage: "compiled policy", Result: r}
 	}
 	say("prover", "%s", r.Result)
+	// Kept so boundlane policy apply can tell a host change from one that
+	// needs a new sandbox.
+	if err := SaveResolved(runDir, o.Policy.Doc); err != nil {
+		return res, err
+	}
 
 	// Snapshot the project before upload, so changes can be compared later,
 	// and warn about files that look like secrets while nothing is created.

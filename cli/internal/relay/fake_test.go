@@ -7,6 +7,8 @@ import (
 	"context"
 	"net/http"
 	"os"
+
+	"boundlane/cli/internal/openshell"
 )
 
 var errStale = staleError("proposal inputs changed; evaluation refreshed, refetch and review again")
@@ -36,6 +38,25 @@ type fakeGW struct {
 	pendingCalls int
 	mode         string
 	modeErr      error
+	listed       []string
+	logCalls     int
+}
+
+// Recorded output of openshell-prover 0.1.2.
+const (
+	proverPass    = `{"schema_version":1,"prover_version":"0.1.2","check":"boundary","coverage":{"domains":["filesystem","network_l4","network_rest","process","landlock"]},"result":"within_boundary","exit_code":0,"inputs":{"candidate":"c.yaml","boundary":"b.yaml"},"counterexample":null,"reason_code":null,"reason":null}`
+	proverExceeds = `{"schema_version":1,"prover_version":"0.1.2","check":"boundary","coverage":{"domains":["filesystem","network_l4","network_rest","process","landlock"]},"result":"exceeds_boundary","exit_code":1,"inputs":{"candidate":"c.yaml","boundary":"b.yaml"},"counterexample":{"domain":"network","binary":null,"ancestor_binary":null,"binary_identity_required":false,"host":"paste.example.net","destination_ip":"8.8.8.8","trusted_gateway":false,"port":443,"protocol":"rest","method":"GET","path":"/"},"reason_code":null,"reason":null}`
+)
+
+// fakeProver answers every check with out and exit, as openshell-prover does.
+func fakeProver(out string, exit int) (openshell.Prover, *openshell.Fake) {
+	f := &openshell.Fake{Replies: map[string]openshell.Reply{"check": {Out: out, Exit: exit}}}
+	return openshell.Prover{R: f}, f
+}
+
+func passing() openshell.Prover {
+	p, _ := fakeProver(proverPass, 0)
+	return p
 }
 
 // Version and ComputeDrivers return what OpenShell 0.1.2 gave on the test machine.
@@ -49,8 +70,17 @@ func (g *fakeGW) GlobalSetting(context.Context, string) (string, error) {
 	}
 	return g.mode, g.modeErr
 }
-func (g *fakeGW) Sandboxes(context.Context) ([]string, error) { return []string{"bl-1"}, nil }
+
+// Sandboxes lists bl-1 unless the test set listed; an empty list is a
+// gateway with no sandbox left.
+func (g *fakeGW) Sandboxes(context.Context) ([]string, error) {
+	if g.listed != nil {
+		return g.listed, nil
+	}
+	return []string{"bl-1"}, nil
+}
 func (g *fakeGW) LogLines(context.Context, string, int) ([]byte, error) {
+	g.logCalls++
 	return g.logs, g.logErr
 }
 func (g *fakeGW) PendingRules(context.Context, string) ([]byte, error) {
