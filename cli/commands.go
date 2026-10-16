@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"boundlane/cli/internal/openshell"
 	"boundlane/cli/internal/run"
 	"boundlane/cli/internal/screen"
+	"boundlane/cli/internal/team"
 	"boundlane/cli/internal/tui"
 	"boundlane/cli/internal/workspace"
 	"boundlane/compiler"
@@ -27,6 +29,20 @@ import (
 
 func client() openshell.Client { return openshell.Client{R: openshell.Exec{Bin: "openshell"}} }
 func prover() openshell.Prover { return openshell.Prover{R: openshell.Exec{Bin: "openshell-prover"}} }
+
+// imageBuilder picks docker or podman to match the gateway's compute driver:
+// the one the connected gateway names, else compute_driver in the local
+// gateway config. When neither says, docker comes first, then podman.
+func imageBuilder(e env, out io.Writer) (engine.Builder, error) {
+	driver := ""
+	if drivers, err := client().ComputeDrivers(e.ctx); err == nil {
+		driver = engine.Driver(drivers)
+	}
+	if driver == "" {
+		driver = engine.Driver([]string{openshell.ConfiguredDriver()})
+	}
+	return engine.DetectFor(out, driver)
+}
 
 func cmdDoctor(e env, args []string) (int, error) {
 	fs := newFlags("doctor", e.stderr)
@@ -61,6 +77,15 @@ func cmdDoctor(e env, args []string) (int, error) {
 			}
 		}
 	}
+	// changing says what --fix is about to change, before it changes it. With
+	// --json it goes to standard error, so standard output stays one document.
+	changing := func(what string) {
+		if *asJSON {
+			fmt.Fprintln(e.stderr, "boundlane doctor --fix: "+what)
+			return
+		}
+		u.Note("Changing: " + what)
+	}
 	oc := client()
 	if !openshell.Installed("openshell") {
 		line("FAIL", "Runtime", fmt.Sprintf("OpenShell %s is not installed. The packages are on https://boundlane.dev/docs/install", openshell.Pinned))
@@ -89,6 +114,7 @@ func cmdDoctor(e env, args []string) (int, error) {
 		case err != nil:
 			line("FAIL", "Approvals", err.Error())
 		case mode == "auto" && *fix:
+			changing("removing the gateway-wide proposal_approval_mode (auto), so a person approves each request.")
 			if err := oc.GlobalSettingDelete(e.ctx, "proposal_approval_mode"); err != nil {
 				line("FAIL", "Approvals", "could not turn off automatic approval: "+err.Error())
 			} else {
@@ -113,12 +139,14 @@ func cmdDoctor(e env, args []string) (int, error) {
 			}
 			sort.Strings(keys)
 			for _, k := range keys {
-				switch {
-				case !*fix:
+				if !*fix {
 					line("FAIL", "Log and requests", fmt.Sprintf("the gateway sets %s to %s for every sandbox, so boundlane run cannot turn it on. Run boundlane doctor --fix to remove it", k, bad[k]))
-				case oc.GlobalSettingDelete(e.ctx, k) != nil:
+					continue
+				}
+				changing(fmt.Sprintf("removing the gateway-wide %s (%s), so boundlane run can turn it on for each sandbox.", k, bad[k]))
+				if oc.GlobalSettingDelete(e.ctx, k) != nil {
 					line("FAIL", "Log and requests", "could not remove the gateway-wide "+k)
-				default:
+				} else {
 					line("ok", "Log and requests", "fixed: removed the gateway-wide "+k)
 				}
 			}
@@ -130,7 +158,7 @@ func cmdDoctor(e env, args []string) (int, error) {
 	} else {
 		line("FAIL", "Policy check", "missing. It ships with the runtime's Homebrew, Debian, and RPM packages")
 	}
-	if b, err := engine.Detect(e.stdout); err != nil {
+	if b, err := imageBuilder(e, e.stdout); err != nil {
 		line("FAIL", "Image builds", err.Error())
 	} else {
 		line("ok", "Image builds", b.Bin+" is available")
@@ -242,19 +270,25 @@ func cmdRun(e env, args []string) (int, error) {
 	name := fs.String("name", "", "sandbox name, at most 19 characters (default bl-<folder>-<id>)")
 	policyFile := fs.String("policy", "", "policy file to use instead of ./boundlane.yaml")
 	noUpload := fs.Bool("no-upload", false, "start with an empty working folder")
+	allowSecrets := fs.Bool("allow-secrets", false, "copy files that look like secrets without asking; the warning is still printed")
 	if err := fs.Parse(args); err != nil {
 		return 1, err
 	}
 	rest := runArgs(fs.Args())
+	// The folder is checked before anything else, so a run from the home
+	// folder never reaches the gateway.
+	repo, err := cwd()
+	if err != nil {
+		return 1, err
+	}
+	if err := workspace.CheckFolder(repo, homeDir()); err != nil {
+		return 1, fmt.Errorf("boundlane run copies the folder it starts in, and %v. cd into one project folder first", err)
+	}
 	entry, err := agents.Get(rest[0])
 	if err != nil {
 		return 1, err
 	}
 	profile, err := entry.Profile()
-	if err != nil {
-		return 1, err
-	}
-	repo, err := cwd()
 	if err != nil {
 		return 1, err
 	}
@@ -266,11 +300,24 @@ func cmdRun(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	images, err := engine.Detect(e.stdout)
+	images, err := imageBuilder(e, e.stdout)
 	if err != nil {
 		return 1, err
 	}
 	u := tui.New(e.stdin, e.stdout)
+	var confirmSecrets func([]string) (bool, error)
+	if !*allowSecrets && u.Interactive() {
+		confirmSecrets = func([]string) (bool, error) {
+			i, err := u.Select("Copy them into the sandbox?", []tui.Option{
+				{Label: "No, stop here", Hint: "nothing is created; add them to .gitignore, then run again"},
+				{Label: "Yes, copy them", Hint: "boundlane run --allow-secrets skips this question"},
+			}, 0)
+			if errors.Is(err, tui.ErrCancelled) {
+				return false, nil
+			}
+			return i == 1, err
+		}
+	}
 	reviewed := false
 	res, err := run.Run(e.ctx, run.Deps{
 		OpenShell: client(),
@@ -283,7 +330,7 @@ func cmdRun(e env, args []string) (int, error) {
 		Filter:    workspace.GitFilter,
 	}, run.Options{
 		Agent: entry, Profile: profile, Args: rest[1:], Repo: repo, Policy: resolved,
-		Name: *name, Keep: *keep, NoUpload: *noUpload,
+		Name: *name, Keep: *keep, NoUpload: *noUpload, ConfirmSecrets: confirmSecrets,
 		OnExit: func(sandbox string) (bool, error) {
 			if !u.Interactive() {
 				return false, nil
@@ -308,6 +355,13 @@ func cmdRun(e env, args []string) (int, error) {
 			return i == 0, err
 		},
 	})
+	if errors.Is(err, run.ErrSecretsDeclined) {
+		u.Blank()
+		u.Skip("Stopped", "nothing was created")
+		u.Note("Add those files to .gitignore, or move them out of this folder, then run boundlane run again.")
+		u.Blank()
+		return 1, nil
+	}
 	if err != nil {
 		return 1, err
 	}
@@ -560,16 +614,14 @@ func denyOne(e env, u *tui.UI, sb config.Sandbox, id, reason string) error {
 
 // chunk expands a request id prefix against the sandbox's pending requests.
 func chunk(e env, sandbox, prefix string) (string, error) {
-	out, err := client().PendingRules(e.ctx, sandbox)
-	if err != nil {
-		return "", err
-	}
-	return openshell.ResolveChunk(openshell.ParseRules(out), prefix)
+	p, err := pending(e, sandbox, prefix)
+	return p.Chunk, err
 }
 
 func cmdApprove(e env, args []string) (int, error) {
 	fs := newFlags("approve", e.stderr)
 	sandbox := fs.String("sandbox", "", "sandbox name (default: the latest running one for this folder)")
+	save := fs.Bool("save", false, "also add the host to the project's boundlane.yaml, so the next sandbox there has it (Free plan)")
 	asJSON := jsonFlag(fs)
 	pos, err := parse(fs, args)
 	if err != nil {
@@ -578,29 +630,138 @@ func cmdApprove(e env, args []string) (int, error) {
 	if len(pos) != 1 {
 		return 1, errors.New("name the request: boundlane approve <id>. boundlane requests lists them and can approve them for you")
 	}
+	if *save && *asJSON {
+		return 1, errors.New("--save prints what it wrote and the policy check; drop --json")
+	}
 	dirs, err := config.Default()
 	if err != nil {
 		return 1, err
+	}
+	if *save {
+		if err := refuseTeamSave(dirs); err != nil {
+			return 1, err
+		}
 	}
 	sb, err := pickSandbox(e, dirs, *sandbox, true)
 	if err != nil {
 		return 1, err
 	}
-	id, err := chunk(e, sb.Name, pos[0])
+	p, err := pending(e, sb.Name, pos[0])
 	if err != nil {
 		return 1, err
 	}
+	id := p.Chunk
 	if *asJSON {
 		if err := client().RuleApprove(e.ctx, sb.Name, id); err != nil {
 			return 1, err
 		}
 		return 0, writeJSON(e.stdout, jsonAnswer{ID: id, Sandbox: sb.Name, Result: "approved", Note: approvedNote})
 	}
+	// With --save, everything that could stop the save is checked before
+	// the approval, so a refusal leaves nothing half done.
+	var host savedHost
+	var file *projectFile
+	repo := sb.Repo
+	if *save {
+		if host, err = requestHost(p.Endpoints); err != nil {
+			return 1, fmt.Errorf("not approved: %v. Approve it without --save and add the host to %s by hand", err, run.ProjectFile)
+		}
+		if repo == "" {
+			if repo, err = cwd(); err != nil {
+				return 1, err
+			}
+		}
+		if file, err = loadProject(filepath.Join(repo, run.ProjectFile)); err != nil {
+			return 1, fmt.Errorf("not approved: %w", err)
+		}
+	}
 	u := tui.New(e.stdin, e.stdout)
 	if err := approveOne(e, u, sb, id); err != nil {
 		return 1, err
 	}
+	if !*save {
+		return 0, nil
+	}
+	return saveApproved(e, u, sb, repo, file, host)
+}
+
+// refuseTeamSave stops approve --save on a signed-in machine: its policy is
+// the team's signed revision, and a project file is not used.
+func refuseTeamSave(dirs config.Dirs) error {
+	en, err := team.Load(dirs)
+	if errors.Is(err, team.ErrNotEnrolled) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	where := "the console"
+	if en.Server != "" {
+		where = en.Server + "/console"
+	}
+	return fmt.Errorf("this machine uses the team policy, so --save has nowhere to write. An admin adds the host to the team policy and publishes it from %s. Approve without --save to let this sandbox through now", where)
+}
+
+// saveApproved writes the approved host into the project file, then runs
+// the check boundlane policy check runs and prints its result.
+func saveApproved(e env, u *tui.UI, sb config.Sandbox, repo string, file *projectFile, host savedHost) (int, error) {
+	out := file.add(host)
+	if !out.Saved {
+		u.Skip("Not saved", out.Detail)
+		u.Blank()
+		return 0, nil
+	}
+	if err := file.write(); err != nil {
+		return 1, fmt.Errorf("approved, but %s was not changed: %w", run.ProjectFile, err)
+	}
+	u.Done("Saved", out.Detail+", in "+tilde(file.path, homeDir()))
+	switch {
+	case host.L4:
+		u.Note("The request named no method or path, so the approved rule lets any traffic through to " + host.key() + ". The saved line is read-only: GET, HEAD, and OPTIONS. Change it in " + run.ProjectFile + " if the agent needs more.")
+	case host.Widened:
+		u.Note("The request allowed " + strings.TrimPrefix(host.Rule, "L7 rest, allow ") + " only. The saved line is read-only, the closest level " + run.ProjectFile + " has: GET, HEAD, and OPTIONS on every path.")
+	}
+	u.Note("The next sandbox in this folder starts with it. This one already has the approval.")
+	name := sb.Agent
+	if name == "" {
+		name = defaultAgent()
+	}
+	entry, err := agents.Get(name)
+	if err != nil {
+		return 1, err
+	}
+	resolved, err := run.ResolveFree(repo, "")
+	if err != nil {
+		return 1, err
+	}
+	r, err := proveResolved(e, resolved, entry, "")
+	if err != nil {
+		return 1, err
+	}
+	printCheck(u, r, resolved.Sources, entry)
+	if !r.Passed() {
+		return 0, &run.PolicyError{Stage: "policy check", Result: r}
+	}
 	return 0, nil
+}
+
+// pending finds a request by id prefix among the sandbox's pending requests.
+func pending(e env, sandbox, prefix string) (openshell.Proposal, error) {
+	out, err := client().PendingRules(e.ctx, sandbox)
+	if err != nil {
+		return openshell.Proposal{}, err
+	}
+	list := openshell.ParseRules(out)
+	id, err := openshell.ResolveChunk(list, prefix)
+	if err != nil {
+		return openshell.Proposal{}, err
+	}
+	for _, p := range list {
+		if p.Chunk == id {
+			return p, nil
+		}
+	}
+	return openshell.Proposal{Chunk: id}, nil
 }
 
 func cmdDeny(e env, args []string) (int, error) {
@@ -643,8 +804,8 @@ func cmdLog(e env, args []string) (int, error) {
 	fs := newFlags("log", e.stderr)
 	sandbox := fs.String("sandbox", "", "sandbox name (default: the latest for this folder)")
 	deny := fs.Bool("deny", false, "denies only")
-	since := fs.String("since", "", "for example 10m or 2h (running sandboxes)")
-	follow := fs.Bool("follow", false, "keep printing new events (running sandboxes)")
+	since := fs.String("since", "", "only decisions newer than this, for example 10m or 2h")
+	follow := fs.Bool("follow", false, "keep printing new decisions (running sandboxes)")
 	rawOut := fs.Bool("raw", false, "print the sandbox's full log as OpenShell wrote it, not only decisions")
 	asJSON := jsonFlag(fs)
 	if _, err := parse(fs, args); err != nil {
@@ -652,6 +813,14 @@ func cmdLog(e env, args []string) (int, error) {
 	}
 	if *rawOut && *asJSON {
 		return 1, errors.New("--raw prints the runtime's own lines; drop it or drop --json")
+	}
+	var cut time.Time
+	if *since != "" {
+		d, err := time.ParseDuration(*since)
+		if err != nil {
+			return 1, fmt.Errorf("--since: %w", err)
+		}
+		cut = time.Now().Add(-d)
 	}
 	dirs, err := config.Default()
 	if err != nil {
@@ -663,10 +832,13 @@ func cmdLog(e env, args []string) (int, error) {
 	}
 	c := client()
 	if sb.Running && *follow {
-		if *asJSON {
+		switch {
+		case *asJSON:
 			return 0, followJSON(e, sb.Name, *since, *deny)
+		case *rawOut:
+			return 0, c.Logs(e.ctx, sb.Name, *since, true)
 		}
-		return 0, c.Logs(e.ctx, sb.Name, *since, true)
+		return 0, followTable(e, sb.Name, *since, *deny)
 	}
 	var raw []byte
 	if sb.Running {
@@ -685,12 +857,7 @@ func cmdLog(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	if *since != "" && !sb.Running {
-		d, err := time.ParseDuration(*since)
-		if err != nil {
-			return 1, fmt.Errorf("--since: %w", err)
-		}
-		cut := time.Now().Add(-d)
+	if !cut.IsZero() {
 		kept := recs[:0]
 		for _, r := range recs {
 			if r.Time.After(cut) {
@@ -708,38 +875,10 @@ func cmdLog(e env, args []string) (int, error) {
 		}
 		return 0, writeJSON(e.stdout, docs)
 	}
-	proc := func(p string) string {
-		if p == "" {
-			return "-"
-		}
-		return filepath.Base(p)
-	}
-	tone := func(action string) string {
-		switch strings.ToLower(action) {
-		case "allowed":
-			return "allow"
-		case "denied":
-			return "deny"
-		default:
-			return ""
-		}
-	}
-	var rows [][]screen.Cell
-	if *deny {
-		rows = append(rows, []screen.Cell{{Text: "time"}, {Text: "process"}, {Text: "destination"}, {Text: "reason"}})
-	} else {
-		rows = append(rows, []screen.Cell{{Text: "time"}, {Text: "action"}, {Text: "process"}, {Text: "destination"}, {Text: "rule"}})
-	}
+	rows := [][]screen.Cell{logHeader(*deny)}
 	for _, r := range recs {
-		t := r.Time.Local().Format("15:04:05")
-		switch {
-		case *deny && r.Denied() && !r.Reset():
-			rows = append(rows, []screen.Cell{{Text: t}, {Text: proc(r.Process)}, {Text: r.Destination}, {Text: dash(r.Reason), Tone: "deny"}})
-		case !*deny && r.Reset():
-			rows = append(rows, []screen.Cell{{Text: t}, {Text: "reset"}, {Text: proc(r.Process)}, {Text: r.Destination}, {Text: "policy changed, the client reconnects"}})
-		case !*deny:
-			action := strings.ToLower(r.Action)
-			rows = append(rows, []screen.Cell{{Text: t}, {Text: action, Tone: tone(action)}, {Text: proc(r.Process)}, {Text: r.Destination}, {Text: dash(r.Rule)}})
+		if row, ok := logRow(r, *deny); ok {
+			rows = append(rows, row)
 		}
 	}
 	u := tui.New(e.stdin, e.stdout)
@@ -765,6 +904,89 @@ func cmdLog(e env, args []string) (int, error) {
 	screen.New(e.stdout).Indented(4).Table(rows)
 	u.Blank()
 	return 0, nil
+}
+
+// logHeader is the first row of the log table.
+func logHeader(deny bool) []screen.Cell {
+	if deny {
+		return []screen.Cell{{Text: "time"}, {Text: "process"}, {Text: "destination"}, {Text: "reason"}}
+	}
+	return []screen.Cell{{Text: "time"}, {Text: "action"}, {Text: "process"}, {Text: "destination"}, {Text: "rule"}}
+}
+
+// logRow is one decision as a table row. ok is false for a record the view
+// leaves out: with deny, anything but a deny.
+func logRow(r forward.Record, deny bool) ([]screen.Cell, bool) {
+	proc := "-"
+	if r.Process != "" {
+		proc = filepath.Base(r.Process)
+	}
+	t := r.Time.Local().Format("15:04:05")
+	switch {
+	case deny && r.Denied() && !r.Reset():
+		return []screen.Cell{{Text: t}, {Text: proc}, {Text: r.Destination}, {Text: dash(r.Reason), Tone: "deny"}}, true
+	case deny:
+		return nil, false
+	case r.Reset():
+		return []screen.Cell{{Text: t}, {Text: "reset"}, {Text: proc}, {Text: r.Destination}, {Text: "policy changed, the client reconnects"}}, true
+	}
+	action := strings.ToLower(r.Action)
+	tone := ""
+	switch action {
+	case "allowed":
+		tone = "allow"
+	case "denied":
+		tone = "deny"
+	}
+	return []screen.Cell{{Text: t}, {Text: action, Tone: tone}, {Text: proc}, {Text: r.Destination}, {Text: dash(r.Rule)}}, true
+}
+
+// followWidths are the column widths of log --follow, which prints each row
+// as it arrives and so cannot measure the rows first. The last column is
+// not padded.
+var followWidths = map[bool][]int{
+	false: {10, 9, 18, 44},
+	true:  {10, 18, 44},
+}
+
+// followTable is log --follow as text: the same rows as the table, from the
+// same decisions --json prints, one line each as they arrive.
+func followTable(e env, sandbox, since string, denyOnly bool) error {
+	scr := screen.New(e.stdout)
+	widths := followWidths[denyOnly]
+	line := func(row []screen.Cell, header bool) error {
+		var b strings.Builder
+		b.WriteString("    ")
+		for i, c := range row {
+			text := c.Text
+			if i < len(widths) && len(text) < widths[i] {
+				text += strings.Repeat(" ", widths[i]-len(text))
+			} else if i < len(widths) {
+				text += "  "
+			}
+			switch {
+			case header:
+				text = scr.Dim(text)
+			case c.Tone == "allow":
+				text = scr.Allow(text)
+			case c.Tone == "deny":
+				text = scr.Deny(text)
+			}
+			b.WriteString(text)
+		}
+		_, err := fmt.Fprintln(e.stdout, strings.TrimRight(b.String(), " "))
+		return err
+	}
+	if err := line(logHeader(denyOnly), true); err != nil {
+		return err
+	}
+	return followRecords(e, sandbox, since, func(r forward.Record) error {
+		row, ok := logRow(r, denyOnly)
+		if !ok {
+			return nil
+		}
+		return line(row, false)
+	})
 }
 
 // staged loads the snapshot and staged copy for a sandbox.
@@ -869,6 +1091,33 @@ func cmdPolicy(e env, args []string) (int, error) {
 		return 1, err
 	}
 
+	if sub == "check" {
+		r, err := proveResolved(e, resolved, entry, *boundary)
+		if err != nil {
+			return 1, err
+		}
+		from := resolved.Sources
+		if from == "" {
+			from = "developer-default"
+		}
+		if *asJSON {
+			missing := r.MissingDomains()
+			if missing == nil {
+				missing = []string{}
+			}
+			doc := jsonPolicyCheck{Passed: r.Passed(), Result: r.Result, Checked: from, Agent: entry.Display, Example: r.Example(), Reason: r.Reason, NotChecked: missing}
+			if err := writeJSON(e.stdout, doc); err != nil {
+				return 1, err
+			}
+		} else {
+			printCheck(tui.New(e.stdin, e.stdout), r, from, entry)
+		}
+		if !r.Passed() {
+			return 0, &run.PolicyError{Stage: "policy check", Result: r}
+		}
+		return 0, nil
+	}
+
 	tmp, err := os.MkdirTemp("", "boundlane-policy-")
 	if err != nil {
 		return 1, err
@@ -879,61 +1128,53 @@ func cmdPolicy(e env, args []string) (int, error) {
 		return 1, err
 	}
 
-	if sub == "compile" {
-		src := c.Policy
-		switch *emit {
-		case "policy":
-		case "boundary":
-			src = c.Boundary
-		default:
-			return 1, fmt.Errorf("--emit is policy or boundary, not %q", *emit)
-		}
-		out, err := os.ReadFile(src)
-		if err != nil {
-			return 1, err
-		}
-		if *output != "" {
-			return 0, os.WriteFile(*output, out, 0o644)
-		}
-		e.stdout.Write(out)
-		return 0, nil
+	src := c.Policy
+	switch *emit {
+	case "policy":
+	case "boundary":
+		src = c.Boundary
+	default:
+		return 1, fmt.Errorf("--emit is policy or boundary, not %q", *emit)
 	}
-
-	b := c.Boundary
-	if *boundary != "" {
-		b = *boundary
-	}
-	r, err := prover().Check(e.ctx, c.Policy, b)
+	out, err := os.ReadFile(src)
 	if err != nil {
 		return 1, err
 	}
-	from := resolved.Sources
-	if from == "" {
-		from = "developer-default"
+	if *output != "" {
+		return 0, os.WriteFile(*output, out, 0o644)
 	}
-	if *asJSON {
-		missing := r.MissingDomains()
-		if missing == nil {
-			missing = []string{}
-		}
-		doc := jsonPolicyCheck{Passed: r.Passed(), Result: r.Result, Checked: from, Agent: entry.Display, Example: r.Example(), Reason: r.Reason, NotChecked: missing}
-		if err := writeJSON(e.stdout, doc); err != nil {
-			return 1, err
-		}
-		if !r.Passed() {
-			return 0, &run.PolicyError{Stage: "policy check", Result: r}
-		}
-		return 0, nil
+	e.stdout.Write(out)
+	return 0, nil
+}
+
+// proveResolved compiles a resolved policy for an agent and runs the prover
+// on it, against boundary or, when that is "", the boundary derived from the
+// same policy. This is boundlane policy check.
+func proveResolved(e env, resolved run.Resolved, entry agents.Entry, boundary string) (openshell.Result, error) {
+	tmp, err := os.MkdirTemp("", "boundlane-policy-")
+	if err != nil {
+		return openshell.Result{}, err
 	}
-	u := tui.New(e.stdin, e.stdout)
+	defer os.RemoveAll(tmp)
+	c, err := run.WriteCompiled(resolved.Doc, entry, tmp, resolved.Sources)
+	if err != nil {
+		return openshell.Result{}, err
+	}
+	if boundary == "" {
+		boundary = c.Boundary
+	}
+	return prover().Check(e.ctx, c.Policy, boundary)
+}
+
+// printCheck prints a policy check result as boundlane policy check does.
+func printCheck(u *tui.UI, r openshell.Result, from string, entry agents.Entry) {
 	u.Blank()
 	if r.Passed() {
 		u.Done("Policy check", "inside the boundary")
-		u.Note("Checked " + from + " for " + entry.Display + ".")
 	} else {
 		u.Problem("Policy check", r.Result)
-		u.Note("Checked " + from + " for " + entry.Display + ".")
 	}
+	u.Note("Checked " + from + " for " + entry.Display + ".")
 	if ex := r.Example(); ex != "" {
 		u.Println("    " + u.Bold("Example") + "  " + ex)
 	}
@@ -944,10 +1185,6 @@ func cmdPolicy(e env, args []string) (int, error) {
 		u.Println("    " + u.Bold("Not checked") + "  " + strings.Join(m, ", "))
 	}
 	u.Blank()
-	if !r.Passed() {
-		return 0, &run.PolicyError{Stage: "policy check", Result: r}
-	}
-	return 0, nil
 }
 
 // subHelp is what a command with subcommands prints when given none.
@@ -985,7 +1222,7 @@ func cmdAgents(e env, args []string) (int, error) {
 		if err != nil {
 			return 1, err
 		}
-		b, err := engine.Detect(e.stdout)
+		b, err := imageBuilder(e, e.stdout)
 		if err != nil {
 			return 1, err
 		}

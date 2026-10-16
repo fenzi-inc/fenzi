@@ -10,6 +10,7 @@ import (
 	"boundlane/cli/internal/config"
 	"boundlane/cli/internal/team"
 	"boundlane/cli/internal/tui"
+	"boundlane/cli/internal/workspace"
 )
 
 // cmdHome is `boundlane` with no command on a terminal: what is going on in
@@ -78,7 +79,7 @@ func cmdHome(e env, _ []string) (int, error) {
 	if waiting.changes != nil {
 		add("review", "Review the agent's changes", plural(len(waiting.changes), "file", "files")+" waiting")
 	}
-	if usableProject(dir, home) == nil {
+	if workspace.CheckFolder(dir, home) == nil {
 		add("start", "Start "+agent.Display+" here", "boundlane run")
 	} else {
 		add("start", "Start "+agent.Display+" in a project folder", "boundlane run")
@@ -107,7 +108,7 @@ func cmdHome(e env, _ []string) (int, error) {
 	case "review":
 		return waiting.offer(e)
 	case "start":
-		if usableProject(dir, home) != nil {
+		if workspace.CheckFolder(dir, home) != nil {
 			p, err := setupProject(u, agent, false)
 			if errors.Is(err, tui.ErrCancelled) {
 				return 0, nil

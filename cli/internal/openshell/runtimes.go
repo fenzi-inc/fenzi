@@ -24,8 +24,10 @@ type Runtime struct {
 	Running bool
 	// Attach means Start may prompt, for example sudo for a password.
 	Attach bool
-	// Tested means a gateway on this runtime has run with Boundlane, or the
-	// upstream docs name it.
+	// Tested means a gateway on this runtime has run with Boundlane (colima),
+	// or it is the upstream docs' path on a Mac (Docker Desktop). Docker
+	// Engine and Podman on Linux are named upstream but have not been run
+	// with Boundlane, so setup says so.
 	Tested bool
 }
 
@@ -82,14 +84,14 @@ func detect(p probe) []Runtime {
 		}
 	case "linux":
 		if p.has("docker") {
-			r := Runtime{Name: "Docker Engine", Socket: "/var/run/docker.sock", Start: []string{"sudo", "systemctl", "start", "docker"}, Attach: true, Tested: true}
+			r := Runtime{Name: "Docker Engine", Socket: "/var/run/docker.sock", Start: []string{"sudo", "systemctl", "start", "docker"}, Attach: true}
 			if rootless := filepath.Join(p.xdg, "docker.sock"); p.xdg != "" && p.exists(rootless) {
 				r.Socket, r.Start, r.Attach = rootless, []string{"systemctl", "--user", "start", "docker"}, false
 			}
 			add(r)
 		}
 		if p.has("podman") && p.xdg != "" {
-			add(Runtime{Name: "Podman", Socket: filepath.Join(p.xdg, "podman", "podman.sock"), Start: []string{"systemctl", "--user", "start", "podman.socket"}, Tested: true})
+			add(Runtime{Name: "Podman", Socket: filepath.Join(p.xdg, "podman", "podman.sock"), Start: []string{"systemctl", "--user", "start", "podman.socket"}})
 		}
 	}
 	return out
@@ -185,6 +187,9 @@ func notRunning(n int) string {
 }
 
 type gatewayConfig struct{ driver, socket string }
+
+// ConfiguredDriver is compute_driver from the local gateway config, or "".
+func ConfiguredDriver() string { return readGatewayConfig(GatewayConfig()).driver }
 
 // readGatewayConfig reads the two keys setup cares about from gateway.toml.
 // It is not a TOML parser; it only reads `key = "value"` lines.

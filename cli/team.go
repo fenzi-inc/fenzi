@@ -58,7 +58,14 @@ func cmdPublish(e env, args []string) (int, error) {
 		return 1, err
 	}
 	if !en.Admin {
-		return 1, errors.New("publishing needs an admin. Sign in as dana@acme.dev on the local server")
+		who, where := "this account", "the console"
+		if en.Email != "" {
+			who = en.Email
+		}
+		if en.Server != "" {
+			where = en.Server + "/console"
+		}
+		return 1, fmt.Errorf("publishing needs a team admin, and %s is a member. An admin publishes from %s, or signs in on this machine with boundlane login", who, where)
 	}
 	raw, err := os.ReadFile(pos[0])
 	if err != nil {

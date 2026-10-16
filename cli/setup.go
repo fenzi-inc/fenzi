@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -17,7 +18,8 @@ import (
 	"boundlane/cli/internal/openshell"
 	"boundlane/cli/internal/run"
 	"boundlane/cli/internal/tui"
-	"boundlane/policies"
+	"boundlane/cli/internal/workspace"
+	"boundlane/compiler"
 )
 
 // quietExit ends a command whose reason is already on screen.
@@ -110,7 +112,7 @@ func setup(e env, u *tui.UI, dirs config.Dirs, release func()) error {
 			return setupImage(e, u, dirs, agent, back)
 		},
 		func(back bool) (bool, error) {
-			s, err := setupReady(u, agent, project, back)
+			s, err := setupReady(e, u, dirs, agent, project, back)
 			start = s
 			return true, err
 		},
@@ -419,7 +421,7 @@ gateway:
 		return quietExit(3)
 	}
 
-	if b, err := engine.Detect(nil); err != nil {
+	if b, err := imageBuilder(e, nil); err != nil {
 		u.Problem("Image builds", "Docker or Podman is needed")
 		u.Note("Boundlane builds each agent's image on this machine. Install Docker or Podman, then run boundlane setup again.")
 		return quietExit(3)
@@ -588,7 +590,7 @@ func modelHost(a agents.Entry) string {
 func setupProject(u *tui.UI, a agents.Entry, back bool) (string, error) {
 	home, _ := os.UserHomeDir()
 	def := ""
-	if wd, err := cwd(); err == nil && usableProject(wd, home) == nil {
+	if wd, err := cwd(); err == nil && workspace.CheckFolder(wd, home) == nil {
 		def = tilde(wd, home)
 	}
 	u.Note("The agent works on a copy of this folder. .gitignore is respected and .git is left out. Your files change only when you run boundlane apply.")
@@ -606,8 +608,8 @@ func setupProject(u *tui.UI, a agents.Entry, back bool) (string, error) {
 		if abs, err := filepath.Abs(dir); err == nil {
 			dir = abs
 		}
-		if err := usableProject(dir, home); err != nil {
-			u.Problem("Folder", err.Error())
+		if err := workspace.CheckFolder(dir, home); err != nil {
+			u.Problem("Folder", err.Error()+". Pick one project folder; the sandbox gets a copy of it")
 			continue
 		}
 		u.Done("Folder", tilde(dir, home))
@@ -615,26 +617,8 @@ func setupProject(u *tui.UI, a agents.Entry, back bool) (string, error) {
 	}
 }
 
-func usableProject(dir, home string) error {
-	info, err := os.Stat(dir)
-	if err != nil {
-		return errors.New("that folder does not exist")
-	}
-	if !info.IsDir() {
-		return errors.New("that is a file, not a folder")
-	}
-	clean := filepath.Clean(dir)
-	if clean == filepath.Clean(home) {
-		return errors.New("that is your home folder. Pick one project; the sandbox gets a copy of it")
-	}
-	if clean == "/" {
-		return errors.New("pick one project folder, not the whole disk")
-	}
-	return nil
-}
-
 func setupImage(e env, u *tui.UI, dirs config.Dirs, a agents.Entry, back bool) (bool, error) {
-	b, err := engine.Detect(nil)
+	b, err := imageBuilder(e, nil)
 	if err != nil {
 		return false, err
 	}
@@ -687,27 +671,59 @@ func buildImage(e env, u *tui.UI, dirs config.Dirs, a agents.Entry, b engine.Bui
 	return nil
 }
 
-func setupReady(u *tui.UI, a agents.Entry, project string, back bool) (bool, error) {
+func setupReady(e env, u *tui.UI, dirs config.Dirs, a agents.Entry, project string, back bool) (bool, error) {
 	home := homeDir()
-	doc := policies.DeveloperDefault()
 	lines := []string{
 		row(u, "Agent", a.Display+" "+a.Version),
 		row(u, "Folder", tilde(project, home)),
-		row(u, "Policy", doc.Name),
-		"",
-		u.Allow(fmt.Sprintf("%-9s", "Reaches")) + " " + modelHost(a) + ", with your key",
 	}
-	for _, h := range doc.Hosts {
-		lines = append(lines, strings.Repeat(" ", 10)+h.Host+", "+h.Access)
-	}
-	lines = append(lines,
-		u.Deny(fmt.Sprintf("%-9s", "Waits"))+" any other host, until you approve it",
-		u.Dim(fmt.Sprintf("%-9s", "Never"))+" your home folder or the real key",
-	)
+	lines = append(lines, readyPolicy(e, u, dirs, a, project)...)
 	u.Blank()
 	u.Box("Ready", lines)
 	u.Blank()
 	return confirmBack(u, "Start "+a.Display+" now?", "Start it in "+tilde(project, home), "Not now", back)
+}
+
+// readyPolicy describes the policy boundlane run will use in project,
+// resolved the way run resolves it: the signed team revision on a signed-in
+// machine, else developer-default with the project's boundlane.yaml over it.
+func readyPolicy(e env, u *tui.UI, dirs config.Dirs, a agents.Entry, project string) []string {
+	quiet := env{ctx: e.ctx, stdin: e.stdin, stdout: io.Discard, stderr: io.Discard}
+	resolved, err := resolvePolicy(quiet, dirs, project, "")
+	if err == nil {
+		// run compiles it before anything starts; a document that does not
+		// compile stops run there.
+		_, err = compiler.Compile(resolved.Doc, compiler.Target{Agent: a.CompilerAgent()})
+	}
+	if err != nil {
+		msg := strings.Join(strings.Fields(err.Error()), " ")
+		return []string{
+			row(u, "Policy", u.Deny("cannot be used: ")+msg),
+			strings.Repeat(" ", 10) + "boundlane run stops until it is fixed. boundlane policy check says why.",
+		}
+	}
+	lines := []string{row(u, "Policy", resolved.Sources)}
+	if resolved.TeamRevision > 0 {
+		if _, err := os.Stat(filepath.Join(project, run.ProjectFile)); err == nil {
+			lines = append(lines, strings.Repeat(" ", 10)+u.Dim(run.ProjectFile+" in this folder is not used; the team policy applies"))
+		}
+	}
+	lines = append(lines, "", u.Allow(fmt.Sprintf("%-9s", "Reaches"))+" "+modelHost(a)+", with your key")
+	for _, h := range resolved.Doc.WithDefaults().Hosts {
+		host := h.Host
+		if h.Port != 443 {
+			host += fmt.Sprintf(":%d", h.Port)
+		}
+		access := h.Access
+		if len(h.Allow) > 0 {
+			access += ": " + strings.Join(h.Allow, ", ")
+		}
+		lines = append(lines, strings.Repeat(" ", 10)+host+", "+access)
+	}
+	return append(lines,
+		u.Deny(fmt.Sprintf("%-9s", "Waits"))+" any other host, until you approve it",
+		u.Dim(fmt.Sprintf("%-9s", "Never"))+" your home folder or the real key",
+	)
 }
 
 func setupFinish(e env, u *tui.UI, a agents.Entry, project string, start bool, release func()) error {

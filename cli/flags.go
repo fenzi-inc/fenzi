@@ -30,7 +30,7 @@ var usage = map[string]string{
 	"boundlane connect":  "boundlane connect [sandbox] [-- agent arguments]",
 	"boundlane stop":     "boundlane stop [sandbox]",
 	"boundlane rm":       "boundlane rm <sandbox> [<sandbox>...] | boundlane rm --finished",
-	"boundlane approve":  "boundlane approve <id>",
+	"boundlane approve":  "boundlane approve <id> [--save]",
 	"boundlane deny":     `boundlane deny <id> --reason "text"`,
 	"boundlane requests": "boundlane requests",
 	"boundlane diff":     "boundlane diff",
