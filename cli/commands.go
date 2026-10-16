@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -643,6 +644,8 @@ func cmdApprove(e env, args []string) (int, error) {
 	fs := newFlags("approve", e.stderr)
 	sandbox := fs.String("sandbox", "", "sandbox name (default: the latest running one for this folder)")
 	save := fs.Bool("save", false, "also add the host to the project's boundlane.yaml, so the next sandbox there has it (Free plan)")
+	dryRun := fs.Bool("dry-run", false, "with --save: show the change to boundlane.yaml and its policy check; approve nothing, write nothing")
+	policyFrom := fs.String("policy-from", "", "with --save: use this file as the new boundlane.yaml. It is checked first; when the check fails, nothing is approved or written")
 	asJSON := jsonFlag(fs)
 	pos, err := parse(fs, args)
 	if err != nil {
@@ -651,15 +654,20 @@ func cmdApprove(e env, args []string) (int, error) {
 	if len(pos) != 1 {
 		return 1, errors.New("name the request: boundlane approve <id>. boundlane requests lists them and can approve them for you")
 	}
-	if *save && *asJSON {
-		return 1, errors.New("--save prints what it wrote and the policy check; drop --json")
+	switch {
+	case *dryRun && !*save:
+		return 1, errors.New("--dry-run previews --save: boundlane approve <id> --save --dry-run")
+	case *policyFrom != "" && !*save:
+		return 1, errors.New("--policy-from goes with --save: boundlane approve <id> --save --policy-from <file>")
+	case *save && *asJSON && !*dryRun:
+		return 1, errors.New("--save prints what it wrote and the policy check; drop --json, or add --dry-run for the preview as JSON")
 	}
 	dirs, err := config.Default()
 	if err != nil {
 		return 1, err
 	}
 	if *save {
-		if err := refuseTeamSave(dirs); err != nil {
+		if err := refuseTeamSave(e, dirs, *sandbox, pos[0]); err != nil {
 			return 1, err
 		}
 	}
@@ -674,6 +682,9 @@ func cmdApprove(e env, args []string) (int, error) {
 	id := p.Chunk
 	if err := checkTeamBoundary(sb, p.Destination()); err != nil {
 		return 1, err
+	}
+	if *save && (*dryRun || *policyFrom != "") {
+		return approveFromPreview(e, sb, p, *policyFrom, *dryRun, *asJSON)
 	}
 	if *asJSON {
 		if err := client().RuleApprove(e.ctx, sb.Name, id); err != nil {
@@ -709,9 +720,61 @@ func cmdApprove(e env, args []string) (int, error) {
 	return saveApproved(e, u, sb, repo, file, host)
 }
 
+// approveFromPreview is approve --save with --dry-run or --policy-from. The
+// dry run prints the change and its check and stops there. With
+// --policy-from alone, the file given is checked first, and only a file that
+// passes is written, after the request is approved.
+func approveFromPreview(e env, sb config.Sandbox, p openshell.Proposal, from string, dryRun, asJSON bool) (int, error) {
+	pv, err := previewSave(e, sb, p, from)
+	if err != nil {
+		if dryRun {
+			return 1, err
+		}
+		return 1, fmt.Errorf("not approved: %w", err)
+	}
+	var fail error
+	if !pv.Check.Passed() {
+		fail = &run.PolicyError{Stage: "policy check", Result: pv.Check}
+	}
+	if dryRun {
+		if asJSON {
+			if err := writeJSON(e.stdout, pv.json()); err != nil {
+				return 1, err
+			}
+		} else {
+			printPreview(tui.New(e.stdin, e.stdout), pv, p.Chunk)
+		}
+		return 0, fail
+	}
+	u := tui.New(e.stdin, e.stdout)
+	if fail != nil {
+		printCheck(u, pv.Check, pv.Sources, "", pv.Agent)
+		u.Note("Nothing was approved, and " + run.ProjectFile + " was not changed.")
+		u.Blank()
+		return 0, fail
+	}
+	if err := approveOne(e, u, sb, p.Chunk); err != nil {
+		return 1, err
+	}
+	if !pv.Changed() {
+		u.Skip("Not changed", run.ProjectFile+" is the same as "+from)
+	} else if err := os.WriteFile(pv.Path, pv.After, pv.Mode); err != nil {
+		return 1, fmt.Errorf("approved, but %s was not changed: %w", run.ProjectFile, err)
+	} else {
+		u.Done("Saved", tilde(pv.Path, homeDir()))
+		u.Note("The next sandbox in this folder starts with it. This one already has the approval.")
+	}
+	if pv.Note != "" {
+		u.Note(pv.Note)
+	}
+	printCheck(u, pv.Check, pv.Sources, "", pv.Agent)
+	return 0, nil
+}
+
 // refuseTeamSave stops approve --save on a signed-in machine: its policy is
-// the team's signed revision, and a project file is not used.
-func refuseTeamSave(dirs config.Dirs) error {
+// the team's signed revision, and a project file is not used. It names the
+// request's page in the console when it can tell the sandbox and the full id.
+func refuseTeamSave(e env, dirs config.Dirs, sandbox, id string) error {
 	en, err := team.Load(dirs)
 	if errors.Is(err, team.ErrNotEnrolled) {
 		return nil
@@ -721,9 +784,30 @@ func refuseTeamSave(dirs config.Dirs) error {
 	}
 	where := "the console"
 	if en.Server != "" {
-		where = en.Server + "/console"
+		where = "the console: " + consoleRequestURL(e, dirs, en.Server, sandbox, id)
 	}
 	return fmt.Errorf("this machine uses the team policy, so --save has nowhere to write. An admin adds the host to the team policy and publishes it from %s. Approve without --save to let this sandbox through now", where)
+}
+
+// fullChunk is the shape of a request's full id.
+var fullChunk = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// consoleRequestURL is <server>/console/requests/<sandbox>/<id> for a
+// request, or <server>/console when the sandbox or the full id is unknown.
+func consoleRequestURL(e env, dirs config.Dirs, server, sandbox, id string) string {
+	server = strings.TrimRight(server, "/")
+	sb, err := pickSandbox(e, dirs, sandbox, true)
+	if err != nil {
+		return server + "/console"
+	}
+	if !fullChunk.MatchString(id) {
+		p, err := pending(e, sb.Name, id)
+		if err != nil || !fullChunk.MatchString(p.Chunk) {
+			return server + "/console"
+		}
+		id = p.Chunk
+	}
+	return server + "/console/requests/" + url.PathEscape(sb.Name) + "/" + url.PathEscape(id)
 }
 
 // saveApproved writes the approved host into the project file, then runs
@@ -739,11 +823,8 @@ func saveApproved(e env, u *tui.UI, sb config.Sandbox, repo string, file *projec
 		return 1, fmt.Errorf("approved, but %s was not changed: %w", run.ProjectFile, err)
 	}
 	u.Done("Saved", out.Detail+", in "+tilde(file.path, homeDir()))
-	switch {
-	case host.L4:
-		u.Note("The request named no method or path, so the approved rule lets any traffic through to " + host.key() + ". The saved line is read-only: GET, HEAD, and OPTIONS. Change it in " + run.ProjectFile + " if the agent needs more.")
-	case host.Widened:
-		u.Note("The request allowed " + strings.TrimPrefix(host.Rule, "L7 rest, allow ") + " only. The saved line is read-only, the closest level " + run.ProjectFile + " has: GET, HEAD, and OPTIONS on every path.")
+	if note := widenedNote(host); note != "" {
+		u.Note(note)
 	}
 	u.Note("The next sandbox in this folder starts with it. This one already has the approval.")
 	name := sb.Agent

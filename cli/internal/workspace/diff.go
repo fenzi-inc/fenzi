@@ -82,6 +82,16 @@ func Diff(root, staged string, c Change) (FileDiff, error) {
 	return d, nil
 }
 
+// Hunks compares two texts line by line, as Diff compares a file. ok is
+// false past the edit limit.
+func Hunks(before, after []byte) (h []Hunk, ok bool) {
+	ops, ok := lineDiff(splitLines(before), splitLines(after))
+	if !ok {
+		return nil, false
+	}
+	return hunks(ops), true
+}
+
 // readSmall returns nil without an error for a file past maxDiffBytes. A file
 // that does not exist reads as empty.
 func readSmall(dir, rel string) ([]byte, error) {

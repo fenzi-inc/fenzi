@@ -9,12 +9,19 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
 
+	"boundlane/agents"
+	"boundlane/cli/internal/config"
+	"boundlane/cli/internal/openshell"
+	"boundlane/cli/internal/run"
+	"boundlane/cli/internal/tui"
+	"boundlane/cli/internal/workspace"
 	"boundlane/compiler"
 	"boundlane/policies"
 )
@@ -172,6 +179,8 @@ func entryPort(e *yaml.Node) int {
 // saveOutcome says what happened to boundlane.yaml.
 type saveOutcome struct {
 	Saved bool
+	// Already means the file or developer-default has the host at that level.
+	Already bool
 	// Detail is one line for the person: what was written, or why not.
 	Detail string
 }
@@ -192,7 +201,7 @@ func (p *projectFile) add(h savedHost) saveOutcome {
 		}
 		switch {
 		case access == h.Access && h.Access == compiler.AccessReadOnly:
-			return saveOutcome{Detail: h.Host + " is already read-only in " + projectName}
+			return saveOutcome{Already: true, Detail: h.Host + " is already read-only in " + projectName}
 		case access == h.Access && h.Access == compiler.AccessReadWrite:
 			allow := value(e, "allow")
 			if allow == nil {
@@ -201,7 +210,7 @@ func (p *projectFile) add(h savedHost) saveOutcome {
 			}
 			for _, line := range allow.Content {
 				if line.Value == h.Allow[0] {
-					return saveOutcome{Detail: h.Host + " already allows " + h.Allow[0] + " in " + projectName}
+					return saveOutcome{Already: true, Detail: h.Host + " already allows " + h.Allow[0] + " in " + projectName}
 				}
 			}
 			allow.Content = append(allow.Content, scalar(h.Allow[0]))
@@ -219,7 +228,7 @@ func (p *projectFile) add(h savedHost) saveOutcome {
 			continue
 		}
 		if b.Access == h.Access && h.Access == compiler.AccessReadOnly {
-			return saveOutcome{Detail: h.Host + " is already read-only in developer-default"}
+			return saveOutcome{Already: true, Detail: h.Host + " is already read-only in developer-default"}
 		}
 		return saveOutcome{Detail: fmt.Sprintf("developer-default makes %s %s, and a project entry would replace that. Add %s to %s by hand, with the requests you still need", h.Host, b.Access, describe(h), projectName)}
 	}
@@ -271,7 +280,15 @@ func (p *projectFile) write() error {
 	if err != nil {
 		return err
 	}
-	doc, err := compiler.Parse(out)
+	if err := checkProject(out); err != nil {
+		return err
+	}
+	return os.WriteFile(p.path, out, p.mode)
+}
+
+// checkProject says whether raw is a project file developer-default accepts.
+func checkProject(raw []byte) error {
+	doc, err := compiler.Parse(raw)
 	if err != nil {
 		return err
 	}
@@ -279,8 +296,290 @@ func (p *projectFile) write() error {
 	if err != nil {
 		return err
 	}
-	if err := merged.WithDefaults().Validate(); err != nil {
-		return err
+	return merged.WithDefaults().Validate()
+}
+
+// savePreview is what approve --save would do to boundlane.yaml, worked out
+// without approving the request or writing the file.
+type savePreview struct {
+	Path   string
+	Exists bool
+	Mode   fs.FileMode
+	Before []byte
+	After  []byte
+	// From is the --policy-from file, or empty when the edit is generated.
+	From string
+	Host savedHost
+	// HostErr is set when the request's rule is in a form that cannot be
+	// saved. Only --policy-from goes on with it, since the person wrote the file.
+	HostErr error
+	// Outcome is what adding the host to the current file does.
+	Outcome saveOutcome
+	Note    string
+	Sources string
+	Agent   agents.Entry
+	Check   openshell.Result
+}
+
+// Changed says whether the file would be different.
+func (pv *savePreview) Changed() bool {
+	return !bytes.Equal(pv.Before, pv.After) || !pv.Exists && len(pv.After) > 0
+}
+
+// previewSave works out the new boundlane.yaml for a request in sb: the
+// generated edit, or the content of from when it is given. It then runs the
+// check boundlane policy check runs on that content, written to a temporary
+// folder. The project file itself is only read.
+func previewSave(e env, sb config.Sandbox, p openshell.Proposal, from string) (*savePreview, error) {
+	host, hostErr := requestHost(p.Endpoints)
+	if hostErr != nil && from == "" {
+		return nil, hostErr
 	}
-	return os.WriteFile(p.path, out, p.mode)
+	repo := sb.Repo
+	if repo == "" {
+		var err error
+		if repo, err = cwd(); err != nil {
+			return nil, err
+		}
+	}
+	pv := &savePreview{Path: filepath.Join(repo, projectName), Mode: 0o644, From: from, Host: host, HostErr: hostErr}
+	raw, err := os.ReadFile(pv.Path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		return nil, err
+	default:
+		pv.Exists, pv.Before = true, raw
+		if info, err := os.Stat(pv.Path); err == nil {
+			pv.Mode = info.Mode().Perm()
+		}
+	}
+	current, err := loadProject(pv.Path)
+	if err != nil {
+		return nil, err
+	}
+	if hostErr == nil {
+		pv.Outcome = current.add(host)
+	}
+	pv.After = pv.Before
+	switch {
+	case from != "":
+		if pv.After, err = os.ReadFile(from); err != nil {
+			return nil, err
+		}
+		if len(bytes.TrimSpace(pv.After)) == 0 {
+			return nil, fmt.Errorf("%s is empty", from)
+		}
+		if err := checkProject(pv.After); err != nil {
+			return nil, fmt.Errorf("%s: %w", from, err)
+		}
+		pv.Note = pv.fromNote()
+	case pv.Outcome.Saved:
+		if pv.After, err = current.bytes(); err != nil {
+			return nil, err
+		}
+		if err := checkProject(pv.After); err != nil {
+			return nil, err
+		}
+		pv.Note = widenedNote(host)
+	default:
+		pv.Note = pv.Outcome.Detail
+	}
+
+	name := sb.Agent
+	if name == "" {
+		name = defaultAgent()
+	}
+	if pv.Agent, err = agents.Get(name); err != nil {
+		return nil, err
+	}
+	tmp, err := os.MkdirTemp("", "boundlane-save-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmp)
+	if len(pv.After) > 0 {
+		if err := os.WriteFile(filepath.Join(tmp, projectName), pv.After, 0o600); err != nil {
+			return nil, err
+		}
+	}
+	resolved, err := run.ResolveFree(tmp, "")
+	if err != nil {
+		return nil, err
+	}
+	pv.Sources = resolved.Sources
+	if pv.Check, err = proveResolved(e, resolved, pv.Agent, ""); err != nil {
+		return nil, err
+	}
+	return pv, nil
+}
+
+// fromNote says when the file given does not have the request's host.
+func (pv *savePreview) fromNote() string {
+	if pv.HostErr != nil {
+		return "boundlane cannot turn this request's rule into an entry, so the file given is used as it is."
+	}
+	given := &projectFile{}
+	if err := yaml.Unmarshal(pv.After, &given.doc); err != nil || len(given.doc.Content) == 0 || given.doc.Content[0].Kind != yaml.MappingNode {
+		return ""
+	}
+	if out := given.add(pv.Host); out.Saved {
+		return "The file given does not list " + pv.Host.Host + ", " + describe(pv.Host) + ". This sandbox gets the approval; the next one in this folder asks again."
+	}
+	return ""
+}
+
+// widenedNote explains a saved line that allows other requests than the
+// one approved.
+func widenedNote(h savedHost) string {
+	switch {
+	case h.L4:
+		return "The request named no method or path, so the approved rule lets any traffic through to " + h.key() + ". The saved line is read-only: GET, HEAD, and OPTIONS. Change it in " + projectName + " if the agent needs more."
+	case h.Widened:
+		return "The request allowed " + strings.TrimPrefix(h.Rule, "L7 rest, allow ") + " only. The saved line is read-only, the closest level " + projectName + " has: GET, HEAD, and OPTIONS on every path."
+	}
+	return ""
+}
+
+// unifiedDiff is a unified diff of boundlane.yaml before and after, or ""
+// when nothing changes.
+func unifiedDiff(existed bool, before, after []byte) string {
+	if bytes.Equal(before, after) && (existed || len(after) == 0) {
+		return ""
+	}
+	hunks, ok := workspace.Hunks(before, after)
+	if !ok {
+		return ""
+	}
+	var b strings.Builder
+	if existed {
+		b.WriteString("--- a/" + projectName + "\n")
+	} else {
+		b.WriteString("--- /dev/null\n")
+	}
+	b.WriteString("+++ b/" + projectName + "\n")
+	for _, h := range hunks {
+		fmt.Fprintf(&b, "@@ -%s +%s @@\n", hunkRange(h.OldStart, h.OldLines), hunkRange(h.NewStart, h.NewLines))
+		for _, o := range h.Ops {
+			b.WriteByte(o.Kind)
+			b.WriteString(o.Text)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+// hunkRange is one side of a hunk header. An empty side names the line
+// before it, as diff -u does.
+func hunkRange(start, lines int) string {
+	if lines == 0 {
+		start--
+	}
+	return fmt.Sprintf("%d,%d", start, lines)
+}
+
+// jsonSavePreview is what approve --save --dry-run --json prints.
+type jsonSavePreview struct {
+	// File is the absolute path of the project file, and Exists whether it
+	// is there now.
+	File   string `json:"file"`
+	Exists bool   `json:"exists"`
+	Before string `json:"before"`
+	After  string `json:"after"`
+	// Diff is the unified diff from Before to After, empty when they match.
+	Diff string `json:"diff"`
+	// Host, Port, Access and Allow are the entry the request becomes. Host
+	// and Access are empty when the request's rule cannot be an entry.
+	Host   string   `json:"host"`
+	Port   int      `json:"port,omitempty"`
+	Access string   `json:"access"`
+	Allow  []string `json:"allow"`
+	// Already is true when the current file or developer-default has the
+	// host at that level, so there is nothing to add.
+	Already bool   `json:"already"`
+	Note    string `json:"note"`
+	// From is the --policy-from file, when one was given.
+	From  string        `json:"from,omitempty"`
+	Check jsonSaveCheck `json:"check"`
+}
+
+// jsonSaveCheck is the policy check of the file as it would be.
+type jsonSaveCheck struct {
+	Passed bool `json:"passed"`
+	// Result is the prover's word, as in boundlane policy check --json.
+	Result  string `json:"result"`
+	Checked string `json:"checked"`
+	Agent   string `json:"agent"`
+	Example string `json:"example"`
+	Reason  string `json:"reason"`
+}
+
+func (pv *savePreview) json() jsonSavePreview {
+	doc := jsonSavePreview{
+		File: pv.Path, Exists: pv.Exists, Before: string(pv.Before), After: string(pv.After),
+		Diff: unifiedDiff(pv.Exists, pv.Before, pv.After), Allow: []string{},
+		Already: pv.Outcome.Already, Note: pv.Note, From: pv.From,
+		Check: jsonSaveCheck{Passed: pv.Check.Passed(), Result: pv.Check.Result, Checked: pv.Sources, Agent: pv.Agent.Display, Example: pv.Check.Example(), Reason: pv.Check.Reason},
+	}
+	if pv.HostErr == nil {
+		doc.Host, doc.Port, doc.Access = pv.Host.Host, pv.Host.Port, pv.Host.Access
+		if len(pv.Host.Allow) > 0 {
+			doc.Allow = pv.Host.Allow
+		}
+	}
+	return doc
+}
+
+// printPreview shows the change approve --save would make, and its check.
+func printPreview(u *tui.UI, pv *savePreview, id string) {
+	u.Title("Preview of approve --save", "nothing is approved or written")
+	state := "exists"
+	if !pv.Exists {
+		state = "new file"
+	}
+	u.Println(fmt.Sprintf("    %s  %s, %s", u.Bold("File"), tilde(pv.Path, homeDir()), state))
+	if pv.From != "" {
+		u.Println(fmt.Sprintf("    %s  %s", u.Bold("From"), pv.From))
+	}
+	switch {
+	case pv.From != "" || pv.HostErr != nil:
+	case pv.Outcome.Saved:
+		u.Println(fmt.Sprintf("    %s  %s, %s", u.Bold("Adds"), pv.Host.Host, describe(pv.Host)))
+	default:
+		u.Println(fmt.Sprintf("    %s  nothing", u.Bold("Adds")))
+	}
+	if pv.Note != "" {
+		u.Note(pv.Note)
+	}
+	u.Blank()
+	if d := unifiedDiff(pv.Exists, pv.Before, pv.After); d != "" {
+		for _, line := range strings.Split(strings.TrimSuffix(d, "\n"), "\n") {
+			switch {
+			case strings.HasPrefix(line, "+++"), strings.HasPrefix(line, "---"), strings.HasPrefix(line, "@@"):
+				line = u.Dim(line)
+			case strings.HasPrefix(line, "+"):
+				line = u.Allow(line)
+			case strings.HasPrefix(line, "-"):
+				line = u.Deny(line)
+			}
+			u.Println("    " + line)
+		}
+	} else {
+		u.Note(projectName + " stays as it is.")
+	}
+	printCheck(u, pv.Check, pv.Sources, "", pv.Agent)
+	if !pv.Check.Passed() {
+		u.Note("Nothing was approved or written.")
+		u.Blank()
+		return
+	}
+	switch {
+	case pv.From != "":
+		u.Command("boundlane approve "+shortID(id)+" --save --policy-from "+pv.From, "approves it and writes this file")
+	case pv.Changed():
+		u.Command("boundlane approve "+shortID(id)+" --save", "approves it and writes this")
+	default:
+		u.Command("boundlane approve "+shortID(id), "approves it for this sandbox")
+	}
+	u.Blank()
 }
