@@ -319,6 +319,19 @@ func cmdRun(e env, args []string) (int, error) {
 		}
 	}
 	reviewed := false
+	// On a machine signed in to a team, requests and decisions reach the
+	// console while the agent runs, without the Mac app or boundlane forward.
+	stopForward := forwardWhile(e, resolved.TeamRevision)
+	forwarded := false
+	finishForward := func() {
+		if !forwarded {
+			forwarded = true
+			if !stopForward() {
+				u.Note("The team console was not reached during this run. Run boundlane forward to send what is queued.")
+			}
+		}
+	}
+	defer finishForward()
 	res, err := run.Run(e.ctx, run.Deps{
 		OpenShell: client(),
 		Prover:    prover(),
@@ -332,6 +345,9 @@ func cmdRun(e env, args []string) (int, error) {
 		Agent: entry, Profile: profile, Args: rest[1:], Repo: repo, Policy: resolved,
 		Name: *name, Keep: *keep, NoUpload: *noUpload, ConfirmSecrets: confirmSecrets,
 		OnExit: func(sandbox string) (bool, error) {
+			// The agent has exited: send its last decisions and requests before
+			// the questions, while the sandbox still exists.
+			finishForward()
 			if !u.Interactive() {
 				return false, nil
 			}

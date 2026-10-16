@@ -147,7 +147,12 @@ func cmdConnect(e env, args []string) (int, error) {
 	u.Println(fmt.Sprintf("  %s %s  %s", u.Accent("■"), u.Bold("Connecting to "+sb.Name), u.Dim(tilde(sb.Repo, homeDir()))))
 	u.Note("This starts " + what + " in the sandbox, with the same policy and the files as the agent left them. The sandbox keeps running when you exit.")
 	u.Blank()
+	// The same background forwarding as boundlane run, for a team sandbox.
+	stopForward := forwardWhile(e, sb.TeamRevision)
 	err = client().Exec(e.ctx, sb.Name, workdir, envv, argv...)
+	if !stopForward() {
+		u.Note("The team console was not reached during this session. Run boundlane forward to send what is queued.")
+	}
 	code := openshell.ExitCode(err)
 	if code < 0 && err != nil {
 		return 1, err

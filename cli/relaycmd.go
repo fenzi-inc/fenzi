@@ -64,6 +64,13 @@ func cmdForward(e env, args []string) (int, error) {
 }
 
 func relayOnce(ctx context.Context, e env) (relay.Report, error) {
+	return relayOnceWait(ctx, e, relayLockWait)
+}
+
+// relayOnceWait is one pass that waits at most wait for another pass to finish.
+// With 0 it tries once and gives up, which the background forwarder in
+// boundlane run wants: the other forwarder is already doing the work.
+func relayOnceWait(ctx context.Context, e env, wait time.Duration) (relay.Report, error) {
 	dirs, err := config.Default()
 	if err != nil {
 		return relay.Report{}, err
@@ -77,7 +84,7 @@ func relayOnce(ctx context.Context, e env) (relay.Report, error) {
 	}
 	// Two passes at once would each rewrite the spool and the cursors, and
 	// one could drop a record the other had read. Passes take turns.
-	unlock, err := lockRelay(ctx, dirs, relayLockWait)
+	unlock, err := lockRelay(ctx, dirs, wait)
 	if err != nil {
 		return relay.Report{}, err
 	}
