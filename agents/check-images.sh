@@ -7,7 +7,7 @@
 # Dockerfile is checked. With no platform, the Docker server's own is used.
 #
 # For each agent the image is built from its Dockerfile alone, as
-# `boundlane agents build` does, with --pull so the base image is current.
+# `fenzi agents build` does, with --pull so the base image is current.
 # Then, inside the image, as the image's own user and without network, each
 # path agent.yaml lists for that processor must:
 #
@@ -24,7 +24,7 @@
 # the local image store. Nothing is pushed. Without buildx, docker build is
 # used for the server's own platform only. Another platform needs buildx and
 # QEMU registered with binfmt. The built image's platform is checked too.
-# They are tagged boundlane-image-check/<agent>:<arch> and removed at the
+# They are tagged fenzi-image-check/<agent>:<arch> and removed at the
 # end; set KEEP_IMAGES=1 to keep them. No other image or container is
 # touched.
 #
@@ -129,7 +129,7 @@ for agent in "${agents[@]}"; do
 	paths=()
 	while IFS= read -r p; do paths+=("$p"); done <"$tmp/paths"
 
-	tag="boundlane-image-check/$agent:$arch"
+	tag="fenzi-image-check/$agent:$arch"
 	echo "== $agent $platform: building $tag"
 	if ! "${build[@]}" --pull --platform "$platform" -t "$tag" - <"$dir/Dockerfile"; then
 		fail "$agent" "image build failed (a non-native platform needs QEMU registered with binfmt)"

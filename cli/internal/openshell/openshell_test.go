@@ -99,9 +99,9 @@ func TestCreateArgs(t *testing.T) {
 	f := &Fake{}
 	_, _ = Client{R: f}.SandboxCreate(context.Background(), CreateOptions{
 		Name: "n", From: "img:1", Policy: "p.yaml", Provider: "bl-claude",
-		Labels: map[string]string{"policy_rev": "r1", "boundlane": "1"},
+		Labels: map[string]string{"policy_rev": "r1", "fenzi": "1"},
 	})
-	want := "sandbox create --name n --from img:1 --policy p.yaml --provider bl-claude --label boundlane=1 --label policy_rev=r1 --approval-mode manual --no-auto-providers --detach --output json"
+	want := "sandbox create --name n --from img:1 --policy p.yaml --provider bl-claude --label fenzi=1 --label policy_rev=r1 --approval-mode manual --no-auto-providers --detach --output json"
 	if f.Calls[0] != want {
 		t.Errorf("got  %s\nwant %s", f.Calls[0], want)
 	}

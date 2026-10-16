@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"boundlane/cli/internal/config"
+	"fenzi/cli/internal/config"
 )
 
 func TestRelayPassesTakeTurns(t *testing.T) {
@@ -15,7 +15,7 @@ func TestRelayPassesTakeTurns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := lockRelay(context.Background(), dirs, 200*time.Millisecond); err == nil || !strings.Contains(err.Error(), "another boundlane sync or forward is running") {
+	if _, err := lockRelay(context.Background(), dirs, 200*time.Millisecond); err == nil || !strings.Contains(err.Error(), "another fenzi sync or forward is running") {
 		t.Fatalf("a second pass while the first runs: err %v", err)
 	}
 	// The second pass waits for the first instead of failing at once.

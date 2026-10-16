@@ -1,4 +1,4 @@
-// Command boundlane runs AI agents inside an OpenShell sandbox with an org policy.
+// Command fenzi runs AI agents inside an OpenShell sandbox with an org policy.
 package main
 
 import (
@@ -9,9 +9,11 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 
-	"boundlane/cli/internal/run"
-	"boundlane/cli/internal/tui"
+	"fenzi/cli/internal/run"
+	"fenzi/cli/internal/tui"
 )
 
 // Version is set at build time with -ldflags "-X main.Version=...".
@@ -42,10 +44,10 @@ var helpGroups = []struct {
 	{"Machine and policy", [][2]string{
 		{"doctor", "Check this machine"},
 		{"key", "Store, replace, or remove a model key"},
-		{"init", "Write a starter boundlane.yaml"},
+		{"init", "Write a starter fenzi.yaml"},
 		{"policy", "Compile or check a policy file"},
 		{"agents", "List agents, or build an image"},
-		{"update", "Install the latest boundlane"},
+		{"update", "Install the latest fenzi"},
 		{"version", "Show the version. --version does the same"},
 	}},
 }
@@ -69,9 +71,9 @@ func writeHelp(w io.Writer) {
 		rows [][2]string
 	}{"Team", team})
 	u.Blank()
-	u.Println(fmt.Sprintf("  %s %s  %s", u.Accent("■"), u.Bold("Boundlane "+Version), u.Dim("the agent you already use, in a sandbox on your machine")))
+	u.Println(fmt.Sprintf("  %s %s  %s", u.Accent("■"), u.Bold("Fenzi "+Version), u.Dim("the agent you already use, in a sandbox on your machine")))
 	u.Blank()
-	u.Println(fmt.Sprintf("  %s  %s", u.Bold("boundlane"), u.Dim("with no command opens a menu for this folder")))
+	u.Println(fmt.Sprintf("  %s  %s", u.Bold("fenzi"), u.Dim("with no command opens a menu for this folder")))
 	for _, g := range groups {
 		u.Blank()
 		u.Println("  " + u.Accent(g.name))
@@ -80,9 +82,9 @@ func writeHelp(w io.Writer) {
 		}
 	}
 	u.Blank()
-	u.Println("  " + u.Dim("Free on one machine with no account. Team: boundlane login, then the console at https://boundlane.dev/console."))
+	u.Println("  " + u.Dim("Free on one machine with no account. Team: fenzi login, then the console at https://fenzi.dev/console."))
 	u.Blank()
-	u.Println("  " + u.Dim("boundlane <command> -h shows its flags. Docs: https://boundlane.dev/docs"))
+	u.Println("  " + u.Dim("fenzi <command> -h shows its flags. Docs: https://fenzi.dev/docs"))
 	u.Println("  " + u.Dim("Exit codes: 0 ok, 1 error, 2 policy check failed, 3 runtime not ready."))
 	u.Println("  " + u.Dim("run and connect exit with the agent's code."))
 	u.Blank()
@@ -123,7 +125,26 @@ func distance(a, b string) int {
 }
 
 func main() {
+	legacyEnv()
+	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "boundlane" {
+		fmt.Fprintln(os.Stderr, "Boundlane is now Fenzi. This command still works; new installs are called fenzi (https://fenzi.dev).")
+	}
 	os.Exit(cli(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+}
+
+// legacyEnv copies each BOUNDLANE_ variable, the names before the rename,
+// to its FENZI_ name when that one is not set.
+func legacyEnv() {
+	for _, kv := range os.Environ() {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || !strings.HasPrefix(k, "BOUNDLANE_") {
+			continue
+		}
+		n := "FENZI_" + strings.TrimPrefix(k, "BOUNDLANE_")
+		if _, set := os.LookupEnv(n); !set {
+			os.Setenv(n, v)
+		}
+	}
 }
 
 type env struct {
@@ -186,9 +207,9 @@ func cli(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if !ok {
 		msg := fmt.Sprintf("unknown command %q.", args[0])
 		if s := suggest(args[0], cmds); s != "" {
-			msg += " Did you mean " + eu.Bold("boundlane "+s) + "?"
+			msg += " Did you mean " + eu.Bold("fenzi "+s) + "?"
 		}
-		fmt.Fprintf(stderr, "%s boundlane: %s\n  %s\n", eu.Bold("!"), msg, eu.Dim("boundlane help lists every command."))
+		fmt.Fprintf(stderr, "%s fenzi: %s\n  %s\n", eu.Bold("!"), msg, eu.Dim("fenzi help lists every command."))
 		return 1
 	}
 	defer announceUpdate(e, startUpdateCheck(e, args[0]))
@@ -205,7 +226,7 @@ func cli(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if errors.Is(err, tui.ErrCancelled) {
 			return 130
 		}
-		fmt.Fprintf(stderr, "%s boundlane %s: %v\n", eu.Bold("!"), args[0], err)
+		fmt.Fprintf(stderr, "%s fenzi %s: %v\n", eu.Bold("!"), args[0], err)
 		var pe *run.PolicyError
 		var ge *run.GatewayError
 		switch {

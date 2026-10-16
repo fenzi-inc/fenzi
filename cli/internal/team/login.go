@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"boundlane/cli/internal/tui"
+	"fenzi/cli/internal/tui"
 )
 
 // Login prints the code and waits until someone approves it in the browser.
@@ -73,7 +73,7 @@ func Refresh(ctx context.Context, c Client, e Enrollment) (Enrollment, string, e
 		}
 		if Status(err) == http.StatusUnauthorized {
 			// Signed out in the console. The gateway keeps enforcing what it has.
-			return e, fmt.Sprintf("this machine was signed out of team %s, still using r%d. Run boundlane login", e.Tenant, e.Revision), nil
+			return e, fmt.Sprintf("this machine was signed out of team %s, still using r%d. Run fenzi login", e.Tenant, e.Revision), nil
 		}
 		return e, fmt.Sprintf("control plane unreachable, using %s r%d", e.Tenant, e.Revision), nil
 	}

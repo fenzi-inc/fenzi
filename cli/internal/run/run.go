@@ -1,4 +1,4 @@
-// Package run implements `boundlane run`.
+// Package run implements `fenzi run`.
 package run
 
 import (
@@ -19,12 +19,12 @@ import (
 	"strings"
 	"time"
 
-	"boundlane/agents"
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/openshell"
-	"boundlane/cli/internal/screen"
-	"boundlane/cli/internal/workspace"
-	"boundlane/compiler"
+	"fenzi/agents"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/openshell"
+	"fenzi/cli/internal/screen"
+	"fenzi/cli/internal/workspace"
+	"fenzi/compiler"
 )
 
 // PolicyError means the prover did not return within_boundary. Nothing starts.
@@ -51,7 +51,7 @@ func (e *PolicyError) Error() string {
 type GatewayError struct{ Err error }
 
 func (e *GatewayError) Error() string {
-	return "OpenShell gateway is not ready: " + e.Err.Error() + "\n  run boundlane doctor"
+	return "OpenShell gateway is not ready: " + e.Err.Error() + "\n  run fenzi doctor"
 }
 func (e *GatewayError) Unwrap() error { return e.Err }
 
@@ -108,7 +108,7 @@ type Result struct {
 	Kept     bool
 }
 
-// Settings turned on for every sandbox Boundlane creates.
+// Settings turned on for every sandbox Fenzi creates.
 var sandboxSettings = [][2]string{
 	{"ocsf_json_enabled", "true"},
 	{"agent_policy_proposals_enabled", "true"},
@@ -142,7 +142,7 @@ func conflicts(global map[string]string) map[string]string {
 	return bad
 }
 
-// LogFile is the shorthand log saved for each run, read by `boundlane log`.
+// LogFile is the shorthand log saved for each run, read by `fenzi log`.
 const LogFile = "sandbox.log"
 
 // logLines is how many shorthand lines are saved when a run ends.
@@ -177,7 +177,7 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 			keys = append(keys, k+" to "+v)
 		}
 		sort.Strings(keys)
-		return res, fmt.Errorf("the gateway sets %s for every sandbox, and Boundlane needs true; run boundlane doctor --fix", strings.Join(keys, " and "))
+		return res, fmt.Errorf("the gateway sets %s for every sandbox, and Fenzi needs true; run fenzi doctor --fix", strings.Join(keys, " and "))
 	}
 
 	// 2. Resolve the agent and its key.
@@ -217,7 +217,7 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		return res, &PolicyError{Stage: "compiled policy", Result: r}
 	}
 	say("prover", "%s", r.Result)
-	// Kept so boundlane policy apply can tell a host change from one that
+	// Kept so fenzi policy apply can tell a host change from one that
 	// needs a new sandbox.
 	if err := SaveResolved(runDir, o.Policy.Doc); err != nil {
 		return res, err
@@ -277,7 +277,7 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		say("key", "%s, already stored on this machine", provider)
 	} else {
 		if d.Getenv(a.Key.Env) == "" {
-			return res, fmt.Errorf("no key stored for %s; run boundlane key set %s, or export %s for this run. The key stays on this machine", a.Name, a.Name, a.Key.Env)
+			return res, fmt.Errorf("no key stored for %s; run fenzi key set %s, or export %s for this run. The key stays on this machine", a.Name, a.Name, a.Key.Env)
 		}
 		if err := d.OpenShell.ProviderCreate(ctx, provider, a.Key.ProfileType); err != nil {
 			return res, err
@@ -296,7 +296,7 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 	}
 
 	// 7. Create the sandbox.
-	labels := map[string]string{"boundlane": "1", "policy_rev": c.Revision, "agent": a.Name}
+	labels := map[string]string{"fenzi": "1", "policy_rev": c.Revision, "agent": a.Name}
 	if o.Policy.TeamRevision > 0 {
 		labels["team_rev"] = strconv.Itoa(o.Policy.TeamRevision)
 	}
@@ -401,7 +401,7 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 	// 12. Save the log, stage the changes, delete the sandbox.
 	if out, lerr := settledLog(ctx, d, name); lerr == nil {
 		_ = os.WriteFile(filepath.Join(runDir, LogFile), out, 0o600)
-		say("log", "saved, boundlane log")
+		say("log", "saved, fenzi log")
 	} else {
 		say("log", "could not be saved: %v", lerr)
 	}

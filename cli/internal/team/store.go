@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"boundlane/cli/internal/config"
+	"fenzi/cli/internal/config"
 )
 
 func path(dirs config.Dirs) string { return filepath.Join(dirs.Config, "enrollment.json") }

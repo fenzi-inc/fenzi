@@ -40,6 +40,8 @@ type Bundle struct {
 // formatHead starts every format 2 message. A format 1 message starts with
 // the tenant and then the revision number, so the two cannot be confused:
 // a tenant cannot hold a space, and "acme" is not a revision number.
+// The wire name stays boundlane: machines on CLIs before the rename to Fenzi
+// verify the same bytes.
 const formatHead = "boundlane bundle 2\n"
 
 // Message is the signed bytes.
@@ -82,7 +84,7 @@ func Verify(pub ed25519.PublicKey, b Bundle) error {
 	case len(b.Document) == 0:
 		return errors.New("bundle has no policy document")
 	case b.Format > FormatBoundary:
-		return fmt.Errorf("bundle format %d is newer than this boundlane knows; run boundlane update", b.Format)
+		return fmt.Errorf("bundle format %d is newer than this fenzi knows; run fenzi update", b.Format)
 	case b.Format < 0:
 		return fmt.Errorf("bundle format %d is not valid", b.Format)
 	case b.Format != FormatBoundary && len(b.Boundary) > 0:
@@ -174,7 +176,7 @@ type Proposal struct {
 	Applied     bool   `json:"applied"`
 	// Draft is true when the sandbox drafted the request from a refused
 	// connection, and false when the agent filed it. The machine decides with
-	// the rule boundlane requests uses. A server that predates the field
+	// the rule fenzi requests uses. A server that predates the field
 	// reads every request as filed by the agent.
 	Draft bool `json:"draft"`
 	// Revision is the team revision the machine held when it reported the

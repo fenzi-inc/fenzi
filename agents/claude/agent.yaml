@@ -1,7 +1,7 @@
 name: claude
 display: Claude Code
 command: claude
-image: boundlane/claude
+image: fenzi/claude
 # Bump together with CLAUDE_CODE_VERSION in the Dockerfile.
 version: "2.1.288"
 # The npm package's claude command is a native binary. OpenShell matches the
@@ -35,7 +35,7 @@ guide_flag: --append-system-prompt
 # claude --help in 2.1.288 lists "auto" and "manual" among the modes. In auto,
 # Claude's own check can refuse a command before it reaches the sandbox; in
 # manual a person approves each action and the policy decides the rest.
-# `boundlane run claude --permission-mode auto` still picks auto.
+# `fenzi run claude --permission-mode auto` still picks auto.
 default_flags:
   --permission-mode: manual
 # Claude asks whether to use the API key it finds in the environment, with No
@@ -44,7 +44,7 @@ default_flags:
 start_note: "Claude may ask whether to use the API key it found. Choose Yes: it is the sandbox's placeholder, not your key."
 key:
   env: ANTHROPIC_API_KEY
-  profile_type: boundlane-claude-code
+  profile_type: fenzi-claude-code
   profile_file: profile.yaml
 # testing until a full run with a real key passes on macOS and Linux.
 status: testing

@@ -1,4 +1,4 @@
-// Package compiler turns a Boundlane policy document into an OpenShell sandbox
+// Package compiler turns a Fenzi policy document into an OpenShell sandbox
 // policy and the boundary the policy prover checks it against.
 //
 // The package has no dependency on a running gateway. It must not import
@@ -23,7 +23,7 @@ const (
 	ApprovalsPerson = "person"
 )
 
-// Document is the org policy document (boundlane.yaml). It is smaller than
+// Document is the org policy document (fenzi.yaml). It is smaller than
 // OpenShell's schema and only expresses what OpenShell enforces and the
 // prover models.
 type Document struct {

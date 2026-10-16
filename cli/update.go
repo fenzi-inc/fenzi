@@ -13,9 +13,9 @@ import (
 
 	"golang.org/x/term"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/tui"
-	"boundlane/cli/internal/update"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/tui"
+	"fenzi/cli/internal/update"
 )
 
 // checkUpdates says whether this command should look for a newer release:
@@ -25,7 +25,7 @@ func checkUpdates(stderr io.Writer, command string) bool {
 	if command == "update" || command == "version" || Version == "dev" {
 		return false
 	}
-	if os.Getenv("BOUNDLANE_NO_UPDATE_CHECK") != "" || os.Getenv("CI") != "" {
+	if os.Getenv("FENZI_NO_UPDATE_CHECK") != "" || os.Getenv("CI") != "" {
 		return false
 	}
 	f, ok := stderr.(*os.File)
@@ -53,7 +53,7 @@ func announceUpdate(e env, n *update.Notifier) {
 	}
 	u := tui.ForOutput(e.stderr)
 	u.Blank()
-	u.Println(fmt.Sprintf("  %s %s %s", u.Accent("↑"), u.Bold("boundlane "+v+" is available."), u.Dim("You have "+Version+". Run boundlane update.")))
+	u.Println(fmt.Sprintf("  %s %s %s", u.Accent("↑"), u.Bold("fenzi "+v+" is available."), u.Dim("You have "+Version+". Run fenzi update.")))
 	u.Blank()
 }
 
@@ -71,20 +71,20 @@ func cmdUpdate(e env, args []string) (int, error) {
 	}
 	u := tui.New(e.stdin, e.stdout)
 	u.Blank()
-	latest, err := u.Spin("Latest release", "asking boundlane.dev", func() (string, error) {
+	latest, err := u.Spin("Latest release", "asking fenzi.dev", func() (string, error) {
 		return update.Latest(e.ctx, client, base)
 	})
 	if err != nil {
 		return 1, fmt.Errorf("could not reach %s: %w", base, err)
 	}
 	if !update.Newer(latest, Version) {
-		u.Done("Up to date", "boundlane "+Version)
+		u.Done("Up to date", "fenzi "+Version)
 		u.Blank()
 		return 0, nil
 	}
 	if *check {
 		u.Println(fmt.Sprintf("  %s %s", u.Accent("↑"), u.Bold(latest+" is available. You have "+Version+".")))
-		u.Command("boundlane update", "install it")
+		u.Command("fenzi update", "install it")
 		u.Blank()
 		return 0, nil
 	}
@@ -102,7 +102,7 @@ func cmdUpdate(e env, args []string) (int, error) {
 		return latest + " in " + tilde(exe, homeDir()), nil
 	}); err != nil {
 		if errors.Is(err, fs.ErrPermission) {
-			u.Note("You cannot write to " + filepath.Dir(exe) + ". Run sudo boundlane update, or run the installer again.")
+			u.Note("You cannot write to " + filepath.Dir(exe) + ". Run sudo fenzi update, or run the installer again.")
 		}
 		return 1, quietExit(1)
 	}
@@ -130,7 +130,7 @@ func updateJSON(e env, client *http.Client, base string, check bool) (int, error
 	}
 	if err := update.Install(e.ctx, client, base, latest, runtime.GOOS, runtime.GOARCH, exe); err != nil {
 		if errors.Is(err, fs.ErrPermission) {
-			return 1, fmt.Errorf("%w. You cannot write to %s. Run sudo boundlane update, or run the installer again", err, filepath.Dir(exe))
+			return 1, fmt.Errorf("%w. You cannot write to %s. Run sudo fenzi update, or run the installer again", err, filepath.Dir(exe))
 		}
 		return 1, err
 	}

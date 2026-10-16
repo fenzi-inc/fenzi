@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/forward"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/forward"
 )
 
 // spoolLimit is how many records wait on disk while the control plane is away.

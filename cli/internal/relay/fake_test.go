@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"os"
 
-	"boundlane/cli/internal/openshell"
+	"fenzi/cli/internal/openshell"
 )
 
 var errStale = staleError("proposal inputs changed; evaluation refreshed, refetch and review again")

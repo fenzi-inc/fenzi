@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"boundlane/agents"
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/openshell"
-	"boundlane/cli/internal/workspace"
+	"fenzi/agents"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/openshell"
+	"fenzi/cli/internal/workspace"
 )
 
 const pass = `{"result":"within_boundary","coverage":{"domains":["filesystem","network_l4","network_rest","process","landlock"]}}`
@@ -120,8 +120,8 @@ func TestRunSequence(t *testing.T) {
 		"settings get --global --json",
 		"profile import -f ",
 		"provider get bl-claude",
-		"provider create --name bl-claude --type boundlane-claude-code --from-existing",
-		"sandbox create --name bl-test-0001 --from boundlane/claude:2.1.288 --policy ",
+		"provider create --name bl-claude --type fenzi-claude-code --from-existing",
+		"sandbox create --name bl-test-0001 --from fenzi/claude:2.1.288 --policy ",
 		"sandbox get bl-test-0001 --policy-only",
 		"settings set bl-test-0001 --key ocsf_json_enabled --value true",
 		"settings set bl-test-0001 --key agent_policy_proposals_enabled --value true",
@@ -149,7 +149,7 @@ func TestRunSequence(t *testing.T) {
 		}
 	}
 	create := calls[5]
-	for _, frag := range []string{"--provider bl-claude", "--label boundlane=1", "--label policy_rev=local-", "--approval-mode manual", "--no-auto-providers", "--detach"} {
+	for _, frag := range []string{"--provider bl-claude", "--label fenzi=1", "--label policy_rev=local-", "--approval-mode manual", "--no-auto-providers", "--detach"} {
 		if !strings.Contains(create, frag) {
 			t.Errorf("sandbox create is missing %q: %s", frag, create)
 		}
@@ -209,7 +209,7 @@ func TestGatewayWideConflictStopsBeforeCreate(t *testing.T) {
 	h := setup(t)
 	h.os.Replies["settings get"] = openshell.Reply{Out: `{"settings":{"ocsf_json_enabled":false,"agent_policy_proposals_enabled":"<unset>"}}`}
 	_, err := Run(context.Background(), h.deps, h.opts)
-	if err == nil || !strings.Contains(err.Error(), "ocsf_json_enabled to false") || !strings.Contains(err.Error(), "boundlane doctor --fix") {
+	if err == nil || !strings.Contains(err.Error(), "ocsf_json_enabled to false") || !strings.Contains(err.Error(), "fenzi doctor --fix") {
 		t.Fatalf("want a conflict naming the key and the fix, got %v", err)
 	}
 	if h.called("sandbox create") {
@@ -227,8 +227,8 @@ func TestExistingProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Recorded from OpenShell 0.1.2: a second import, and the export shape.
-	exists := openshell.Reply{Exit: 1, Stderr: "error profile=boundlane-claude-code field=id custom provider profile 'boundlane-claude-code' already exists"}
-	same := `{"id":"boundlane-claude-code","resource_version":3,"credentials":[{"env_vars":["ANTHROPIC_API_KEY","CLAUDE_API_KEY"]}],"endpoints":[{"host":"api.anthropic.com","port":443,"protocol":"rest","access":"read-write","enforcement":"enforce"}],"binaries":["/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"]}`
+	exists := openshell.Reply{Exit: 1, Stderr: "error profile=fenzi-claude-code field=id custom provider profile 'fenzi-claude-code' already exists"}
+	same := `{"id":"fenzi-claude-code","resource_version":3,"credentials":[{"env_vars":["ANTHROPIC_API_KEY","CLAUDE_API_KEY"]}],"endpoints":[{"host":"api.anthropic.com","port":443,"protocol":"rest","access":"read-write","enforcement":"enforce"}],"binaries":["/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"]}`
 	if !strings.Contains(string(profile), "api.anthropic.com") {
 		t.Fatal("fixture assumes the claude profile")
 	}
@@ -258,8 +258,8 @@ func TestExistingProfile(t *testing.T) {
 				update = c
 			}
 		}
-		if !strings.HasSuffix(update, "profile.update.yaml boundlane-claude-code") {
-			t.Fatalf("want profile update --file <dir>/profile.update.yaml boundlane-claude-code, calls:\n%s", strings.Join(h.os.Calls, "\n"))
+		if !strings.HasSuffix(update, "profile.update.yaml fenzi-claude-code") {
+			t.Fatalf("want profile update --file <dir>/profile.update.yaml fenzi-claude-code, calls:\n%s", strings.Join(h.os.Calls, "\n"))
 		}
 		body, err := os.ReadFile(strings.Fields(update)[3])
 		if err != nil {
@@ -490,7 +490,7 @@ func TestSandboxName(t *testing.T) {
 func TestWriteGuide(t *testing.T) {
 	fake := &openshell.Fake{}
 	d := Deps{OpenShell: openshell.Client{R: fake}}
-	dest := "/sandbox/.boundlane/guide.md"
+	dest := "/sandbox/.fenzi/guide.md"
 	if err := writeGuide(context.Background(), d, "sb", dest); err != nil {
 		t.Fatal(err)
 	}

@@ -7,9 +7,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"boundlane/agents"
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/openshell"
+	"fenzi/agents"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/openshell"
 )
 
 // ProviderName is the OpenShell provider that holds an agent's key.
@@ -30,7 +30,7 @@ func SetKey(ctx context.Context, oc openshell.Client, a agents.Entry, value stri
 	if err != nil {
 		return false, err
 	}
-	dir, err := os.MkdirTemp("", "boundlane-profile-")
+	dir, err := os.MkdirTemp("", "fenzi-profile-")
 	if err != nil {
 		return false, err
 	}
@@ -53,7 +53,7 @@ func SetKey(ctx context.Context, oc openshell.Client, a agents.Entry, value stri
 // sandbox that was started for this agent is still running, because what a
 // running sandbox does when its provider disappears is not documented. The
 // running sandboxes come from the gateway; which agent each one runs comes
-// from the state Boundlane kept when it started them.
+// from the state Fenzi kept when it started them.
 func RemoveKey(ctx context.Context, oc openshell.Client, dirs config.Dirs, a agents.Entry) (bool, error) {
 	exists, err := KeyStored(ctx, oc, a)
 	if err != nil || !exists {
@@ -64,7 +64,7 @@ func RemoveKey(ctx context.Context, oc openshell.Client, dirs config.Dirs, a age
 		return false, err
 	}
 	if name := RunningWith(dirs, a, running); name != "" {
-		return false, fmt.Errorf("%s is running with the %s key; stop it first (boundlane stop %s)", name, a.Display, name)
+		return false, fmt.Errorf("%s is running with the %s key; stop it first (fenzi stop %s)", name, a.Display, name)
 	}
 	return true, oc.ProviderDelete(ctx, ProviderName(a))
 }

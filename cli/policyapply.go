@@ -1,6 +1,6 @@
 package main
 
-// boundlane policy apply: on the Free plan, bring a change to ./boundlane.yaml
+// fenzi policy apply: on the Free plan, bring a change to ./fenzi.yaml
 // to the sandboxes already running from this folder. A host change loads onto
 // them the way sync loads a team revision: compiled, proved, then policy set
 // and policy list. A change to the workspace or paths is fixed when the
@@ -12,17 +12,17 @@ import (
 	"os"
 	"path/filepath"
 
-	"boundlane/agents"
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/run"
-	"boundlane/cli/internal/team"
-	"boundlane/cli/internal/tui"
-	"boundlane/compiler"
+	"fenzi/agents"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/run"
+	"fenzi/cli/internal/team"
+	"fenzi/cli/internal/tui"
+	"fenzi/compiler"
 )
 
 func cmdPolicyApply(e env, args []string) (int, error) {
 	fs := newFlags("policy apply", e.stderr)
-	policyFile := fs.String("policy", "", "policy file to use instead of ./boundlane.yaml, as given to boundlane run")
+	policyFile := fs.String("policy", "", "policy file to use instead of ./fenzi.yaml, as given to fenzi run")
 	if _, err := parse(fs, args); err != nil {
 		return 1, err
 	}
@@ -32,7 +32,7 @@ func cmdPolicyApply(e env, args []string) (int, error) {
 	}
 	switch _, err := team.Load(dirs); {
 	case err == nil:
-		return 1, errors.New("this machine is signed in to a team, so its policy comes from the console. boundlane sync loads a published host change onto running sandboxes")
+		return 1, errors.New("this machine is signed in to a team, so its policy comes from the console. fenzi sync loads a published host change onto running sandboxes")
 	case !errors.Is(err, team.ErrNotEnrolled):
 		return 1, err
 	}
@@ -68,7 +68,7 @@ func cmdPolicyApply(e env, args []string) (int, error) {
 	u.Done("Policy", next.Sources)
 	if len(targets) == 0 {
 		u.Skip("Sandboxes", "none running from this folder")
-		u.Note("The next boundlane run here uses this policy.")
+		u.Note("The next fenzi run here uses this policy.")
 		u.Blank()
 		return 0, nil
 	}
@@ -78,7 +78,7 @@ func cmdPolicyApply(e env, args []string) (int, error) {
 		sbRun := dirs.Run(sb.Name)
 		prev, err := run.LoadResolved(sbRun)
 		if errors.Is(err, run.ErrNoResolved) {
-			u.Skip(sb.Name, "started before Boundlane saved the policy it runs; the next run uses this one")
+			u.Skip(sb.Name, "started before Fenzi saved the policy it runs; the next run uses this one")
 			continue
 		}
 		if err != nil {
@@ -90,7 +90,7 @@ func cmdPolicyApply(e env, args []string) (int, error) {
 			continue
 		case compiler.EffectWall:
 			u.Skip(sb.Name, "not changed. "+compiler.EffectNote(compiler.EffectWall))
-			u.Note("Workspace and path rules are fixed when a sandbox is created. boundlane stop " + sb.Name + ", then boundlane run, starts one with them.")
+			u.Note("Workspace and path rules are fixed when a sandbox is created. fenzi stop " + sb.Name + ", then fenzi run, starts one with them.")
 			continue
 		}
 		line, rev, err := loadHosts(e, dirs, sb, next)
@@ -135,7 +135,7 @@ func loadHosts(e env, dirs config.Dirs, sb config.Sandbox, next run.Resolved) (l
 	if err != nil {
 		return "", "", err
 	}
-	tmp, err := os.MkdirTemp("", "boundlane-apply-")
+	tmp, err := os.MkdirTemp("", "fenzi-apply-")
 	if err != nil {
 		return "", "", err
 	}

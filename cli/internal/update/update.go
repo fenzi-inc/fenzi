@@ -1,4 +1,4 @@
-// Package update finds out whether a newer boundlane is published and
+// Package update finds out whether a newer fenzi is published and
 // replaces the running binary with it. It reads the same files as the
 // install script: latest.txt, the binary, and the release's sha256 list.
 package update
@@ -21,15 +21,15 @@ import (
 	"time"
 )
 
-// DefaultBase is where releases are published. BOUNDLANE_DOWNLOAD_BASE
+// DefaultBase is where releases are published. FENZI_DOWNLOAD_BASE
 // overrides it, as it does for the install script.
-const DefaultBase = "https://boundlane.dev/dl"
+const DefaultBase = "https://fenzi.dev/dl"
 
 // Every is how often the background check asks for latest.txt.
 const Every = 24 * time.Hour
 
 func Base() string {
-	if b := os.Getenv("BOUNDLANE_DOWNLOAD_BASE"); b != "" {
+	if b := os.Getenv("FENZI_DOWNLOAD_BASE"); b != "" {
 		return strings.TrimRight(b, "/")
 	}
 	return DefaultBase
@@ -141,8 +141,8 @@ func (n *Notifier) Available(max time.Duration) string {
 // Install downloads version for goos/goarch, checks it against the release's
 // sha256 list, and puts it in place of exe. Nothing changes if any step fails.
 func Install(ctx context.Context, c *http.Client, base, version, goos, goarch, exe string) error {
-	name := fmt.Sprintf("boundlane-%s-%s-%s", version, goos, goarch)
-	sums, err := get(ctx, c, fmt.Sprintf("%s/boundlane-%s-sha256.txt", base, version), 1<<16)
+	name := fmt.Sprintf("fenzi-%s-%s-%s", version, goos, goarch)
+	sums, err := get(ctx, c, fmt.Sprintf("%s/fenzi-%s-sha256.txt", base, version), 1<<16)
 	if err != nil {
 		return fmt.Errorf("checksum list: %w", err)
 	}
@@ -164,7 +164,7 @@ func Install(ctx context.Context, c *http.Client, base, version, goos, goarch, e
 	if hex.EncodeToString(sum[:]) != want {
 		return errors.New("the checksum did not match, so nothing was replaced")
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(exe), ".boundlane-update-*")
+	tmp, err := os.CreateTemp(filepath.Dir(exe), ".fenzi-update-*")
 	if err != nil {
 		return err
 	}

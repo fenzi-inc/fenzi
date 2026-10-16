@@ -11,8 +11,8 @@ import (
 	"sync"
 	"testing"
 
-	"boundlane/cli/internal/team"
-	"boundlane/teamapi"
+	"fenzi/cli/internal/team"
+	"fenzi/teamapi"
 )
 
 // roleConsole serves a good bundle and answers /v1/me with me, or with 404

@@ -51,7 +51,7 @@ func TestDetectLinux(t *testing.T) {
 		t.Fatalf("got %+v", rts)
 	}
 	if rts[0].Tested || rts[1].Tested {
-		t.Errorf("Docker Engine and Podman have not been run with Boundlane: %+v", rts)
+		t.Errorf("Docker Engine and Podman have not been run with Fenzi: %+v", rts)
 	}
 	rootless := detect(fakeProbe("linux", []string{"docker"}, []string{"/run/user/1000/docker.sock"}, nil))
 	if rootless[0].Socket != "/run/user/1000/docker.sock" || rootless[0].Attach {

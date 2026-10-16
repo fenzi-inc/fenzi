@@ -7,14 +7,14 @@ import (
 	"testing"
 	"time"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/run"
-	"boundlane/cli/internal/team"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/run"
+	"fenzi/cli/internal/team"
 )
 
 // policyList is what the fake runtime answers to policy list. OpenShell 0.1.2
 // showed a new revision Pending and then Loaded there; the full text was not
-// recorded, and Boundlane reads only those two words, as sync does.
+// recorded, and Fenzi reads only those two words, as sync does.
 const policyList = "Loaded\n"
 
 // applyFixture is a Free-plan machine with one sandbox running from a
@@ -109,7 +109,7 @@ func TestPolicyApplyLeavesAPathChangeForTheNextRun(t *testing.T) {
 	if called(t, "policy set") {
 		t.Fatalf("a path change was loaded onto a running sandbox: %q", runtimeCalls(t))
 	}
-	if !strings.Contains(out, "Takes effect on the next run. Running agents keep the old paths.") || !strings.Contains(strings.Join(strings.Fields(out), " "), "boundlane stop bl-web-1a2b") {
+	if !strings.Contains(out, "Takes effect on the next run. Running agents keep the old paths.") || !strings.Contains(strings.Join(strings.Fields(out), " "), "fenzi stop bl-web-1a2b") {
 		t.Fatalf("output:\n%s", out)
 	}
 	saved, err := run.LoadResolved(dirs.Run("bl-web-1a2b"))
@@ -139,7 +139,7 @@ func TestPolicyApplyWithoutASavedPolicy(t *testing.T) {
 	os.Remove(filepath.Join(dirs.Run("bl-web-1a2b"), run.ResolvedFile))
 	writeProject(t, repo, "version: 1\nhosts:\n  - host: api.example.org\n    access: read-only\n")
 	out, code := runCLI(t, "", "policy", "apply")
-	if code != 0 || called(t, "policy set") || !strings.Contains(out, "started before Boundlane saved the policy it runs") {
+	if code != 0 || called(t, "policy set") || !strings.Contains(out, "started before Fenzi saved the policy it runs") {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
 }

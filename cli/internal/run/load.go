@@ -11,8 +11,8 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"boundlane/cli/internal/openshell"
-	"boundlane/compiler"
+	"fenzi/cli/internal/openshell"
+	"fenzi/compiler"
 )
 
 // Checker is the policy prover. openshell.Prover implements it.

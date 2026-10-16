@@ -43,7 +43,7 @@ func InstallCommand() string {
 // upstreamInstallerSHA256, and runs it for InstallVersion with the terminal
 // attached, so a password prompt from a package manager reaches the person.
 func Install(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) error {
-	dir, err := os.MkdirTemp("", "boundlane-openshell-")
+	dir, err := os.MkdirTemp("", "fenzi-openshell-")
 	if err != nil {
 		return err
 	}
@@ -130,7 +130,7 @@ func HomebrewInstallCommand() string {
 // InstallHomebrew downloads Homebrew's installer and runs it with the
 // terminal attached; it asks for the password and to confirm.
 func InstallHomebrew(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) error {
-	dir, err := os.MkdirTemp("", "boundlane-homebrew-")
+	dir, err := os.MkdirTemp("", "fenzi-homebrew-")
 	if err != nil {
 		return err
 	}

@@ -2,14 +2,14 @@
 # OpenShell 0.1.2 has no OpenCode profile. OpenCode 1.18.34 reads
 # ANTHROPIC_API_KEY and calls api.anthropic.com, which is this profile's shape.
 # Changes from upstream, reviewed 6 October 2026:
-#   - binaries name the real path in the boundlane/opencode image. The npm
+#   - binaries name the real path in the fenzi/opencode image. The npm
 #     opencode command is that native program; postinstall copies it to
 #     bin/opencode.exe on every architecture.
 #   - id changed so it cannot collide with an organization's own anthropic,
-#     or with boundlane-claude-code.
-id: boundlane-opencode
-display_name: OpenCode (Boundlane)
-description: OpenCode CLI in the boundlane/opencode image, with an Anthropic API key
+#     or with fenzi-claude-code.
+id: fenzi-opencode
+display_name: OpenCode (Fenzi)
+description: OpenCode CLI in the fenzi/opencode image, with an Anthropic API key
 category: agent
 inference_capable: true
 credentials:

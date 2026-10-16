@@ -1,9 +1,9 @@
 package main
 
-// boundlane rm: forget finished sandboxes. A finished sandbox is already gone
+// fenzi rm: forget finished sandboxes. A finished sandbox is already gone
 // from the gateway; what is left on this machine is its record in the state,
 // the changes staged when it ended, and the log saved then. rm removes those
-// three, in that order. A running sandbox is refused: boundlane stop ends it.
+// three, in that order. A running sandbox is refused: fenzi stop ends it.
 
 import (
 	"errors"
@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/run"
-	"boundlane/cli/internal/tui"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/run"
+	"fenzi/cli/internal/tui"
 )
 
 // jsonRemoved is one sandbox rm removed: its record always, and whether
@@ -46,7 +46,7 @@ func cmdRm(e env, args []string) (int, error) {
 	}
 	switch {
 	case len(pos) == 0 && !*finished:
-		return 1, errors.New("name a sandbox, or pass --finished for every finished one. boundlane ps --all lists them")
+		return 1, errors.New("name a sandbox, or pass --finished for every finished one. fenzi ps --all lists them")
 	case len(pos) > 0 && *finished:
 		return 1, errors.New("name sandboxes or pass --finished, not both")
 	}
@@ -54,7 +54,7 @@ func cmdRm(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	// The gateway says what is running; the state says what Boundlane started.
+	// The gateway says what is running; the state says what Fenzi started.
 	live, err := client().Sandboxes(e.ctx)
 	if err != nil {
 		return 1, err
@@ -82,7 +82,7 @@ func cmdRm(e env, args []string) (int, error) {
 		seen := map[string]bool{}
 		for _, n := range pos {
 			if _, ok := s.Find(n); !ok && !running[n] {
-				return 1, fmt.Errorf("%s is not a sandbox on this machine; boundlane ps --all lists them", n)
+				return 1, fmt.Errorf("%s is not a sandbox on this machine; fenzi ps --all lists them", n)
 			}
 			if !seen[n] {
 				seen[n] = true
@@ -94,7 +94,7 @@ func cmdRm(e env, args []string) (int, error) {
 	doc := jsonRm{Removed: []jsonRemoved{}, Refused: []jsonRefused{}}
 	for _, n := range names {
 		if running[n] {
-			doc.Refused = append(doc.Refused, jsonRefused{Name: n, Reason: fmt.Sprintf("%s is running; boundlane stop %s ends it first", n, n)})
+			doc.Refused = append(doc.Refused, jsonRefused{Name: n, Reason: fmt.Sprintf("%s is running; fenzi stop %s ends it first", n, n)})
 			continue
 		}
 		r, err := removeSandbox(dirs, s, n)
@@ -154,7 +154,7 @@ func removeSandbox(dirs config.Dirs, s *config.State, name string) (jsonRemoved,
 	// The folders are built from the name, so a hand-edited record with an
 	// empty name or a path in it must not reach RemoveAll.
 	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
-		return r, fmt.Errorf("%q is not a sandbox name boundlane created; nothing was removed", name)
+		return r, fmt.Errorf("%q is not a sandbox name fenzi created; nothing was removed", name)
 	}
 	kept := s.Sandboxes[:0]
 	for _, sb := range s.Sandboxes {

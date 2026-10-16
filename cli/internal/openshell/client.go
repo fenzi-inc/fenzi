@@ -15,7 +15,7 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// Pinned is the OpenShell release line Boundlane is built against. Bump it
+// Pinned is the OpenShell release line Fenzi is built against. Bump it
 // only after reading the upstream migration notes.
 var Pinned = VersionRange{Major: 0, Minor: 1}
 
@@ -260,7 +260,7 @@ func (c Client) SandboxCreate(ctx context.Context, o CreateOptions) ([]byte, err
 	for _, k := range sortedKeys(o.Labels) {
 		args = append(args, "--label", k+"="+o.Labels[k])
 	}
-	// --no-auto-providers: Boundlane creates its own providers, and without the
+	// --no-auto-providers: Fenzi creates its own providers, and without the
 	// flag a non-interactive create errors if one is missing.
 	args = append(args, "--approval-mode", "manual", "--no-auto-providers", "--detach", "--output", "json")
 	return c.R.Output(ctx, args...)
@@ -324,10 +324,10 @@ func (c Client) ExecOutput(ctx context.Context, name string, cmd ...string) ([]b
 	return c.R.Output(ctx, args...)
 }
 
-// Sandboxes: `openshell sandbox list --names --selector boundlane=1`, one name
+// Sandboxes: `openshell sandbox list --names --selector fenzi=1`, one name
 // per line (0.1.2 help text). Every sandbox run creates carries that label.
 func (c Client) Sandboxes(ctx context.Context) ([]string, error) {
-	out, err := c.R.Output(ctx, "sandbox", "list", "--names", "--selector", "boundlane=1")
+	out, err := c.R.Output(ctx, "sandbox", "list", "--names", "--selector", "fenzi=1")
 	if err != nil {
 		return nil, err
 	}

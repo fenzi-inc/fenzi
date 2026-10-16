@@ -6,14 +6,14 @@ import (
 	"os"
 	"time"
 
-	"boundlane/agents"
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/team"
-	"boundlane/cli/internal/tui"
-	"boundlane/cli/internal/workspace"
+	"fenzi/agents"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/team"
+	"fenzi/cli/internal/tui"
+	"fenzi/cli/internal/workspace"
 )
 
-// cmdHome is `boundlane` with no command on a terminal: what is going on in
+// cmdHome is `fenzi` with no command on a terminal: what is going on in
 // this folder, and the next things a person usually does.
 func cmdHome(e env, _ []string) (int, error) {
 	u := tui.New(e.stdin, e.stdout)
@@ -65,7 +65,7 @@ func cmdHome(e env, _ []string) (int, error) {
 	}
 	lines = append(lines, "", u.Dim(plan))
 	u.Blank()
-	u.Box("Boundlane "+Version, lines)
+	u.Box("Fenzi "+Version, lines)
 	u.Blank()
 
 	type choice struct {
@@ -80,17 +80,17 @@ func cmdHome(e env, _ []string) (int, error) {
 		add("review", "Review the agent's changes", plural(len(waiting.changes), "file", "files")+" waiting")
 	}
 	if workspace.CheckFolder(dir, home) == nil {
-		add("start", "Start "+agent.Display+" here", "boundlane run")
+		add("start", "Start "+agent.Display+" here", "fenzi run")
 	} else {
-		add("start", "Start "+agent.Display+" in a project folder", "boundlane run")
+		add("start", "Start "+agent.Display+" in a project folder", "fenzi run")
 	}
 	if len(live) > 0 {
-		add("connect", "Connect to a running sandbox", "boundlane connect")
-		add("requests", "Requests for more access", "boundlane requests")
+		add("connect", "Connect to a running sandbox", "fenzi connect")
+		add("requests", "Requests for more access", "fenzi requests")
 	}
-	add("doctor", "Check this machine", "boundlane doctor")
-	add("setup", "Change the agent, key, or folder", "boundlane setup")
-	add("help", "All commands", "boundlane help")
+	add("doctor", "Check this machine", "fenzi doctor")
+	add("setup", "Change the agent, key, or folder", "fenzi setup")
+	add("help", "All commands", "fenzi help")
 	add("quit", "Quit", "")
 
 	opts := make([]tui.Option, len(choices))

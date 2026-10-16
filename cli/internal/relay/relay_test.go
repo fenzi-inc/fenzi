@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/openshell"
-	"boundlane/cli/internal/team"
-	"boundlane/controlplane"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/openshell"
+	"fenzi/cli/internal/team"
+	"fenzi/controlplane"
 )
 
 func TestPassLoadsAHostChangeAndShipsADeny(t *testing.T) {

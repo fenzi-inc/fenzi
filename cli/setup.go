@@ -12,14 +12,14 @@ import (
 	"sync"
 	"time"
 
-	"boundlane/agents"
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/engine"
-	"boundlane/cli/internal/openshell"
-	"boundlane/cli/internal/run"
-	"boundlane/cli/internal/tui"
-	"boundlane/cli/internal/workspace"
-	"boundlane/compiler"
+	"fenzi/agents"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/engine"
+	"fenzi/cli/internal/openshell"
+	"fenzi/cli/internal/run"
+	"fenzi/cli/internal/tui"
+	"fenzi/cli/internal/workspace"
+	"fenzi/compiler"
 )
 
 // quietExit ends a command whose reason is already on screen.
@@ -41,7 +41,7 @@ func cmdSetup(e env, args []string) (int, error) {
 	}
 	stopped := func() {
 		u.Blank()
-		u.Println("  Setup stopped. Run boundlane setup to start again.")
+		u.Println("  Setup stopped. Run fenzi setup to start again.")
 	}
 
 	// Raw-key questions read Ctrl-C as a key. Typed answers and checks get
@@ -72,7 +72,7 @@ func cmdSetup(e env, args []string) (int, error) {
 
 func setup(e env, u *tui.UI, dirs config.Dirs, release func()) error {
 	u.Blank()
-	u.Box("Boundlane "+Version, []string{
+	u.Box("Fenzi "+Version, []string{
 		u.Bold("Run the agent you already use inside a sandbox on this machine."),
 		"",
 		"The agent gets a copy of one project folder and the hosts your policy names. Your home folder, your credentials, and everything else stay outside.",
@@ -163,7 +163,7 @@ func setupMachine(e env, u *tui.UI) error {
 			switch opts[i].Label {
 			case quit:
 				u.Blank()
-				u.Note("Install Homebrew from https://brew.sh, then run boundlane setup again.")
+				u.Note("Install Homebrew from https://brew.sh, then run fenzi setup again.")
 				return quietExit(3)
 			case install:
 				u.Blank()
@@ -175,7 +175,7 @@ func setupMachine(e env, u *tui.UI) error {
 			}
 			continue
 		}
-		u.Note("Boundlane runs each agent inside OpenShell, an open-source sandbox. Setup can install release " + openshell.InstallVersion + " with the upstream installer:")
+		u.Note("Fenzi runs each agent inside OpenShell, an open-source sandbox. Setup can install release " + openshell.InstallVersion + " with the upstream installer:")
 		u.Command(openshell.InstallCommand(), "")
 		u.Blank()
 		ok, err := u.Confirm("Install OpenShell "+openshell.InstallVersion+" now?", "Yes, install it", "No, I will install it myself")
@@ -184,7 +184,7 @@ func setupMachine(e env, u *tui.UI) error {
 		}
 		if !ok {
 			u.Blank()
-			u.Note("Install OpenShell " + openshell.InstallVersion + ", then run boundlane setup again. Guide: https://boundlane.dev/docs/install")
+			u.Note("Install OpenShell " + openshell.InstallVersion + ", then run fenzi setup again. Guide: https://fenzi.dev/docs/install")
 			return quietExit(3)
 		}
 		u.Blank()
@@ -216,7 +216,7 @@ func setupMachine(e env, u *tui.UI) error {
 		}
 		return "OpenShell " + v, nil
 	}); err != nil {
-		u.Note("Boundlane " + Version + " is built for OpenShell " + openshell.Pinned.String() + ". Install " + openshell.InstallVersion + ", then run boundlane setup again.")
+		u.Note("Fenzi " + Version + " is built for OpenShell " + openshell.Pinned.String() + ". Install " + openshell.InstallVersion + ", then run fenzi setup again.")
 		return quietExit(3)
 	}
 
@@ -243,7 +243,7 @@ gateway:
 		}
 		switch {
 		case d.None:
-			u.Note("On a Mac the gateway runs sandboxes in Docker Desktop, colima, or the MicroVM driver. On Linux it uses Docker Engine 28 or later, or Podman 5. Guide: https://boundlane.dev/docs/install#runtime")
+			u.Note("On a Mac the gateway runs sandboxes in Docker Desktop, colima, or the MicroVM driver. On Linux it uses Docker Engine 28 or later, or Podman 5. Guide: https://fenzi.dev/docs/install#runtime")
 			if openshell.CanInstallColima() {
 				opts = append(opts, tui.Option{Label: install, Hint: strings.Join(openshell.InstallColimaCommand, " ")})
 			}
@@ -258,13 +258,13 @@ gateway:
 		}
 		for _, r := range d.Running {
 			if !r.Tested {
-				u.Note(r.Name + " has not been tested with the gateway yet. If it does not connect, see https://boundlane.dev/docs/troubleshooting#runtimes")
+				u.Note(r.Name + " has not been tested with the gateway yet. If it does not connect, see https://fenzi.dev/docs/troubleshooting#runtimes")
 			}
 		}
 		sock := openshell.ColimaSocket()
 		canColima := sock != "" && needsColimaConfig() && openshell.Service("restart") != nil
 		if sock != "" && needsColimaConfig() && !canColima {
-			u.Note("colima needs three gateway settings: https://boundlane.dev/docs/troubleshooting#colima")
+			u.Note("colima needs three gateway settings: https://fenzi.dev/docs/troubleshooting#colima")
 		}
 		if canColima {
 			opts = append(opts, tui.Option{Label: colima, Hint: "writes " + tilde(openshell.GatewayConfig(), homeDir())})
@@ -355,7 +355,7 @@ gateway:
 		}
 		return strings.Join(drivers, ", "), err
 	}); err != nil {
-		u.Note("Start Docker, Podman, or the MicroVM driver, then run boundlane setup again.")
+		u.Note("Start Docker, Podman, or the MicroVM driver, then run fenzi setup again.")
 		return quietExit(3)
 	}
 
@@ -366,7 +366,7 @@ gateway:
 		return quietExit(3)
 	case mode == "auto":
 		u.Problem("Approvals", "requests are approved with no person")
-		u.Note("This gateway approves an agent's requests for more access by itself. Boundlane needs a person to decide.")
+		u.Note("This gateway approves an agent's requests for more access by itself. Fenzi needs a person to decide.")
 		ok, err := u.Confirm("Turn automatic approval off for this gateway?", "Yes, a person approves", "No, quit setup")
 		if err != nil {
 			return err
@@ -394,7 +394,7 @@ gateway:
 			keys = append(keys, k)
 		}
 		u.Problem("Log and requests", "turned off for every sandbox: "+strings.Join(keys, ", "))
-		u.Note("Boundlane turns on the decision log and agent requests for each sandbox. The gateway overrides that for every sandbox.")
+		u.Note("Fenzi turns on the decision log and agent requests for each sandbox. The gateway overrides that for every sandbox.")
 		ok, err := u.Confirm("Remove the gateway-wide setting?", "Yes, remove it", "No, quit setup")
 		if err != nil {
 			return err
@@ -417,13 +417,13 @@ gateway:
 		u.Done("Policy check", "installed")
 	} else {
 		u.Problem("Policy check", "openshell-prover is missing")
-		u.Note("It ships with the runtime's Homebrew, Debian, and RPM packages. Reinstall OpenShell from one of them, then run boundlane setup again.")
+		u.Note("It ships with the runtime's Homebrew, Debian, and RPM packages. Reinstall OpenShell from one of them, then run fenzi setup again.")
 		return quietExit(3)
 	}
 
 	if b, err := imageBuilder(e, nil); err != nil {
 		u.Problem("Image builds", "Docker or Podman is needed")
-		u.Note("Boundlane builds each agent's image on this machine. Install Docker or Podman, then run boundlane setup again.")
+		u.Note("Fenzi builds each agent's image on this machine. Install Docker or Podman, then run fenzi setup again.")
 		return quietExit(3)
 	} else {
 		u.Done("Image builds", b.Bin)
@@ -593,7 +593,7 @@ func setupProject(u *tui.UI, a agents.Entry, back bool) (string, error) {
 	if wd, err := cwd(); err == nil && workspace.CheckFolder(wd, home) == nil {
 		def = tilde(wd, home)
 	}
-	u.Note("The agent works on a copy of this folder. .gitignore is respected and .git is left out. Your files change only when you run boundlane apply.")
+	u.Note("The agent works on a copy of this folder. .gitignore is respected and .git is left out. Your files change only when you run fenzi apply.")
 	u.Blank()
 	for {
 		answer, err := u.Ask("Which folder should "+a.Display+" work in?", def, back)
@@ -684,9 +684,9 @@ func setupReady(e env, u *tui.UI, dirs config.Dirs, a agents.Entry, project stri
 	return confirmBack(u, "Start "+a.Display+" now?", "Start it in "+tilde(project, home), "Not now", back)
 }
 
-// readyPolicy describes the policy boundlane run will use in project,
+// readyPolicy describes the policy fenzi run will use in project,
 // resolved the way run resolves it: the signed team revision on a signed-in
-// machine, else developer-default with the project's boundlane.yaml over it.
+// machine, else developer-default with the project's fenzi.yaml over it.
 func readyPolicy(e env, u *tui.UI, dirs config.Dirs, a agents.Entry, project string) []string {
 	quiet := env{ctx: e.ctx, stdin: e.stdin, stdout: io.Discard, stderr: io.Discard}
 	resolved, err := resolvePolicy(quiet, dirs, project, "")
@@ -699,7 +699,7 @@ func readyPolicy(e env, u *tui.UI, dirs config.Dirs, a agents.Entry, project str
 		msg := strings.Join(strings.Fields(err.Error()), " ")
 		return []string{
 			row(u, "Policy", u.Deny("cannot be used: ")+msg),
-			strings.Repeat(" ", 10) + "boundlane run stops until it is fixed. boundlane policy check says why.",
+			strings.Repeat(" ", 10) + "fenzi run stops until it is fixed. fenzi policy check says why.",
 		}
 	}
 	lines := []string{row(u, "Policy", resolved.Sources)}
@@ -733,8 +733,8 @@ func setupFinish(e env, u *tui.UI, a agents.Entry, project string, start bool, r
 		u.Println("  " + u.Bold("When you are ready"))
 		u.Blank()
 		u.Command("cd "+shellPath(tilde(project, home)), "")
-		u.Command("boundlane run", "")
-		u.Note("Or type boundlane on its own for a menu.")
+		u.Command("fenzi run", "")
+		u.Note("Or type fenzi on its own for a menu.")
 		setupAfter(u)
 		return nil
 	}
@@ -759,26 +759,26 @@ func setupAfter(u *tui.UI) {
 	u.Println("  " + u.Bold("While the agent works, in another terminal"))
 	u.Blank()
 	u.Commands(
-		[2]string{"boundlane requests", "what it asked for; approve or deny each one"},
-		[2]string{"boundlane log --deny", "what was blocked"},
+		[2]string{"fenzi requests", "what it asked for; approve or deny each one"},
+		[2]string{"fenzi log --deny", "what was blocked"},
 	)
 	u.Blank()
 	u.Println("  " + u.Bold("When it exits"))
 	u.Blank()
-	u.Note("Boundlane shows what the agent changed and asks before anything is copied into your folder. Then it asks whether to keep the sandbox running. Keeping it leaves the session and its approvals in place; boundlane connect opens the agent again, and boundlane stop ends it.")
-	if p := os.Getenv("BOUNDLANE_PATH_PROFILE"); p != "" && !onPath() {
+	u.Note("Fenzi shows what the agent changed and asks before anything is copied into your folder. Then it asks whether to keep the sandbox running. Keeping it leaves the session and its approvals in place; fenzi connect opens the agent again, and fenzi stop ends it.")
+	if p := os.Getenv("FENZI_PATH_PROFILE"); p != "" && !onPath() {
 		u.Blank()
-		u.Note("The installer added boundlane to PATH in " + p + ". Open a new terminal, or run this, so the current one finds it:")
+		u.Note("The installer added fenzi to PATH in " + p + ". Open a new terminal, or run this, so the current one finds it:")
 		u.Command("source "+p, "")
 	} else if !onPath() {
 		u.Blank()
-		u.Note("Your shell cannot find boundlane yet. Add its folder to PATH:")
+		u.Note("Your shell cannot find fenzi yet. Add its folder to PATH:")
 		if exe, err := os.Executable(); err == nil {
 			u.Command(`export PATH="`+filepath.Dir(exe)+`:$PATH"`, "")
 		}
 	}
 	u.Blank()
-	u.Println("  " + u.Dim("Docs: https://boundlane.dev/docs"))
+	u.Println("  " + u.Dim("Docs: https://fenzi.dev/docs"))
 }
 
 func row(u *tui.UI, label, value string) string {
@@ -786,7 +786,7 @@ func row(u *tui.UI, label, value string) string {
 }
 
 func onPath() bool {
-	found, err := exec.LookPath("boundlane")
+	found, err := exec.LookPath("fenzi")
 	if err != nil {
 		return false
 	}

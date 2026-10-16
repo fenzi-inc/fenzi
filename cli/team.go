@@ -2,7 +2,7 @@ package main
 
 // The Team plan's client commands: login, logout, status, policy publish,
 // and the policy an enrolled machine runs. The control plane is the hosted
-// service at https://boundlane.dev; nothing here holds a model key or source.
+// service at https://fenzi.dev; nothing here holds a model key or source.
 
 import (
 	"context"
@@ -13,14 +13,14 @@ import (
 	"path/filepath"
 	"time"
 
-	"boundlane/agents"
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/relay"
-	"boundlane/cli/internal/run"
-	"boundlane/cli/internal/screen"
-	"boundlane/cli/internal/team"
-	"boundlane/cli/internal/tui"
-	"boundlane/compiler"
+	"fenzi/agents"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/relay"
+	"fenzi/cli/internal/run"
+	"fenzi/cli/internal/screen"
+	"fenzi/cli/internal/team"
+	"fenzi/cli/internal/tui"
+	"fenzi/compiler"
 )
 
 func reportAccount(e env, line func(status, check, detail string)) {
@@ -45,7 +45,7 @@ func cmdPublish(e env, args []string) (int, error) {
 		return 1, err
 	}
 	if len(pos) != 1 {
-		return 1, errors.New("usage: boundlane policy publish <file>")
+		return 1, errors.New("usage: fenzi policy publish <file>")
 	}
 	dirs, err := config.Default()
 	if err != nil {
@@ -53,7 +53,7 @@ func cmdPublish(e env, args []string) (int, error) {
 	}
 	en, err := team.Load(dirs)
 	if errors.Is(err, team.ErrNotEnrolled) {
-		return 1, errors.New("sign in first (boundlane login)")
+		return 1, errors.New("sign in first (fenzi login)")
 	}
 	if err != nil {
 		return 1, err
@@ -72,7 +72,7 @@ func cmdPublish(e env, args []string) (int, error) {
 		if en.Server != "" {
 			where = en.Server + "/console"
 		}
-		return 1, fmt.Errorf("publishing needs a team admin, and %s is %s. An admin publishes from %s, or signs in on this machine with boundlane login", who, withArticle(en.RoleName()), where)
+		return 1, fmt.Errorf("publishing needs a team admin, and %s is %s. An admin publishes from %s, or signs in on this machine with fenzi login", who, withArticle(en.RoleName()), where)
 	}
 	raw, err := os.ReadFile(pos[0])
 	if err != nil {
@@ -110,7 +110,7 @@ func cmdLogin(e env, args []string) (int, error) {
 	defer cancel()
 	en, err := team.Login(ctx, team.Client{Base: *server}, host, e.stdout)
 	if errors.Is(err, context.DeadlineExceeded) {
-		return 1, errors.New("no approval after two minutes, nothing was stored. Run boundlane login for a new code")
+		return 1, errors.New("no approval after two minutes, nothing was stored. Run fenzi login for a new code")
 	}
 	if err != nil {
 		return 1, err
@@ -155,7 +155,7 @@ func cmdStatus(e env, args []string) (int, error) {
 		}
 		u.Title("This machine", "")
 		u.Skip("Account", "none, Free plan")
-		u.Command("boundlane login", "sign this machine in")
+		u.Command("fenzi login", "sign this machine in")
 		u.Blank()
 		return 0, nil
 	}
@@ -314,7 +314,7 @@ func resolvePolicy(e env, dirs config.Dirs, repo, file string) (run.Resolved, er
 		screen.New(e.stdout).Label("policy", note)
 	}
 	if en.Revision == 0 {
-		return run.Resolved{}, errors.New("no team policy yet; an admin publishes one in the console or with boundlane policy publish")
+		return run.Resolved{}, errors.New("no team policy yet; an admin publishes one in the console or with fenzi policy publish")
 	}
 	b, err := en.Bundle()
 	if err != nil {

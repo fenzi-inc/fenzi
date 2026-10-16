@@ -6,12 +6,12 @@ import (
 	"sync"
 	"time"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/team"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/team"
 )
 
 // forwardEvery is how often a run on a signed-in machine sends decisions and
-// requests to the team console, the same as boundlane forward's default.
+// requests to the team console, the same as fenzi forward's default.
 var forwardEvery = 5 * time.Second
 
 // forwardLastWait bounds the last pass after the agent exits, so a console
@@ -20,11 +20,11 @@ var forwardLastWait = 20 * time.Second
 
 // forwardWhile forwards to the team console in the background while an agent
 // runs, so a request the agent files reaches the console without the Mac app or
-// a separate boundlane forward. It starts only on a machine signed in to a team,
+// a separate fenzi forward. It starts only on a machine signed in to a team,
 // for a sandbox started from the team's policy; on Free it does nothing.
 //
 // Passes take turns with any other forwarder through relay.lock: when one is
-// already running (the Mac app's, or boundlane forward), this one skips that
+// already running (the Mac app's, or fenzi forward), this one skips that
 // pass rather than queue behind it. Nothing is written to the agent's terminal.
 //
 // The returned stop ends the loop and makes one last pass, so what the session

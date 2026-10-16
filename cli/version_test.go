@@ -16,7 +16,7 @@ func TestVersionDisplay(t *testing.T) {
 		if strings.Contains(got, "OpenShell") || strings.Contains(got, "openshell") {
 			t.Fatalf("%v names the runtime:\n%s", args, got)
 		}
-		if !strings.Contains(got, "■ Version") || !strings.Contains(got, "Boundlane") || !strings.Contains(got, Version) {
+		if !strings.Contains(got, "■ Version") || !strings.Contains(got, "Fenzi") || !strings.Contains(got, Version) {
 			t.Fatalf("%v display:\n%s", args, got)
 		}
 		if strings.Contains(errOut.String(), "unknown command") {

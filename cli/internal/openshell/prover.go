@@ -18,7 +18,7 @@ const (
 	Inconclusive    = "inconclusive"
 )
 
-// RequiredDomains are the parts of a policy Boundlane relies on. A result whose
+// RequiredDomains are the parts of a policy Fenzi relies on. A result whose
 // coverage omits any of them does not count as a pass.
 var RequiredDomains = []string{"filesystem", "network_l4", "network_rest", "process", "landlock"}
 

@@ -1,13 +1,13 @@
 # Reviewed copy of providers/claude-code.yaml from OpenShell v0.1.2 (Apache-2.0).
 # Changes from upstream, reviewed 3 October 2026:
-#   - binaries name the real path in the boundlane/claude image. OpenShell
+#   - binaries name the real path in the fenzi/claude image. OpenShell
 #     matches the kernel-resolved path, not the /usr/local/bin/claude symlink.
 #   - statsig.anthropic.com and sentry.io (telemetry, error reporting) removed.
 #     Only the model API is reachable with the key.
 #   - id changed so it cannot collide with an organization's own claude-code.
-id: boundlane-claude-code
-display_name: Claude Code (Boundlane)
-description: Claude Code CLI in the boundlane/claude image
+id: fenzi-claude-code
+display_name: Claude Code (Fenzi)
+description: Claude Code CLI in the fenzi/claude image
 category: agent
 inference_capable: true
 credentials:

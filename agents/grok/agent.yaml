@@ -1,7 +1,7 @@
 name: grok
 display: Grok
 command: grok
-image: boundlane/grok
+image: fenzi/grok
 # Bump together with GROK_VERSION in the Dockerfile. npm dist-tag latest
 # on 6 October 2026. The alpha tag was 1.0.49 and is not pinned.
 version: "1.0.46"
@@ -35,7 +35,7 @@ env:
 guide_flag: --rules
 key:
   env: XAI_API_KEY
-  profile_type: boundlane-grok
+  profile_type: fenzi-grok
   profile_file: profile.yaml
 status: testing
 verified: false

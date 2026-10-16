@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/forward"
-	"boundlane/cli/internal/openshell"
-	"boundlane/cli/internal/team"
-	"boundlane/teamapi"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/forward"
+	"fenzi/cli/internal/openshell"
+	"fenzi/cli/internal/team"
+	"fenzi/teamapi"
 )
 
 // fakeTeam is a team server that records what the forwarder sends.

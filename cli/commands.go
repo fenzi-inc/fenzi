@@ -14,18 +14,18 @@ import (
 	"strings"
 	"time"
 
-	"boundlane/agents"
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/engine"
-	"boundlane/cli/internal/forward"
-	"boundlane/cli/internal/openshell"
-	"boundlane/cli/internal/run"
-	"boundlane/cli/internal/screen"
-	"boundlane/cli/internal/team"
-	"boundlane/cli/internal/tui"
-	"boundlane/cli/internal/workspace"
-	"boundlane/compiler"
-	"boundlane/policies"
+	"fenzi/agents"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/engine"
+	"fenzi/cli/internal/forward"
+	"fenzi/cli/internal/openshell"
+	"fenzi/cli/internal/run"
+	"fenzi/cli/internal/screen"
+	"fenzi/cli/internal/team"
+	"fenzi/cli/internal/tui"
+	"fenzi/cli/internal/workspace"
+	"fenzi/compiler"
+	"fenzi/policies"
 )
 
 func client() openshell.Client { return openshell.Client{R: openshell.Exec{Bin: "openshell"}} }
@@ -47,7 +47,7 @@ func imageBuilder(e env, out io.Writer) (engine.Builder, error) {
 
 func cmdDoctor(e env, args []string) (int, error) {
 	fs := newFlags("doctor", e.stderr)
-	fix := fs.Bool("fix", false, "remove gateway-wide settings that weaken or block Boundlane")
+	fix := fs.Bool("fix", false, "remove gateway-wide settings that weaken or block Fenzi")
 	asJSON := jsonFlag(fs)
 	if _, err := parse(fs, args); err != nil {
 		return 1, err
@@ -82,14 +82,14 @@ func cmdDoctor(e env, args []string) (int, error) {
 	// --json it goes to standard error, so standard output stays one document.
 	changing := func(what string) {
 		if *asJSON {
-			fmt.Fprintln(e.stderr, "boundlane doctor --fix: "+what)
+			fmt.Fprintln(e.stderr, "fenzi doctor --fix: "+what)
 			return
 		}
 		u.Note("Changing: " + what)
 	}
 	oc := client()
 	if !openshell.Installed("openshell") {
-		line("FAIL", "Runtime", fmt.Sprintf("OpenShell %s is not installed. The packages are on https://boundlane.dev/docs/install", openshell.Pinned))
+		line("FAIL", "Runtime", fmt.Sprintf("OpenShell %s is not installed. The packages are on https://fenzi.dev/docs/install", openshell.Pinned))
 	} else {
 		out, err := oc.Version(e.ctx)
 		if v, ok := openshell.Pinned.Contains(out); err == nil && ok {
@@ -100,7 +100,7 @@ func cmdDoctor(e env, args []string) (int, error) {
 		if err := oc.Ready(e.ctx); err != nil {
 			msg := err.Error()
 			if d := openshell.Diagnose(); d.None || d.Orphan || (len(d.Running) == 0 && len(d.Stopped) > 0) {
-				msg = d.Summary() + " Run boundlane setup to fix it."
+				msg = d.Summary() + " Run fenzi setup to fix it."
 			}
 			line("FAIL", "Gateway", msg)
 		} else {
@@ -122,7 +122,7 @@ func cmdDoctor(e env, args []string) (int, error) {
 				line("ok", "Approvals", "fixed: a person approves each request")
 			}
 		case mode == "auto":
-			line("FAIL", "Approvals", "requests are approved with no person. Run boundlane doctor --fix to turn that off")
+			line("FAIL", "Approvals", "requests are approved with no person. Run fenzi doctor --fix to turn that off")
 		case mode == "" || mode == openshell.Unset:
 			line("ok", "Approvals", "a person approves each request")
 		default:
@@ -141,10 +141,10 @@ func cmdDoctor(e env, args []string) (int, error) {
 			sort.Strings(keys)
 			for _, k := range keys {
 				if !*fix {
-					line("FAIL", "Log and requests", fmt.Sprintf("the gateway sets %s to %s for every sandbox, so boundlane run cannot turn it on. Run boundlane doctor --fix to remove it", k, bad[k]))
+					line("FAIL", "Log and requests", fmt.Sprintf("the gateway sets %s to %s for every sandbox, so fenzi run cannot turn it on. Run fenzi doctor --fix to remove it", k, bad[k]))
 					continue
 				}
-				changing(fmt.Sprintf("removing the gateway-wide %s (%s), so boundlane run can turn it on for each sandbox.", k, bad[k]))
+				changing(fmt.Sprintf("removing the gateway-wide %s (%s), so fenzi run can turn it on for each sandbox.", k, bad[k]))
 				if oc.GlobalSettingDelete(e.ctx, k) != nil {
 					line("FAIL", "Log and requests", "could not remove the gateway-wide "+k)
 				} else {
@@ -177,16 +177,16 @@ func cmdDoctor(e env, args []string) (int, error) {
 	u.Blank()
 	if failed {
 		u.Println("  " + u.Bold("Some checks need you.") + " " + u.Dim("Each ! line says what to change."))
-		u.Commands([2]string{"boundlane setup", "fixes most of them for you"}, [2]string{"boundlane doctor", "checks again"})
-		u.Note("Help for each line: https://boundlane.dev/docs/troubleshooting#doctor")
+		u.Commands([2]string{"fenzi setup", "fixes most of them for you"}, [2]string{"fenzi doctor", "checks again"})
+		u.Note("Help for each line: https://fenzi.dev/docs/troubleshooting#doctor")
 		u.Blank()
 		return 3, nil
 	}
 	u.Println("  " + u.Bold("This machine is ready."))
 	if _, ok := configDirs(e).LoadSetup(); ok {
-		u.Command("boundlane run", "start the agent in this folder")
+		u.Command("fenzi run", "start the agent in this folder")
 	} else {
-		u.Command("boundlane setup", "choose an agent, store its key, pick a folder")
+		u.Command("fenzi setup", "choose an agent, store its key, pick a folder")
 	}
 	u.Blank()
 	return 0, nil
@@ -221,8 +221,8 @@ func failureMode() string {
 	return "a bad policy is refused"
 }
 
-const initTemplate = `# Boundlane project policy. Merged over developer-default on the Free plan.
-# Reference: https://boundlane.dev/docs/policy (not published yet).
+const initTemplate = `# Fenzi project policy. Merged over developer-default on the Free plan.
+# Reference: https://fenzi.dev/docs/policy (not published yet).
 version: 1
 
 # Hosts this project needs beyond developer-default.
@@ -259,8 +259,8 @@ func cmdInit(e env, args []string) (int, error) {
 	u := tui.New(e.stdin, e.stdout)
 	u.Blank()
 	u.Done("Wrote", run.ProjectFile)
-	u.Note("Every line is commented out, so nothing changes until you uncomment one. The next boundlane run in this folder uses it.")
-	u.Command("boundlane policy check", "see that it stays inside developer-default")
+	u.Note("Every line is commented out, so nothing changes until you uncomment one. The next fenzi run in this folder uses it.")
+	u.Command("fenzi policy check", "see that it stays inside developer-default")
 	u.Blank()
 	return 0, nil
 }
@@ -269,7 +269,7 @@ func cmdRun(e env, args []string) (int, error) {
 	fs := newFlags("run", e.stderr)
 	keep := fs.Bool("keep", false, "keep the sandbox when the agent exits, without asking")
 	name := fs.String("name", "", "sandbox name, at most 19 characters (default bl-<folder>-<id>)")
-	policyFile := fs.String("policy", "", "policy file to use instead of ./boundlane.yaml")
+	policyFile := fs.String("policy", "", "policy file to use instead of ./fenzi.yaml")
 	noUpload := fs.Bool("no-upload", false, "start with an empty working folder")
 	allowSecrets := fs.Bool("allow-secrets", false, "copy files that look like secrets without asking; the warning is still printed")
 	if err := fs.Parse(args); err != nil {
@@ -283,7 +283,7 @@ func cmdRun(e env, args []string) (int, error) {
 		return 1, err
 	}
 	if err := workspace.CheckFolder(repo, homeDir()); err != nil {
-		return 1, fmt.Errorf("boundlane run copies the folder it starts in, and %v. cd into one project folder first", err)
+		return 1, fmt.Errorf("fenzi run copies the folder it starts in, and %v. cd into one project folder first", err)
 	}
 	entry, err := agents.Get(rest[0])
 	if err != nil {
@@ -311,7 +311,7 @@ func cmdRun(e env, args []string) (int, error) {
 		confirmSecrets = func([]string) (bool, error) {
 			i, err := u.Select("Copy them into the sandbox?", []tui.Option{
 				{Label: "No, stop here", Hint: "nothing is created; add them to .gitignore, then run again"},
-				{Label: "Yes, copy them", Hint: "boundlane run --allow-secrets skips this question"},
+				{Label: "Yes, copy them", Hint: "fenzi run --allow-secrets skips this question"},
 			}, 0)
 			if errors.Is(err, tui.ErrCancelled) {
 				return false, nil
@@ -321,14 +321,14 @@ func cmdRun(e env, args []string) (int, error) {
 	}
 	reviewed := false
 	// On a machine signed in to a team, requests and decisions reach the
-	// console while the agent runs, without the Mac app or boundlane forward.
+	// console while the agent runs, without the Mac app or fenzi forward.
 	stopForward := forwardWhile(e, resolved.TeamRevision)
 	forwarded := false
 	finishForward := func() {
 		if !forwarded {
 			forwarded = true
 			if !stopForward() {
-				u.Note("The team console was not reached during this run. Run boundlane forward to send what is queued.")
+				u.Note("The team console was not reached during this run. Run fenzi forward to send what is queued.")
 			}
 		}
 	}
@@ -361,9 +361,9 @@ func cmdRun(e env, args []string) (int, error) {
 				u.Blank()
 			}
 			u.Println(fmt.Sprintf("  %s %s", u.Accent("■"), u.Bold("The sandbox")))
-			u.Note("It still has this session, its files, and any approvals from this run. Keep it to come back with boundlane connect. Deleting it does not touch changes that are staged or applied.")
+			u.Note("It still has this session, its files, and any approvals from this run. Keep it to come back with fenzi connect. Deleting it does not touch changes that are staged or applied.")
 			i, err := u.Select("What should happen to "+sandbox+"?", []tui.Option{
-				{Label: "Keep it running", Hint: "boundlane connect opens the agent again"},
+				{Label: "Keep it running", Hint: "fenzi connect opens the agent again"},
 				{Label: "Delete it", Hint: "ends the session and its pending requests"},
 			}, 0)
 			if errors.Is(err, tui.ErrCancelled) {
@@ -375,7 +375,7 @@ func cmdRun(e env, args []string) (int, error) {
 	if errors.Is(err, run.ErrSecretsDeclined) {
 		u.Blank()
 		u.Skip("Stopped", "nothing was created")
-		u.Note("Add those files to .gitignore, or move them out of this folder, then run boundlane run again.")
+		u.Note("Add those files to .gitignore, or move them out of this folder, then run fenzi run again.")
 		u.Blank()
 		return 1, nil
 	}
@@ -384,8 +384,8 @@ func cmdRun(e env, args []string) (int, error) {
 	}
 	if res.Kept {
 		u.Commands(
-			[2]string{"boundlane connect " + res.Sandbox, "open the agent again"},
-			[2]string{"boundlane stop " + res.Sandbox, "end it and bring the changes back"},
+			[2]string{"fenzi connect " + res.Sandbox, "open the agent again"},
+			[2]string{"fenzi stop " + res.Sandbox, "end it and bring the changes back"},
 		)
 		u.Blank()
 	}
@@ -442,7 +442,7 @@ func cmdRequests(e env, args []string) (int, error) {
 	if len(list) == 0 {
 		if strings.Contains(string(out), "Chunk") {
 			if *asJSON {
-				return 1, errors.New("the runtime listed requests in a form this release does not read; run boundlane requests without --json")
+				return 1, errors.New("the runtime listed requests in a form this release does not read; run fenzi requests without --json")
 			}
 			// The text format changed; show it rather than hide requests.
 			e.stdout.Write(out)
@@ -485,7 +485,7 @@ func cmdRequests(e env, args []string) (int, error) {
 		flag = " --sandbox " + sb.Name
 	}
 	hidden := len(drafts) > 0 && !*all
-	allHint := [2]string{"boundlane requests --all" + flag, "list the drafts too"}
+	allHint := [2]string{"fenzi requests --all" + flag, "list the drafts too"}
 	draftNote := func() {
 		if hidden {
 			u.Note(plural(len(drafts), "more was", "more were") + " drafted by the sandbox from refused connections, not asked for by the agent: " + destinations(drafts) + ".")
@@ -517,7 +517,7 @@ func cmdRequests(e env, args []string) (int, error) {
 	draftNote()
 	list = shown
 	if !u.Interactive() {
-		hints := [][2]string{{"boundlane approve <id>" + flag, "let it through"}, {`boundlane deny <id> --reason "..."` + flag, "refuse; the agent sees the reason"}}
+		hints := [][2]string{{"fenzi approve <id>" + flag, "let it through"}, {`fenzi deny <id> --reason "..."` + flag, "refuse; the agent sees the reason"}}
 		if hidden {
 			hints = append(hints, allHint)
 		}
@@ -643,22 +643,22 @@ func chunk(e env, sandbox, prefix string) (string, error) {
 func cmdApprove(e env, args []string) (int, error) {
 	fs := newFlags("approve", e.stderr)
 	sandbox := fs.String("sandbox", "", "sandbox name (default: the latest running one for this folder)")
-	save := fs.Bool("save", false, "also add the host to the project's boundlane.yaml, so the next sandbox there has it (Free plan)")
-	dryRun := fs.Bool("dry-run", false, "with --save: show the change to boundlane.yaml and its policy check; approve nothing, write nothing")
-	policyFrom := fs.String("policy-from", "", "with --save: use this file as the new boundlane.yaml. It is checked first; when the check fails, nothing is approved or written")
+	save := fs.Bool("save", false, "also add the host to the project's fenzi.yaml, so the next sandbox there has it (Free plan)")
+	dryRun := fs.Bool("dry-run", false, "with --save: show the change to fenzi.yaml and its policy check; approve nothing, write nothing")
+	policyFrom := fs.String("policy-from", "", "with --save: use this file as the new fenzi.yaml. It is checked first; when the check fails, nothing is approved or written")
 	asJSON := jsonFlag(fs)
 	pos, err := parse(fs, args)
 	if err != nil {
 		return 1, err
 	}
 	if len(pos) != 1 {
-		return 1, errors.New("name the request: boundlane approve <id>. boundlane requests lists them and can approve them for you")
+		return 1, errors.New("name the request: fenzi approve <id>. fenzi requests lists them and can approve them for you")
 	}
 	switch {
 	case *dryRun && !*save:
-		return 1, errors.New("--dry-run previews --save: boundlane approve <id> --save --dry-run")
+		return 1, errors.New("--dry-run previews --save: fenzi approve <id> --save --dry-run")
 	case *policyFrom != "" && !*save:
-		return 1, errors.New("--policy-from goes with --save: boundlane approve <id> --save --policy-from <file>")
+		return 1, errors.New("--policy-from goes with --save: fenzi approve <id> --save --policy-from <file>")
 	case *save && *asJSON && !*dryRun:
 		return 1, errors.New("--save prints what it wrote and the policy check; drop --json, or add --dry-run for the preview as JSON")
 	}
@@ -705,6 +705,11 @@ func cmdApprove(e env, args []string) (int, error) {
 			if repo, err = cwd(); err != nil {
 				return 1, err
 			}
+		}
+		if moved, err := run.MigrateProjectFile(repo); err != nil {
+			return 1, fmt.Errorf("not approved: renaming %s to %s: %w", run.LegacyProjectFile, run.ProjectFile, err)
+		} else if moved {
+			fmt.Fprintf(e.stderr, "Renamed %s to %s, the name since Boundlane became Fenzi.\n", run.LegacyProjectFile, run.ProjectFile)
 		}
 		if file, err = loadProject(filepath.Join(repo, run.ProjectFile)); err != nil {
 			return 1, fmt.Errorf("not approved: %w", err)
@@ -811,7 +816,7 @@ func consoleRequestURL(e env, dirs config.Dirs, server, sandbox, id string) stri
 }
 
 // saveApproved writes the approved host into the project file, then runs
-// the check boundlane policy check runs and prints its result.
+// the check fenzi policy check runs and prints its result.
 func saveApproved(e env, u *tui.UI, sb config.Sandbox, repo string, file *projectFile, host savedHost) (int, error) {
 	out := file.add(host)
 	if !out.Saved {
@@ -879,7 +884,7 @@ func cmdDeny(e env, args []string) (int, error) {
 		return 1, err
 	}
 	if len(pos) != 1 || strings.TrimSpace(*reason) == "" {
-		return 1, errors.New(`name the request and say why: boundlane deny <id> --reason "text". The agent sees the reason`)
+		return 1, errors.New(`name the request and say why: fenzi deny <id> --reason "text". The agent sees the reason`)
 	}
 	dirs, err := config.Default()
 	if err != nil {
@@ -1115,7 +1120,7 @@ func staged(e env, name string) (config.Sandbox, workspace.Manifest, string, []w
 	files := filepath.Join(dir, "files")
 	if _, err := os.Stat(files); err != nil {
 		if sb.Running {
-			return sb, nil, "", nil, fmt.Errorf("nothing staged for %s; boundlane stop %s brings back what the agent changed", sb.Name, sb.Name)
+			return sb, nil, "", nil, fmt.Errorf("nothing staged for %s; fenzi stop %s brings back what the agent changed", sb.Name, sb.Name)
 		}
 		return sb, nil, "", nil, fmt.Errorf("nothing staged for %s; its changes were applied", sb.Name)
 	}
@@ -1131,7 +1136,7 @@ func cmdPolicy(e env, args []string) (int, error) {
 		return cmdPolicyApply(e, args[1:])
 	}
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		subHelp(e, "policy", "The policy for this folder is the one boundlane run uses: developer-default plus ./boundlane.yaml, if there is one, or the team's signed revision on a signed-in machine.", [][2]string{
+		subHelp(e, "policy", "The policy for this folder is the one fenzi run uses: developer-default plus ./fenzi.yaml, if there is one, or the team's signed revision on a signed-in machine.", [][2]string{
 			{"policy check [file]", "Prove it stays inside the org boundary"},
 			{"policy compile [file]", "Print the OpenShell policy it becomes"},
 			{"policy apply", "Load host changes onto running sandboxes (Free plan)"},
@@ -1140,7 +1145,7 @@ func cmdPolicy(e env, args []string) (int, error) {
 		return 0, nil
 	}
 	if args[0] != "compile" && args[0] != "check" {
-		return 1, fmt.Errorf("%q is not a policy command; try boundlane policy check, compile, apply, or publish", args[0])
+		return 1, fmt.Errorf("%q is not a policy command; try fenzi policy check, compile, apply, or publish", args[0])
 	}
 	sub := args[0]
 	fs := newFlags("policy "+sub, e.stderr)
@@ -1155,7 +1160,7 @@ func cmdPolicy(e env, args []string) (int, error) {
 		return 1, err
 	}
 	if sub == "compile" && *asJSON {
-		return 1, errors.New("--json is for boundlane policy check; compile prints the policy as YAML")
+		return 1, errors.New("--json is for fenzi policy check; compile prints the policy as YAML")
 	}
 	file := ""
 	if len(pos) > 0 {
@@ -1184,8 +1189,8 @@ func cmdPolicy(e env, args []string) (int, error) {
 		}
 		resolved = run.Resolved{Doc: doc, Sources: file}
 	} else if file == "" {
-		// The policy boundlane run uses here: the signed team revision on a
-		// signed-in machine, developer-default plus ./boundlane.yaml on the
+		// The policy fenzi run uses here: the signed team revision on a
+		// signed-in machine, developer-default plus ./fenzi.yaml on the
 		// Free plan. Its labels go to standard error, so standard output keeps
 		// only the YAML or the JSON document.
 		dirs, err := config.Default()
@@ -1238,7 +1243,7 @@ func cmdPolicy(e env, args []string) (int, error) {
 		return 0, nil
 	}
 
-	tmp, err := os.MkdirTemp("", "boundlane-policy-")
+	tmp, err := os.MkdirTemp("", "fenzi-policy-")
 	if err != nil {
 		return 1, err
 	}
@@ -1269,9 +1274,9 @@ func cmdPolicy(e env, args []string) (int, error) {
 
 // proveResolved compiles a resolved policy for an agent and runs the prover
 // on it, against boundary or, when that is "", the boundary derived from the
-// same policy. This is boundlane policy check.
+// same policy. This is fenzi policy check.
 func proveResolved(e env, resolved run.Resolved, entry agents.Entry, boundary string) (openshell.Result, error) {
-	tmp, err := os.MkdirTemp("", "boundlane-policy-")
+	tmp, err := os.MkdirTemp("", "fenzi-policy-")
 	if err != nil {
 		return openshell.Result{}, err
 	}
@@ -1286,7 +1291,7 @@ func proveResolved(e env, resolved run.Resolved, entry agents.Entry, boundary st
 	return prover().Check(e.ctx, c.Policy, boundary)
 }
 
-// printCheck prints a policy check result as boundlane policy check does.
+// printCheck prints a policy check result as fenzi policy check does.
 // against names the team boundary it was proved against, or is empty for the
 // boundary derived from the same policy.
 func printCheck(u *tui.UI, r openshell.Result, from, against string, entry agents.Entry) {
@@ -1315,17 +1320,17 @@ func printCheck(u *tui.UI, r openshell.Result, from, against string, entry agent
 // subHelp is what a command with subcommands prints when given none.
 func subHelp(e env, name, intro string, rows [][2]string, foot string) {
 	u := tui.New(e.stdin, e.stdout)
-	u.Title("boundlane "+name, "")
+	u.Title("fenzi "+name, "")
 	if intro != "" {
 		u.Note(intro)
 		u.Blank()
 	}
 	width := 0
 	for _, r := range rows {
-		width = max(width, len("boundlane "+r[0]))
+		width = max(width, len("fenzi "+r[0]))
 	}
 	for _, r := range rows {
-		u.Println(fmt.Sprintf("    %s  %s", u.Bold(fmt.Sprintf("%-*s", width, "boundlane "+r[0])), u.Dim(r[1])))
+		u.Println(fmt.Sprintf("    %s  %s", u.Bold(fmt.Sprintf("%-*s", width, "fenzi "+r[0])), u.Dim(r[1])))
 	}
 	if foot != "" {
 		u.Blank()
@@ -1337,7 +1342,7 @@ func subHelp(e env, name, intro string, rows [][2]string, foot string) {
 func cmdAgents(e env, args []string) (int, error) {
 	if len(args) >= 1 && args[0] == "build" {
 		if len(args) != 2 {
-			return 1, errors.New("usage: boundlane agents build <name>")
+			return 1, errors.New("usage: fenzi agents build <name>")
 		}
 		entry, err := agents.Get(args[1])
 		if err != nil {
@@ -1362,7 +1367,7 @@ func cmdAgents(e env, args []string) (int, error) {
 		return 1, err
 	}
 	if len(pos) > 0 {
-		return 1, fmt.Errorf("%q is not an agents command; boundlane agents lists them, boundlane agents build <name> builds an image", pos[0])
+		return 1, fmt.Errorf("%q is not an agents command; fenzi agents lists them, fenzi agents build <name> builds an image", pos[0])
 	}
 	all, err := agents.All()
 	if err != nil {
@@ -1388,7 +1393,7 @@ func cmdAgents(e env, args []string) (int, error) {
 	}
 	screen.New(e.stdout).Indented(4).Table(rows)
 	u.Blank()
-	u.Commands([2]string{"boundlane run <agent>", "start one in this folder"}, [2]string{"boundlane agents build <agent>", "build its image ahead of time"})
+	u.Commands([2]string{"fenzi run <agent>", "start one in this folder"}, [2]string{"fenzi agents build <agent>", "build its image ahead of time"})
 	u.Blank()
 	return 0, nil
 }
@@ -1473,9 +1478,9 @@ func cmdPs(e env, args []string) (int, error) {
 	if len(rows) == 1 {
 		u.Blank()
 		u.Done("No sandboxes running", "")
-		hints := [][2]string{{"boundlane run", "start the agent in this folder"}}
+		hints := [][2]string{{"fenzi run", "start the agent in this folder"}}
 		if finished > 0 {
-			hints = append(hints, [2]string{"boundlane ps --all", "include the " + plural(finished, "finished one", "finished ones")})
+			hints = append(hints, [2]string{"fenzi ps --all", "include the " + plural(finished, "finished one", "finished ones")})
 		}
 		u.Commands(hints...)
 		u.Blank()
@@ -1490,10 +1495,10 @@ func cmdPs(e env, args []string) (int, error) {
 	u.Blank()
 	var hints [][2]string
 	if running > 0 {
-		hints = append(hints, [2]string{"boundlane connect [sandbox]", "open its agent again"}, [2]string{"boundlane stop [sandbox]", "end it and review the changes"})
+		hints = append(hints, [2]string{"fenzi connect [sandbox]", "open its agent again"}, [2]string{"fenzi stop [sandbox]", "end it and review the changes"})
 	}
 	if !*all && finished > 0 {
-		hints = append(hints, [2]string{"boundlane ps --all", "include the finished ones"})
+		hints = append(hints, [2]string{"fenzi ps --all", "include the finished ones"})
 	}
 	u.Commands(hints...)
 	u.Blank()
@@ -1605,17 +1610,17 @@ func cmdKey(e env, args []string) (int, error) {
 			if ok {
 				u.Done(a.Display, a.Key.Env+" stored")
 			} else {
-				u.Skip(a.Display, "no key. boundlane key set "+a.Name)
+				u.Skip(a.Display, "no key. fenzi key set "+a.Name)
 			}
 		}
 		u.Blank()
 		return 0, nil
 	case "set", "remove":
 		if len(args) != 2 {
-			return 1, fmt.Errorf("name the agent: boundlane key %s claude. boundlane agents lists them", args[0])
+			return 1, fmt.Errorf("name the agent: fenzi key %s claude. fenzi agents lists them", args[0])
 		}
 	default:
-		return 1, fmt.Errorf("%q is not a key command; try boundlane key list, set, or remove", args[0])
+		return 1, fmt.Errorf("%q is not a key command; try fenzi key list, set, or remove", args[0])
 	}
 	a, err := agents.Get(args[1])
 	if err != nil {
@@ -1681,7 +1686,7 @@ func cmdVersion(e env, args []string) (int, error) {
 	}
 	u := tui.New(e.stdin, e.stdout)
 	u.Title("Version", "")
-	u.Done("Boundlane", Version)
+	u.Done("Fenzi", Version)
 	u.Blank()
 	return 0, nil
 }

@@ -8,9 +8,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/screen"
-	"boundlane/cli/internal/workspace"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/screen"
+	"fenzi/cli/internal/workspace"
 )
 
 // Stop ends a sandbox the way an agent exit does: save the log, copy the
@@ -24,7 +24,7 @@ func Stop(ctx context.Context, d Deps, sb config.Sandbox) ([]workspace.Change, e
 	if out, err := settledLog(ctx, d, sb.Name); err == nil {
 		_ = os.MkdirAll(runDir, 0o700)
 		_ = os.WriteFile(filepath.Join(runDir, LogFile), out, 0o600)
-		say("log", "saved, boundlane log")
+		say("log", "saved, fenzi log")
 	} else {
 		say("log", "could not be saved: %v", err)
 	}
@@ -34,7 +34,7 @@ func Stop(ctx context.Context, d Deps, sb config.Sandbox) ([]workspace.Change, e
 	base, err := workspace.Load(filepath.Join(staging, "base.json"))
 	switch {
 	case sb.Repo == "":
-		say("changes", "not copied; this sandbox was not started by boundlane run")
+		say("changes", "not copied; this sandbox was not started by fenzi run")
 	case errors.Is(err, fs.ErrNotExist):
 		say("changes", "not copied; the snapshot of %s taken before upload is missing", sb.Repo)
 	case err != nil:

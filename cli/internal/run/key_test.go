@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"boundlane/agents"
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/openshell"
+	"fenzi/agents"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/openshell"
 )
 
 func keyFake(t *testing.T, providerExists bool, sandboxes string) (*openshell.Fake, agents.Entry) {
@@ -31,7 +31,7 @@ func TestSetKeyCreatesThroughEnvironment(t *testing.T) {
 	if err != nil || replaced {
 		t.Fatalf("replaced %v, err %v", replaced, err)
 	}
-	if !strings.HasPrefix(f.Calls[len(f.Calls)-1], "provider create --name bl-claude --type boundlane-claude-code --from-existing") {
+	if !strings.HasPrefix(f.Calls[len(f.Calls)-1], "provider create --name bl-claude --type fenzi-claude-code --from-existing") {
 		t.Errorf("calls: %v", f.Calls)
 	}
 	for _, c := range f.Calls {
@@ -85,7 +85,7 @@ func TestRemoveKeyRefusesWhileThatAgentRuns(t *testing.T) {
 	if err == nil {
 		t.Fatal("want a refusal while a Claude Code sandbox runs")
 	}
-	if want := "bl-api-90cc is running with the Claude Code key; stop it first (boundlane stop bl-api-90cc)"; err.Error() != want {
+	if want := "bl-api-90cc is running with the Claude Code key; stop it first (fenzi stop bl-api-90cc)"; err.Error() != want {
 		t.Errorf("err = %q, want %q", err, want)
 	}
 	for _, c := range f.Calls {

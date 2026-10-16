@@ -96,7 +96,7 @@ func TestPlainOutputHasNoEscapes(t *testing.T) {
 
 func TestBoxLinesHaveOneWidth(t *testing.T) {
 	u, out := session("")
-	u.Box("Boundlane 0.1.0", []string{"short", "", strings.Repeat("a longer sentence that wraps ", 6)})
+	u.Box("Fenzi 0.1.0", []string{"short", "", strings.Repeat("a longer sentence that wraps ", 6)})
 	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
 	w := visible(lines[0])
 	for _, l := range lines {
@@ -104,7 +104,7 @@ func TestBoxLinesHaveOneWidth(t *testing.T) {
 			t.Errorf("width %d, want %d: %q", visible(l), w, l)
 		}
 	}
-	if !strings.HasPrefix(strings.TrimSpace(lines[0]), "┌─ Boundlane 0.1.0 ─") {
+	if !strings.HasPrefix(strings.TrimSpace(lines[0]), "┌─ Fenzi 0.1.0 ─") {
 		t.Errorf("title not in the border: %q", lines[0])
 	}
 }

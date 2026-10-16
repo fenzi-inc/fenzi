@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/team"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/team"
 )
 
 // Recorded from OpenShell 0.1.2.
@@ -15,7 +15,7 @@ const doctorStatus = `{"authentication":{"provider":"mTLS transport","status":"a
 func TestDoctorFixSaysWhatItChangesFirst(t *testing.T) {
 	// Answers in the shapes recorded from 0.1.2: --version's line, status
 	// JSON, gateway info's compute_drivers, and settings get --global --json,
-	// with gateway-wide values that weaken Boundlane.
+	// with gateway-wide values that weaken Fenzi.
 	fakeRuntime(t, map[string]reply{
 		"--version":                    {out: "openshell 0.1.2\n"},
 		"status":                       {out: doctorStatus},
@@ -44,7 +44,7 @@ func TestPublishByAMemberNamesTheConsole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := (team.Enrollment{Server: "https://boundlane.example", Token: "t", Email: "ana@acme.dev", Tenant: "acme", Machine: "m"}).Save(dirs); err != nil {
+	if err := (team.Enrollment{Server: "https://fenzi.example", Token: "t", Email: "ana@acme.dev", Tenant: "acme", Machine: "m"}).Save(dirs); err != nil {
 		t.Fatal(err)
 	}
 	file := t.TempDir() + "/org.yaml"
@@ -52,7 +52,7 @@ func TestPublishByAMemberNamesTheConsole(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, code := runCLI(t, "", "policy", "publish", file)
-	if code != 1 || !strings.Contains(out, "ana@acme.dev is a member") || !strings.Contains(out, "https://boundlane.example/console") || strings.Contains(out, "dana@") || strings.Contains(out, "local server") {
+	if code != 1 || !strings.Contains(out, "ana@acme.dev is a member") || !strings.Contains(out, "https://fenzi.example/console") || strings.Contains(out, "dana@") || strings.Contains(out, "local server") {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
 }

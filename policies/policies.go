@@ -4,7 +4,7 @@ package policies
 import (
 	_ "embed"
 
-	"boundlane/compiler"
+	"fenzi/compiler"
 )
 
 //go:embed developer-default.yaml

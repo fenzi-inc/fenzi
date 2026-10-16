@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"boundlane/cli/internal/config"
-	"boundlane/teamapi"
+	"fenzi/cli/internal/config"
+	"fenzi/teamapi"
 )
 
 // A bundle with the team boundary is cached with it and verified again on

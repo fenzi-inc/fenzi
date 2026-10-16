@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"boundlane/agents"
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/tui"
+	"fenzi/agents"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/tui"
 )
 
 func TestReadyNamesThePolicyRunWillUse(t *testing.T) {
@@ -35,25 +35,25 @@ func TestReadyNamesThePolicyRunWillUse(t *testing.T) {
 	}
 
 	out := ready()
-	if !strings.Contains(out, "developer-default (built in)") || strings.Contains(out, "boundlane.yaml") || !strings.Contains(out, "api.github.com, read-only") {
+	if !strings.Contains(out, "developer-default (built in)") || strings.Contains(out, "fenzi.yaml") || !strings.Contains(out, "api.github.com, read-only") {
 		t.Errorf("without a project file:\n%s", out)
 	}
 
 	file := "version: 1\nhosts:\n  - host: api.stripe.com\n    access: read-only\n  - host: api.example.com\n    port: 8443\n    access: read-write\n    allow:\n      - POST /v1/things\n"
-	if err := os.WriteFile(filepath.Join(project, "boundlane.yaml"), []byte(file), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(project, "fenzi.yaml"), []byte(file), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	out = ready()
-	for _, want := range []string{"developer-default (built in) + ./boundlane.yaml", "api.stripe.com, read-only", "api.example.com:8443, read-write: POST /v1/things", "api.github.com, read-only"} {
+	for _, want := range []string{"developer-default (built in) + ./fenzi.yaml", "api.stripe.com, read-only", "api.example.com:8443, read-write: POST /v1/things", "api.github.com, read-only"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
 
-	if err := os.WriteFile(filepath.Join(project, "boundlane.yaml"), []byte("version: 1\nhosts:\n  - host: x\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(project, "fenzi.yaml"), []byte("version: 1\nhosts:\n  - host: x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if out = ready(); !strings.Contains(out, "cannot be used") || !strings.Contains(out, "boundlane run stops until it is fixed") {
+	if out = ready(); !strings.Contains(out, "cannot be used") || !strings.Contains(out, "fenzi run stops until it is fixed") {
 		t.Errorf("a broken project file:\n%s", out)
 	}
 }

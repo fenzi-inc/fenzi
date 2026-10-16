@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"boundlane/agents"
-	"boundlane/cli/internal/config"
-	"boundlane/compiler"
-	"boundlane/controlplane"
-	"boundlane/teamapi"
+	"fenzi/agents"
+	"fenzi/cli/internal/config"
+	"fenzi/compiler"
+	"fenzi/controlplane"
+	"fenzi/teamapi"
 )
 
 // effectiveFor is what the runtime prints for a sandbox running doc, in the

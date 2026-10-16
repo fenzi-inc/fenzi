@@ -15,7 +15,7 @@ import (
 )
 
 // Runtime is a container runtime the gateway's Docker or Podman driver can
-// start sandboxes in. Boundlane starts it with the runtime's own command; it
+// start sandboxes in. Fenzi starts it with the runtime's own command; it
 // never configures the runtime itself.
 type Runtime struct {
 	Name    string
@@ -24,10 +24,10 @@ type Runtime struct {
 	Running bool
 	// Attach means Start may prompt, for example sudo for a password.
 	Attach bool
-	// Tested means a gateway on this runtime has run with Boundlane (colima),
+	// Tested means a gateway on this runtime has run with Fenzi (colima),
 	// or it is the upstream docs' path on a Mac (Docker Desktop). Docker
 	// Engine and Podman on Linux are named upstream but have not been run
-	// with Boundlane, so setup says so.
+	// with Fenzi, so setup says so.
 	Tested bool
 }
 
@@ -246,7 +246,7 @@ func StartRuntime(ctx context.Context, r Runtime, stdin io.Reader, stdout, stder
 }
 
 // InstallColimaCommand is the runtime setup can install for someone who has
-// none. colima is the one Boundlane has run on; the docker CLI builds agent images.
+// none. colima is the one Fenzi has run on; the docker CLI builds agent images.
 var InstallColimaCommand = []string{"brew", "install", "colima", "docker"}
 
 // CanInstallColima reports whether InstallColimaCommand can run here.

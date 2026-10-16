@@ -1,16 +1,16 @@
 # Reviewed copy of providers/openai.yaml from OpenShell v0.1.2 (Apache-2.0).
 # Upstream's providers/codex.yaml injects ChatGPT login tokens and opens
-# auth.openai.com, chatgpt.com and ab.chatgpt.com. Boundlane runs Codex with an
+# auth.openai.com, chatgpt.com and ab.chatgpt.com. Fenzi runs Codex with an
 # API key only, which is the openai profile's shape.
 # Changes from upstream, reviewed 6 October 2026:
-#   - binaries name the native codex program in the boundlane/codex image, one
+#   - binaries name the native codex program in the fenzi/codex image, one
 #     path per architecture. The npm codex command is a Node launcher that
 #     starts it; OpenShell matches the kernel-resolved path of the program that
 #     connects.
 #   - id changed so it cannot collide with an organization's own openai.
-id: boundlane-codex
-display_name: Codex (Boundlane)
-description: Codex CLI in the boundlane/codex image, with an OpenAI API key
+id: fenzi-codex
+display_name: Codex (Fenzi)
+description: Codex CLI in the fenzi/codex image, with an OpenAI API key
 category: agent
 inference_capable: true
 credentials:

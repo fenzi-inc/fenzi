@@ -57,7 +57,7 @@ func TestRequestsShowsWhatTheAgentAskedFor(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
-	for _, want := range []string{"1 request from the agent", "www.example.com:443", "2 more were drafted by the sandbox", "github.com:443, downloads.claude.ai:443", "boundlane requests --all"} {
+	for _, want := range []string{"1 request from the agent", "www.example.com:443", "2 more were drafted by the sandbox", "github.com:443, downloads.claude.ai:443", "fenzi requests --all"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}

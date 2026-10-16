@@ -14,9 +14,9 @@ import (
 	"syscall"
 	"time"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/tui"
-	"boundlane/controlplane"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/tui"
+	"fenzi/controlplane"
 )
 
 // includedTeam is true in a build that carries the local team server.
@@ -61,7 +61,7 @@ func cmdServer(e env, args []string) (int, error) {
 	}
 	if b, created, err := s.SeedDeveloperDefault(e.ctx); err != nil {
 		u.Problem("Policy", "not seeded ("+err.Error()+")")
-		u.Note("Sign in still works. Publish with boundlane policy publish once the prover runs.")
+		u.Note("Sign in still works. Publish with fenzi policy publish once the prover runs.")
 	} else if created {
 		u.Done("Policy", fmt.Sprintf("developer-default r%d, proved and signed", b.Revision))
 	} else {
@@ -74,7 +74,7 @@ func cmdServer(e env, args []string) (int, error) {
 	for _, user := range users {
 		u.Done("User", user.Email+", "+user.Role())
 	}
-	u.Note("Press Ctrl-C to stop. Sign in from another terminal with boundlane login --server http://" + *addr + ".")
+	u.Note("Press Ctrl-C to stop. Sign in from another terminal with fenzi login --server http://" + *addr + ".")
 	u.Blank()
 	srv := &http.Server{Addr: *addr, Handler: controlplane.Handler(s)}
 	ctx, stop := signal.NotifyContext(e.ctx, os.Interrupt)
@@ -92,15 +92,15 @@ func cmdServer(e env, args []string) (int, error) {
 }
 
 // serveProve compiles and proves documents for the hosted control plane,
-// which does not run openshell-prover itself. BOUNDLANE_PROVE_TOKEN, when set,
+// which does not run openshell-prover itself. FENZI_PROVE_TOKEN, when set,
 // must be sent as X-Prove-Token.
 func serveProve(e env, addr string) (int, error) {
 	u := tui.New(e.stdin, e.stdout)
 	u.Title("Prove server", "localhost only")
 	u.Done("Listen", "http://"+addr+"/v1/prove")
-	token := os.Getenv("BOUNDLANE_PROVE_TOKEN")
+	token := os.Getenv("FENZI_PROVE_TOKEN")
 	if token == "" {
-		u.Note("BOUNDLANE_PROVE_TOKEN is not set. Any local process can ask for a proof.")
+		u.Note("FENZI_PROVE_TOKEN is not set. Any local process can ask for a proof.")
 	}
 	srv := &http.Server{Addr: addr, Handler: controlplane.ProveHandler(proverChecker{}, token), ReadHeaderTimeout: 10 * time.Second}
 	ctx, stop := signal.NotifyContext(e.ctx, os.Interrupt, syscall.SIGTERM)
@@ -120,7 +120,7 @@ func serveProve(e env, addr string) (int, error) {
 type proverChecker struct{}
 
 func (proverChecker) Check(ctx context.Context, policy, boundary []byte) (bool, string, error) {
-	dir, err := os.MkdirTemp("", "boundlane-prove-")
+	dir, err := os.MkdirTemp("", "fenzi-prove-")
 	if err != nil {
 		return false, "", err
 	}

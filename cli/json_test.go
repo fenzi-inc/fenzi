@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/forward"
-	"boundlane/cli/internal/run"
-	"boundlane/cli/internal/team"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/forward"
+	"fenzi/cli/internal/run"
+	"fenzi/cli/internal/team"
 )
 
 // reply is what the fake runtime prints for a command line that starts with
@@ -101,7 +101,7 @@ func runJSON(t *testing.T, into any, args ...string) (stderr string, code int) {
 	return errOut.String(), code
 }
 
-// seedState saves sandboxes as boundlane run would have recorded them.
+// seedState saves sandboxes as fenzi run would have recorded them.
 func seedState(t *testing.T, list ...config.Sandbox) config.Dirs {
 	t.Helper()
 	dirs, err := config.Default()
@@ -385,7 +385,7 @@ func TestJSONPolicyCheck(t *testing.T) {
 		t.Errorf("check = %+v", doc)
 	}
 	var none json.RawMessage
-	if stderr, code := runJSON(t, &none, "policy", "compile", "--json"); code != 1 || none != nil || !strings.Contains(stderr, "--json is for boundlane policy check") {
+	if stderr, code := runJSON(t, &none, "policy", "compile", "--json"); code != 1 || none != nil || !strings.Contains(stderr, "--json is for fenzi policy check") {
 		t.Errorf("compile --json: exit %d stdout %q stderr %q", code, none, stderr)
 	}
 }
@@ -413,7 +413,7 @@ func TestJSONUpdateCheck(t *testing.T) {
 		http.NotFound(w, r)
 	}))
 	t.Cleanup(srv.Close)
-	t.Setenv("BOUNDLANE_DOWNLOAD_BASE", srv.URL)
+	t.Setenv("FENZI_DOWNLOAD_BASE", srv.URL)
 	var doc jsonUpdate
 	if stderr, code := runJSON(t, &doc, "update", "--check", "--json"); code != 0 || stderr != "" {
 		t.Fatalf("exit %d stderr %q", code, stderr)

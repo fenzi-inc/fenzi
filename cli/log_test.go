@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/forward"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/forward"
 )
 
 // recentLine is the recorded NET:OPEN line from decisionLines with its time

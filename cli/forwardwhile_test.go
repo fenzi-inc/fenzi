@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"boundlane/cli/internal/config"
-	"boundlane/teamapi"
+	"fenzi/cli/internal/config"
+	"fenzi/teamapi"
 )
 
 func quietEnv() env {
@@ -55,7 +55,7 @@ func TestForwardWhileDoesNothingOnFree(t *testing.T) {
 }
 
 // Signed in, a team run forwards every few seconds while the agent runs and once
-// more when it stops, without boundlane forward or the Mac app.
+// more when it stops, without fenzi forward or the Mac app.
 func TestForwardWhileForwardsDuringTheRunAndAtTheEnd(t *testing.T) {
 	fakeRuntime(t, nil, "")
 	fastForward(t)
@@ -82,7 +82,7 @@ func TestForwardWhileForwardsDuringTheRunAndAtTheEnd(t *testing.T) {
 	}
 }
 
-// When another forwarder holds the lock (the Mac app's, or boundlane forward),
+// When another forwarder holds the lock (the Mac app's, or fenzi forward),
 // the run skips its passes instead of queueing, and still makes the last one.
 func TestForwardWhileSkipsWhileAnotherForwarderRuns(t *testing.T) {
 	fakeRuntime(t, nil, "")

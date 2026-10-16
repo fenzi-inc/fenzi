@@ -111,7 +111,7 @@ func TestAuditMapsAnApproval(t *testing.T) {
 		t.Errorf("AuditFromShorthand = %+v, want %+v", r, want)
 	}
 	if _, ok := FromShorthand(approvedLine, "s"); ok {
-		t.Error("an approval is not a decision; boundlane log must not show it")
+		t.Error("an approval is not a decision; fenzi log must not show it")
 	}
 	for _, other := range []string{
 		`[1791297778.239] [sandbox] [OCSF ] [ocsf] CONFIG:PROPOSED [INFO] agent_authored proposal chunk:fad7c2ed-3aca-4fb7-bb37-495820dd7562 on example.com:443 HEAD / by /usr/bin/curl`,

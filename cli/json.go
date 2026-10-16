@@ -13,9 +13,9 @@ import (
 	"io"
 	"time"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/forward"
-	"boundlane/cli/internal/openshell"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/forward"
+	"fenzi/cli/internal/openshell"
 )
 
 // jsonFlag adds --json to a command.
@@ -65,7 +65,7 @@ type jsonSandbox struct {
 	// Folder is the absolute path the sandbox was started for.
 	Folder string `json:"folder"`
 	// Created is RFC 3339, or empty for a sandbox the runtime reports that
-	// Boundlane did not start.
+	// Fenzi did not start.
 	Created string `json:"created"`
 	Running bool   `json:"running"`
 }

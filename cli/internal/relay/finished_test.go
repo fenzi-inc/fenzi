@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/run"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/run"
 )
 
 // saveLog writes a sandbox's log the way run and stop save it before the

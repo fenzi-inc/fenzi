@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"boundlane/cli/internal/config"
-	"boundlane/controlplane"
+	"fenzi/cli/internal/config"
+	"fenzi/controlplane"
 )
 
 func TestLoginCachesASignedPolicy(t *testing.T) {
@@ -151,7 +151,7 @@ func TestRefreshSaysWhenTheMachineWasSignedOut(t *testing.T) {
 	}
 	// The hosted control plane answers a revoked machine token like this.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "sign in with boundlane login", http.StatusUnauthorized)
+		http.Error(w, "sign in with fenzi login", http.StatusUnauthorized)
 	}))
 	defer srv.Close()
 	got, note, err := Refresh(context.Background(), Client{Base: srv.URL}, en)

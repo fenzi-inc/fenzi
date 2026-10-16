@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"sort"
 
-	"boundlane/agents"
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/openshell"
-	"boundlane/cli/internal/run"
-	"boundlane/cli/internal/tui"
+	"fenzi/agents"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/openshell"
+	"fenzi/cli/internal/run"
+	"fenzi/cli/internal/tui"
 )
 
 // splitDash separates the arguments before "--" from those after it.
@@ -23,7 +23,7 @@ func splitDash(args []string) ([]string, []string) {
 }
 
 // running refreshes the state from the gateway and returns the running
-// sandboxes Boundlane started, newest first.
+// sandboxes Fenzi started, newest first.
 func running(e env, dirs config.Dirs) ([]config.Sandbox, error) {
 	names, err := client().Sandboxes(e.ctx)
 	if err != nil {
@@ -62,10 +62,10 @@ func chooseRunning(e env, u *tui.UI, dirs config.Dirs, name, purpose string) (co
 				return sb, nil
 			}
 		}
-		return config.Sandbox{}, fmt.Errorf("%s is not running; boundlane ps lists the ones that are", name)
+		return config.Sandbox{}, fmt.Errorf("%s is not running; fenzi ps lists the ones that are", name)
 	}
 	if len(list) == 0 {
-		return config.Sandbox{}, errors.New("no sandbox is running. boundlane run starts one")
+		return config.Sandbox{}, errors.New("no sandbox is running. fenzi run starts one")
 	}
 	if dir, err := cwd(); err == nil {
 		if sb, ok := (&config.State{Sandboxes: list}).LatestIn(dir, true); ok {
@@ -76,7 +76,7 @@ func chooseRunning(e env, u *tui.UI, dirs config.Dirs, name, purpose string) (co
 		return list[0], nil
 	}
 	if !u.Interactive() {
-		return config.Sandbox{}, errors.New("several sandboxes are running; name one, boundlane ps lists them")
+		return config.Sandbox{}, errors.New("several sandboxes are running; name one, fenzi ps lists them")
 	}
 	home := homeDir()
 	opts := make([]tui.Option, len(list))
@@ -134,7 +134,7 @@ func cmdConnect(e env, args []string) (int, error) {
 	} else {
 		a, err := agents.Get(sb.Agent)
 		if err != nil {
-			return 1, fmt.Errorf("%s was not started by boundlane run, so its agent is not known; use --shell", sb.Name)
+			return 1, fmt.Errorf("%s was not started by fenzi run, so its agent is not known; use --shell", sb.Name)
 		}
 		argv, envv, what = a.Argv(agentArgs), a.Env, a.Display
 	}
@@ -147,11 +147,11 @@ func cmdConnect(e env, args []string) (int, error) {
 	u.Println(fmt.Sprintf("  %s %s  %s", u.Accent("■"), u.Bold("Connecting to "+sb.Name), u.Dim(tilde(sb.Repo, homeDir()))))
 	u.Note("This starts " + what + " in the sandbox, with the same policy and the files as the agent left them. The sandbox keeps running when you exit.")
 	u.Blank()
-	// The same background forwarding as boundlane run, for a team sandbox.
+	// The same background forwarding as fenzi run, for a team sandbox.
 	stopForward := forwardWhile(e, sb.TeamRevision)
 	err = client().Exec(e.ctx, sb.Name, workdir, envv, argv...)
 	if !stopForward() {
-		u.Note("The team console was not reached during this session. Run boundlane forward to send what is queued.")
+		u.Note("The team console was not reached during this session. Run fenzi forward to send what is queued.")
 	}
 	code := openshell.ExitCode(err)
 	if code < 0 && err != nil {
@@ -159,6 +159,6 @@ func cmdConnect(e env, args []string) (int, error) {
 	}
 	u.Blank()
 	u.Skip("Still running", sb.Name)
-	u.Commands([2]string{"boundlane connect " + sb.Name, "come back to it"}, [2]string{"boundlane stop " + sb.Name, "end it and review the changes"})
+	u.Commands([2]string{"fenzi connect " + sb.Name, "come back to it"}, [2]string{"fenzi stop " + sb.Name, "end it and review the changes"})
 	return max(code, 0), nil
 }

@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/team"
-	"boundlane/teamapi"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/team"
+	"fenzi/teamapi"
 )
 
 // refusingConsole serves a policy bundle this machine must not take, and

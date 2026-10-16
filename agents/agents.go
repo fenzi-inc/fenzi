@@ -15,7 +15,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"boundlane/compiler"
+	"fenzi/compiler"
 )
 
 //go:embed claude codex grok opencode
@@ -103,7 +103,7 @@ func All() ([]Entry, error) {
 // Get returns one entry by name.
 func Get(name string) (Entry, error) {
 	if _, err := fs.Stat(files, path.Join(name, "agent.yaml")); err != nil {
-		return Entry{}, fmt.Errorf("agent %q is not in the catalog; run boundlane agents to list them", name)
+		return Entry{}, fmt.Errorf("agent %q is not in the catalog; run fenzi agents to list them", name)
 	}
 	return load(name)
 }

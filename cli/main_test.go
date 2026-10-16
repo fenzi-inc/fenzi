@@ -38,7 +38,7 @@ func TestUnknownCommandSuggests(t *testing.T) {
 	if code := cli([]string{"stauts"}, strings.NewReader(""), &out, &errOut); code != 1 {
 		t.Fatalf("exit %d", code)
 	}
-	if !strings.Contains(errOut.String(), "Did you mean boundlane status?") {
+	if !strings.Contains(errOut.String(), "Did you mean fenzi status?") {
 		t.Errorf("no suggestion: %q", errOut.String())
 	}
 	if suggest("zzzzzzzz", map[string]func(env, []string) (int, error){"run": nil}) != "" {
@@ -52,7 +52,7 @@ func TestSubcommandHelp(t *testing.T) {
 		if code := cli(args, strings.NewReader(""), &out, &errOut); code != 0 {
 			t.Fatalf("%v: exit %d, %s", args, code, errOut.String())
 		}
-		if !strings.Contains(out.String(), "boundlane "+args[0]+" ") {
+		if !strings.Contains(out.String(), "fenzi "+args[0]+" ") {
 			t.Errorf("%v printed:\n%s", args, out.String())
 		}
 	}

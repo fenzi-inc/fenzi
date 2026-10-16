@@ -107,7 +107,7 @@ func ReadShorthand(rd io.Reader, sandbox string) ([]Record, error) {
 
 // AuditFromStream maps a decision or an approval. The forwarder ships both so
 // the control plane can match OpenShell's approvals to console reviews.
-// `boundlane log` reads decisions only.
+// `fenzi log` reads decisions only.
 func AuditFromStream(t time.Time, level, message, sandbox string) (Record, bool) {
 	if r, ok := FromStream(t, level, message, sandbox); ok {
 		return r, true

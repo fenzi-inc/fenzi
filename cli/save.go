@@ -1,7 +1,7 @@
 package main
 
 // approve --save: the host an approved request names, written into the
-// project's boundlane.yaml so the next sandbox in that folder starts with it.
+// project's fenzi.yaml so the next sandbox in that folder starts with it.
 
 import (
 	"bytes"
@@ -16,14 +16,14 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"boundlane/agents"
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/openshell"
-	"boundlane/cli/internal/run"
-	"boundlane/cli/internal/tui"
-	"boundlane/cli/internal/workspace"
-	"boundlane/compiler"
-	"boundlane/policies"
+	"fenzi/agents"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/openshell"
+	"fenzi/cli/internal/run"
+	"fenzi/cli/internal/tui"
+	"fenzi/cli/internal/workspace"
+	"fenzi/compiler"
+	"fenzi/policies"
 )
 
 // savedHost is one hosts entry of a project file, made from a request.
@@ -62,7 +62,7 @@ var (
 func requestHost(endpoints string) (savedHost, error) {
 	m := endpointLine.FindStringSubmatch(strings.TrimSpace(endpoints))
 	if m == nil {
-		return savedHost{}, fmt.Errorf("its rule (%s) is in a form boundlane cannot save yet", endpoints)
+		return savedHost{}, fmt.Errorf("its rule (%s) is in a form fenzi cannot save yet", endpoints)
 	}
 	port, err := strconv.Atoi(m[2])
 	if err != nil {
@@ -82,12 +82,12 @@ func requestHost(endpoints string) (savedHost, error) {
 			h.Access, h.Allow = compiler.AccessReadWrite, []string{a[1] + " " + a[2]}
 		}
 	default:
-		return savedHost{}, fmt.Errorf("its rule (%s) is in a form boundlane cannot save yet", rule)
+		return savedHost{}, fmt.Errorf("its rule (%s) is in a form fenzi cannot save yet", rule)
 	}
 	return h, nil
 }
 
-// projectFile is a boundlane.yaml read as YAML nodes, so its comments and
+// projectFile is a fenzi.yaml read as YAML nodes, so its comments and
 // order survive an edit.
 type projectFile struct {
 	path string
@@ -176,7 +176,7 @@ func entryPort(e *yaml.Node) int {
 	return 443
 }
 
-// saveOutcome says what happened to boundlane.yaml.
+// saveOutcome says what happened to fenzi.yaml.
 type saveOutcome struct {
 	Saved bool
 	// Already means the file or developer-default has the host at that level.
@@ -250,7 +250,7 @@ func (p *projectFile) add(h savedHost) saveOutcome {
 }
 
 // projectName is how messages name the project file.
-const projectName = "boundlane.yaml"
+const projectName = "fenzi.yaml"
 
 func describe(h savedHost) string {
 	if len(h.Allow) > 0 {
@@ -299,7 +299,7 @@ func checkProject(raw []byte) error {
 	return merged.WithDefaults().Validate()
 }
 
-// savePreview is what approve --save would do to boundlane.yaml, worked out
+// savePreview is what approve --save would do to fenzi.yaml, worked out
 // without approving the request or writing the file.
 type savePreview struct {
 	Path   string
@@ -326,9 +326,9 @@ func (pv *savePreview) Changed() bool {
 	return !bytes.Equal(pv.Before, pv.After) || !pv.Exists && len(pv.After) > 0
 }
 
-// previewSave works out the new boundlane.yaml for a request in sb: the
+// previewSave works out the new fenzi.yaml for a request in sb: the
 // generated edit, or the content of from when it is given. It then runs the
-// check boundlane policy check runs on that content, written to a temporary
+// check fenzi policy check runs on that content, written to a temporary
 // folder. The project file itself is only read.
 func previewSave(e env, sb config.Sandbox, p openshell.Proposal, from string) (*savePreview, error) {
 	host, hostErr := requestHost(p.Endpoints)
@@ -393,7 +393,7 @@ func previewSave(e env, sb config.Sandbox, p openshell.Proposal, from string) (*
 	if pv.Agent, err = agents.Get(name); err != nil {
 		return nil, err
 	}
-	tmp, err := os.MkdirTemp("", "boundlane-save-")
+	tmp, err := os.MkdirTemp("", "fenzi-save-")
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +417,7 @@ func previewSave(e env, sb config.Sandbox, p openshell.Proposal, from string) (*
 // fromNote says when the file given does not have the request's host.
 func (pv *savePreview) fromNote() string {
 	if pv.HostErr != nil {
-		return "boundlane cannot turn this request's rule into an entry, so the file given is used as it is."
+		return "fenzi cannot turn this request's rule into an entry, so the file given is used as it is."
 	}
 	given := &projectFile{}
 	if err := yaml.Unmarshal(pv.After, &given.doc); err != nil || len(given.doc.Content) == 0 || given.doc.Content[0].Kind != yaml.MappingNode {
@@ -441,7 +441,7 @@ func widenedNote(h savedHost) string {
 	return ""
 }
 
-// unifiedDiff is a unified diff of boundlane.yaml before and after, or ""
+// unifiedDiff is a unified diff of fenzi.yaml before and after, or ""
 // when nothing changes.
 func unifiedDiff(existed bool, before, after []byte) string {
 	if bytes.Equal(before, after) && (existed || len(after) == 0) {
@@ -506,7 +506,7 @@ type jsonSavePreview struct {
 // jsonSaveCheck is the policy check of the file as it would be.
 type jsonSaveCheck struct {
 	Passed bool `json:"passed"`
-	// Result is the prover's word, as in boundlane policy check --json.
+	// Result is the prover's word, as in fenzi policy check --json.
 	Result  string `json:"result"`
 	Checked string `json:"checked"`
 	Agent   string `json:"agent"`
@@ -575,11 +575,11 @@ func printPreview(u *tui.UI, pv *savePreview, id string) {
 	}
 	switch {
 	case pv.From != "":
-		u.Command("boundlane approve "+shortID(id)+" --save --policy-from "+pv.From, "approves it and writes this file")
+		u.Command("fenzi approve "+shortID(id)+" --save --policy-from "+pv.From, "approves it and writes this file")
 	case pv.Changed():
-		u.Command("boundlane approve "+shortID(id)+" --save", "approves it and writes this")
+		u.Command("fenzi approve "+shortID(id)+" --save", "approves it and writes this")
 	default:
-		u.Command("boundlane approve "+shortID(id), "approves it for this sandbox")
+		u.Command("fenzi approve "+shortID(id), "approves it for this sandbox")
 	}
 	u.Blank()
 }

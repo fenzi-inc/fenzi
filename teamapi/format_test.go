@@ -124,7 +124,7 @@ func TestBothFormatsRoundTrip(t *testing.T) {
 	}
 	future := b
 	future.Format = 3
-	if err := Verify(pub, future); err == nil || !strings.Contains(err.Error(), "boundlane update") {
+	if err := Verify(pub, future); err == nil || !strings.Contains(err.Error(), "fenzi update") {
 		t.Errorf("format 3: %v", err)
 	}
 }

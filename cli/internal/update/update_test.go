@@ -56,15 +56,15 @@ func newRelease(bin []byte) *release {
 	sum := sha256.Sum256(bin)
 	return &release{files: map[string][]byte{
 		"latest.txt":                  []byte("0.1.2\n"),
-		"boundlane-0.1.2-linux-amd64": bin,
-		"boundlane-0.1.2-sha256.txt":  []byte(hex.EncodeToString(sum[:]) + "  boundlane-0.1.2-linux-amd64\n"),
+		"fenzi-0.1.2-linux-amd64": bin,
+		"fenzi-0.1.2-sha256.txt":  []byte(hex.EncodeToString(sum[:]) + "  fenzi-0.1.2-linux-amd64\n"),
 	}}
 }
 
 func TestInstallReplacesOnlyWhenTheChecksumMatches(t *testing.T) {
 	r := newRelease([]byte("new binary"))
 	srv := r.serve(t)
-	exe := filepath.Join(t.TempDir(), "boundlane")
+	exe := filepath.Join(t.TempDir(), "fenzi")
 	if err := os.WriteFile(exe, []byte("old binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -75,14 +75,14 @@ func TestInstallReplacesOnlyWhenTheChecksumMatches(t *testing.T) {
 	if err := Install(ctx, srv.Client(), srv.URL, "0.1.2", "darwin", "arm64", exe); err == nil {
 		t.Fatal("installed a platform that has no checksum")
 	}
-	r.files["boundlane-0.1.2-linux-amd64"] = []byte("tampered")
+	r.files["fenzi-0.1.2-linux-amd64"] = []byte("tampered")
 	if err := Install(ctx, srv.Client(), srv.URL, "0.1.2", "linux", "amd64", exe); err == nil {
 		t.Fatal("installed a binary with the wrong checksum")
 	}
 	if b, _ := os.ReadFile(exe); string(b) != "old binary" {
 		t.Fatalf("binary changed after a failed update: %q", b)
 	}
-	r.files["boundlane-0.1.2-linux-amd64"] = []byte("new binary")
+	r.files["fenzi-0.1.2-linux-amd64"] = []byte("new binary")
 	if err := Install(ctx, srv.Client(), srv.URL, "0.1.2", "linux", "amd64", exe); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestInstallReplacesOnlyWhenTheChecksumMatches(t *testing.T) {
 	if fi, _ := os.Stat(exe); fi.Mode().Perm() != 0o755 {
 		t.Fatalf("mode %v", fi.Mode())
 	}
-	left, _ := filepath.Glob(filepath.Join(filepath.Dir(exe), ".boundlane-update-*"))
+	left, _ := filepath.Glob(filepath.Join(filepath.Dir(exe), ".fenzi-update-*"))
 	if len(left) != 0 {
 		t.Fatalf("temporary files left: %v", left)
 	}
@@ -101,7 +101,7 @@ func TestInstallReplacesOnlyWhenTheChecksumMatches(t *testing.T) {
 func TestNotifierAsksOnceADay(t *testing.T) {
 	r := newRelease([]byte("x"))
 	srv := r.serve(t)
-	t.Setenv("BOUNDLANE_DOWNLOAD_BASE", srv.URL)
+	t.Setenv("FENZI_DOWNLOAD_BASE", srv.URL)
 	dir := t.TempDir()
 	now := time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC)
 

@@ -1,5 +1,5 @@
 // Package team is the CLI's client for the Team control plane: the hosted
-// service, or boundlane server on one machine.
+// service, or fenzi server on one machine.
 package team
 
 import (
@@ -12,12 +12,12 @@ import (
 	"io"
 	"net/http"
 
-	"boundlane/teamapi"
+	"fenzi/teamapi"
 )
 
-// DefaultServer is the hosted Team control plane. boundlane server on one
+// DefaultServer is the hosted Team control plane. fenzi server on one
 // machine is http://127.0.0.1:8787; pass it with login --server.
-const DefaultServer = "https://boundlane.dev"
+const DefaultServer = "https://fenzi.dev"
 
 // ErrNotEnrolled means this machine has not signed in.
 var ErrNotEnrolled = errors.New("not signed in")

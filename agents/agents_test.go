@@ -10,8 +10,8 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"boundlane/compiler"
-	"boundlane/policies"
+	"fenzi/compiler"
+	"fenzi/policies"
 )
 
 func TestCatalog(t *testing.T) {
@@ -104,7 +104,7 @@ func TestArgv(t *testing.T) {
 	if (Entry{Command: "opencode"}).HasGuide() {
 		t.Error("an entry without guide_flag, guide_config, or guide_file has no guide")
 	}
-	file := Entry{Command: "opencode", GuideFile: "/sandbox/.boundlane/guide.md"}
+	file := Entry{Command: "opencode", GuideFile: "/sandbox/.fenzi/guide.md"}
 	if !file.HasGuide() {
 		t.Error("guide_file means the guide is passed")
 	}

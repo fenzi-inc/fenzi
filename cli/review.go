@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/tui"
-	"boundlane/cli/internal/workspace"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/tui"
+	"fenzi/cli/internal/workspace"
 )
 
 // review is one set of staged changes and how to name it in a command.
@@ -215,7 +215,7 @@ func (r review) apply(u *tui.UI) (int, error) {
 		for _, c := range conflicts {
 			u.Println("      " + c)
 		}
-		u.Note("Applying would overwrite those edits, so nothing was changed. Save or undo them, then run boundlane apply" + r.flag + " again.")
+		u.Note("Applying would overwrite those edits, so nothing was changed. Save or undo them, then run fenzi apply" + r.flag + " again.")
 		return 1, nil
 	}
 	next, err := workspace.Applied(r.base, r.files, r.changes)
@@ -241,7 +241,7 @@ func (r review) later(u *tui.UI) {
 	u.Blank()
 	u.Skip("Kept for later", "nothing in "+r.folder()+" changed")
 	u.Note("The changes stay staged on this machine. From " + r.folder() + ":")
-	u.Commands([2]string{"boundlane diff" + r.flag, "see them again"}, [2]string{"boundlane apply" + r.flag, "apply them"})
+	u.Commands([2]string{"fenzi diff" + r.flag, "see them again"}, [2]string{"fenzi apply" + r.flag, "apply them"})
 }
 
 // offer is shown after an agent exits or a sandbox is stopped.
@@ -289,7 +289,7 @@ func cmdDiff(e env, args []string) (int, error) {
 	} else {
 		u.Blank()
 	}
-	u.Println("  " + u.Dim("Nothing in "+r.folder()+" has changed. ") + u.Bold("boundlane apply"+r.flag) + u.Dim(" copies them in."))
+	u.Println("  " + u.Dim("Nothing in "+r.folder()+" has changed. ") + u.Bold("fenzi apply"+r.flag) + u.Dim(" copies them in."))
 	return 0, nil
 }
 

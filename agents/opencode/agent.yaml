@@ -1,7 +1,7 @@
 name: opencode
 display: OpenCode
 command: opencode
-image: boundlane/opencode
+image: fenzi/opencode
 # Bump together with OPENCODE_VERSION in the Dockerfile.
 version: "1.18.34"
 # The npm opencode command is a native program. postinstall copies the build
@@ -31,13 +31,13 @@ env:
   OPENCODE_DISABLE_MODELS_FETCH: "1"
   OPENCODE_DISABLE_LSP_DOWNLOAD: "1"
   OPENCODE_DISABLE_DEFAULT_PLUGINS: "1"
-  OPENCODE_CONFIG_CONTENT: '{"autoupdate":false,"share":"disabled","enabled_providers":["anthropic"],"instructions":["/sandbox/.boundlane/guide.md"]}'
+  OPENCODE_CONFIG_CONTENT: '{"autoupdate":false,"share":"disabled","enabled_providers":["anthropic"],"instructions":["/sandbox/.fenzi/guide.md"]}'
 # OpenCode loads extra instructions from files named in its config. It has no
 # flag that appends text.
-guide_file: /sandbox/.boundlane/guide.md
+guide_file: /sandbox/.fenzi/guide.md
 key:
   env: ANTHROPIC_API_KEY
-  profile_type: boundlane-opencode
+  profile_type: fenzi-opencode
   profile_file: profile.yaml
 status: testing
 verified: false

@@ -20,10 +20,10 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"boundlane/agents"
-	"boundlane/cli/internal/run"
-	"boundlane/compiler"
-	"boundlane/teamapi"
+	"fenzi/agents"
+	"fenzi/cli/internal/run"
+	"fenzi/compiler"
+	"fenzi/teamapi"
 )
 
 // providerRule starts the name of a rule the runtime adds for a provider.

@@ -13,9 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/team"
-	"boundlane/controlplane"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/team"
+	"fenzi/controlplane"
 )
 
 func TestServerRejectsAPublicAddress(t *testing.T) {
@@ -69,7 +69,7 @@ func enrollAcme(t *testing.T) config.Dirs {
 func TestRunUsesTheSignedTeamPolicy(t *testing.T) {
 	dirs := enrollAcme(t)
 	repo := t.TempDir()
-	if err := os.WriteFile(filepath.Join(repo, "boundlane.yaml"), []byte("version: 1\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, "fenzi.yaml"), []byte("version: 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
@@ -93,7 +93,7 @@ func TestPolicyCheckUsesTheSignedTeamPolicy(t *testing.T) {
 	fakeRuntime(t, nil, proverWithin)
 	enrollAcme(t)
 	repo := t.TempDir()
-	if err := os.WriteFile(filepath.Join(repo, "boundlane.yaml"), []byte("version: 1\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, "fenzi.yaml"), []byte("version: 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(repo)

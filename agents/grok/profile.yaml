@@ -3,10 +3,10 @@
 # header. docs.x.ai, checked 6 October 2026, says API-key auth sends
 # Authorization: Bearer to https://api.x.ai/v1 (GROK_XAI_API_BASE_URL).
 # The binary path is the program the npm grok command resolves to in the
-# boundlane/grok image.
-id: boundlane-grok
-display_name: Grok (Boundlane)
-description: Grok CLI in the boundlane/grok image, with an xAI API key
+# fenzi/grok image.
+id: fenzi-grok
+display_name: Grok (Fenzi)
+description: Grok CLI in the fenzi/grok image, with an xAI API key
 category: agent
 inference_capable: true
 credentials:

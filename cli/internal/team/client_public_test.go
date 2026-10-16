@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"boundlane/teamapi"
+	"fenzi/teamapi"
 )
 
 // fakeConsole answers like the hosted control plane: the device login, then a
@@ -32,7 +32,7 @@ func (f *fakeConsole) bundle(rev int) teamapi.Wire {
 
 func (f *fakeConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if f.status != 0 {
-		http.Error(w, "sign in with boundlane login", f.status)
+		http.Error(w, "sign in with fenzi login", f.status)
 		return
 	}
 	switch r.URL.Path {
@@ -51,7 +51,7 @@ func (f *fakeConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 	case "/v1/policy":
 		if r.Header.Get("Authorization") != "Bearer tok" {
-			http.Error(w, "sign in with boundlane login", http.StatusUnauthorized)
+			http.Error(w, "sign in with fenzi login", http.StatusUnauthorized)
 			return
 		}
 		json.NewEncoder(w).Encode(f.bundle(f.revision))
@@ -162,7 +162,7 @@ func TestRefreshKeepsThePolicyWhenSignedOutOrUnreachable(t *testing.T) {
 }
 
 func TestDefaultServerIsTheHostedConsole(t *testing.T) {
-	if (Client{}).base() != "https://boundlane.dev" {
+	if (Client{}).base() != "https://fenzi.dev" {
 		t.Fatalf("default server %s", Client{}.base())
 	}
 }

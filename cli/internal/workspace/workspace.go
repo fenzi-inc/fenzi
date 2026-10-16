@@ -240,7 +240,7 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	defer in.Close()
-	tmp, err := os.CreateTemp(filepath.Dir(dst), ".boundlane-*")
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".fenzi-*")
 	if err != nil {
 		return err
 	}

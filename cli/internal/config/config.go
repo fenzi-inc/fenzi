@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// Dirs are the CLI's folders: ~/.config/boundlane and ~/.cache/boundlane,
+// Dirs are the CLI's folders: ~/.config/fenzi and ~/.cache/fenzi,
 // or the XDG equivalents. Model keys are never stored here.
 type Dirs struct {
 	Config string
@@ -32,7 +32,22 @@ func Default() (Dirs, error) {
 	if cache == "" {
 		cache = filepath.Join(home, ".cache")
 	}
-	return Dirs{Config: filepath.Join(cfg, "boundlane"), Cache: filepath.Join(cache, "boundlane")}, nil
+	d := Dirs{Config: filepath.Join(cfg, "fenzi"), Cache: filepath.Join(cache, "fenzi")}
+	// Machines set up before the rename from Boundlane keep their sign-in,
+	// state and cache: the old folders move once, when the new ones are missing.
+	moveLegacy(filepath.Join(cfg, "boundlane"), d.Config)
+	moveLegacy(filepath.Join(cache, "boundlane"), d.Cache)
+	return d, nil
+}
+
+func moveLegacy(old, cur string) {
+	if _, err := os.Stat(cur); err == nil {
+		return
+	}
+	if _, err := os.Stat(old); err != nil {
+		return
+	}
+	_ = os.Rename(old, cur)
 }
 
 // Run holds the compiled policy, boundary, and effective policy for one sandbox.
@@ -43,7 +58,7 @@ func (d Dirs) Staging(sandbox string) string { return filepath.Join(d.Cache, "st
 
 func (d Dirs) statePath() string { return filepath.Join(d.Config, "state.json") }
 
-// State remembers which sandboxes Boundlane started. Profiles and providers
+// State remembers which sandboxes Fenzi started. Profiles and providers
 // are looked up on the gateway instead.
 type State struct {
 	Sandboxes []Sandbox `json:"sandboxes"`
@@ -131,7 +146,7 @@ func (s *State) LatestIn(dir string, runningOnly bool) (Sandbox, bool) {
 	return in.Latest(runningOnly)
 }
 
-// Setup records the answers from boundlane setup.
+// Setup records the answers from fenzi setup.
 type Setup struct {
 	Agent    string    `json:"agent"`
 	Project  string    `json:"project"`

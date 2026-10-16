@@ -1,7 +1,7 @@
 name: codex
 display: Codex
 command: codex
-image: boundlane/codex
+image: fenzi/codex
 # Bump together with CODEX_VERSION in the Dockerfile.
 version: "0.160.1"
 # The npm codex command is a Node launcher that starts a native program for
@@ -37,9 +37,9 @@ args:
   - --disable
   - apps
   - -c
-  - model_provider="boundlane"
+  - model_provider="fenzi"
   - -c
-  - model_providers.boundlane={name="OpenAI", base_url="https://api.openai.com/v1", env_key="OPENAI_API_KEY", supports_websockets=false}
+  - model_providers.fenzi={name="OpenAI", base_url="https://api.openai.com/v1", env_key="OPENAI_API_KEY", supports_websockets=false}
   # Codex's own sandbox is bubblewrap, which cannot create namespaces inside an
   # OpenShell sandbox ("bwrap: No permissions to create a new namespace"), so
   # every command would fail. OpenShell's filesystem, process and network
@@ -64,7 +64,7 @@ args:
 guide_config: developer_instructions
 key:
   env: OPENAI_API_KEY
-  profile_type: boundlane-codex
+  profile_type: fenzi-codex
   profile_file: profile.yaml
 status: testing
 verified: false

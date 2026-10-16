@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"boundlane/agents"
-	"boundlane/compiler"
+	"fenzi/agents"
+	"fenzi/compiler"
 )
 
 // acmeBoundary is a team boundary: wider than developer-default by

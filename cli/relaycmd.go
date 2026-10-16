@@ -12,11 +12,11 @@ import (
 	"syscall"
 	"time"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/openshell"
-	"boundlane/cli/internal/relay"
-	"boundlane/cli/internal/team"
-	"boundlane/cli/internal/tui"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/openshell"
+	"fenzi/cli/internal/relay"
+	"fenzi/cli/internal/team"
+	"fenzi/cli/internal/tui"
 )
 
 func cmdSync(e env, args []string) (int, error) {
@@ -69,7 +69,7 @@ func relayOnce(ctx context.Context, e env) (relay.Report, error) {
 
 // relayOnceWait is one pass that waits at most wait for another pass to finish.
 // With 0 it tries once and gives up, which the background forwarder in
-// boundlane run wants: the other forwarder is already doing the work.
+// fenzi run wants: the other forwarder is already doing the work.
 func relayOnceWait(ctx context.Context, e env, wait time.Duration) (relay.Report, error) {
 	dirs, err := config.Default()
 	if err != nil {
@@ -77,7 +77,7 @@ func relayOnceWait(ctx context.Context, e env, wait time.Duration) (relay.Report
 	}
 	en, err := team.Load(dirs)
 	if errors.Is(err, team.ErrNotEnrolled) {
-		return relay.Report{}, errors.New("sign in first (boundlane login)")
+		return relay.Report{}, errors.New("sign in first (fenzi login)")
 	}
 	if err != nil {
 		return relay.Report{}, err
@@ -131,7 +131,7 @@ func relayOnceWait(ctx context.Context, e env, wait time.Duration) (relay.Report
 		rep.Notes = append([]string{note}, rep.Notes...)
 	}
 	if err != nil && strings.Contains(err.Error(), "No active gateway") {
-		return rep, errors.New("OpenShell gateway is not ready. Run boundlane doctor")
+		return rep, errors.New("OpenShell gateway is not ready. Run fenzi doctor")
 	}
 	return rep, err
 }
@@ -149,7 +149,7 @@ func beatNotes(en team.Enrollment) []string {
 var relayLockWait = 60 * time.Second
 
 // lockRelay holds relay.lock in the config folder until unlock is called.
-// It waits while another boundlane sync or forward holds it, up to wait.
+// It waits while another fenzi sync or forward holds it, up to wait.
 func lockRelay(ctx context.Context, dirs config.Dirs, wait time.Duration) (unlock func(), err error) {
 	if err := os.MkdirAll(dirs.Config, 0o700); err != nil {
 		return nil, err
@@ -173,7 +173,7 @@ func lockRelay(ctx context.Context, dirs config.Dirs, wait time.Duration) (unloc
 		}
 		if time.Now().After(deadline) {
 			f.Close()
-			return nil, errors.New("another boundlane sync or forward is running; try again when it finishes")
+			return nil, errors.New("another fenzi sync or forward is running; try again when it finishes")
 		}
 		select {
 		case <-ctx.Done():

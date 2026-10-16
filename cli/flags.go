@@ -7,12 +7,12 @@ import (
 	"io"
 	"os"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/tui"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/tui"
 )
 
 func newFlags(name string, out io.Writer) *flag.FlagSet {
-	fs := flag.NewFlagSet("boundlane "+name, flag.ContinueOnError)
+	fs := flag.NewFlagSet("fenzi "+name, flag.ContinueOnError)
 	fs.SetOutput(out)
 	fs.Usage = func() { writeFlags(out, fs) }
 	return fs
@@ -26,31 +26,31 @@ func (helpRequested) Error() string { return "help" }
 
 // usage is the shape of each command, shown above its flags.
 var usage = map[string]string{
-	"boundlane run":      "boundlane run [agent] [-- agent arguments]",
-	"boundlane connect":  "boundlane connect [sandbox] [-- agent arguments]",
-	"boundlane stop":     "boundlane stop [sandbox]",
-	"boundlane rm":       "boundlane rm <sandbox> [<sandbox>...] | boundlane rm --finished",
-	"boundlane approve":  "boundlane approve <id> [--save [--dry-run] [--policy-from <file>]]",
-	"boundlane deny":     `boundlane deny <id> --reason "text"`,
-	"boundlane requests": "boundlane requests",
-	"boundlane diff":     "boundlane diff",
-	"boundlane apply":    "boundlane apply",
-	"boundlane log":      "boundlane log",
-	"boundlane ps":       "boundlane ps",
-	"boundlane doctor":   "boundlane doctor",
-	"boundlane init":     "boundlane init",
-	"boundlane setup":    "boundlane setup",
-	"boundlane update":   "boundlane update [--check]",
-	"boundlane version":  "boundlane version",
-	"boundlane status":   "boundlane status",
-	"boundlane login":    "boundlane login",
-	"boundlane logout":   "boundlane logout",
-	"boundlane server":   "boundlane server",
-	"boundlane sync":     "boundlane sync",
-	"boundlane forward":  "boundlane forward [--once]",
-	"boundlane agents":   "boundlane agents",
-	"boundlane key":      "boundlane key",
-	"boundlane policy":   "boundlane policy",
+	"fenzi run":      "fenzi run [agent] [-- agent arguments]",
+	"fenzi connect":  "fenzi connect [sandbox] [-- agent arguments]",
+	"fenzi stop":     "fenzi stop [sandbox]",
+	"fenzi rm":       "fenzi rm <sandbox> [<sandbox>...] | fenzi rm --finished",
+	"fenzi approve":  "fenzi approve <id> [--save [--dry-run] [--policy-from <file>]]",
+	"fenzi deny":     `fenzi deny <id> --reason "text"`,
+	"fenzi requests": "fenzi requests",
+	"fenzi diff":     "fenzi diff",
+	"fenzi apply":    "fenzi apply",
+	"fenzi log":      "fenzi log",
+	"fenzi ps":       "fenzi ps",
+	"fenzi doctor":   "fenzi doctor",
+	"fenzi init":     "fenzi init",
+	"fenzi setup":    "fenzi setup",
+	"fenzi update":   "fenzi update [--check]",
+	"fenzi version":  "fenzi version",
+	"fenzi status":   "fenzi status",
+	"fenzi login":    "fenzi login",
+	"fenzi logout":   "fenzi logout",
+	"fenzi server":   "fenzi server",
+	"fenzi sync":     "fenzi sync",
+	"fenzi forward":  "fenzi forward [--once]",
+	"fenzi agents":   "fenzi agents",
+	"fenzi key":      "fenzi key",
+	"fenzi policy":   "fenzi policy",
 }
 
 func writeFlags(out io.Writer, fs *flag.FlagSet) {
@@ -100,7 +100,7 @@ func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 	}
 }
 
-// pickSandbox returns the named sandbox, or the most recent one Boundlane
+// pickSandbox returns the named sandbox, or the most recent one Fenzi
 // started for the current folder. Outside any project it takes the most
 // recent one overall and says which, so output from another project is never
 // shown silently.
@@ -126,9 +126,9 @@ func pickSandbox(e env, dirs config.Dirs, name string, runningOnly bool) (config
 		return sb, nil
 	}
 	if runningOnly {
-		return config.Sandbox{}, errors.New("no sandbox is running. boundlane run starts one")
+		return config.Sandbox{}, errors.New("no sandbox is running. fenzi run starts one")
 	}
-	return config.Sandbox{}, errors.New("no sandbox has run on this machine yet. boundlane run starts one")
+	return config.Sandbox{}, errors.New("no sandbox has run on this machine yet. fenzi run starts one")
 }
 
 func cwd() (string, error) { return os.Getwd() }

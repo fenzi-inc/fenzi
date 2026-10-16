@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/run"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/run"
 )
 
 // rmFixture is a machine with one running sandbox and two finished ones:
@@ -84,7 +84,7 @@ func TestRmRemovesAFinishedSandbox(t *testing.T) {
 	if !exists(dirs.Run("bl-old-2222")) || !exists(dirs.Run("bl-live-0000")) {
 		t.Error("another sandbox's folder went too")
 	}
-	// Gone from the list, and no longer an answer for boundlane log.
+	// Gone from the list, and no longer an answer for fenzi log.
 	var errOut bytes.Buffer
 	var out2 bytes.Buffer
 	if code := cli([]string{"log", "--sandbox", "bl-old-1111"}, strings.NewReader(""), &out2, &errOut); code == 0 {
@@ -98,7 +98,7 @@ func TestRmRefusesARunningSandbox(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("exit %d, want 1:\n%s", code, out)
 	}
-	if !strings.Contains(out, "Nothing removed") || !strings.Contains(out, "! bl-live-0000") || !strings.Contains(out, "is running; boundlane stop bl-live-0000 ends it first") {
+	if !strings.Contains(out, "Nothing removed") || !strings.Contains(out, "! bl-live-0000") || !strings.Contains(out, "is running; fenzi stop bl-live-0000 ends it first") {
 		t.Errorf("output:\n%s", out)
 	}
 	if len(names(t, dirs)) != 3 || !exists(dirs.Run("bl-live-0000")) {
@@ -107,7 +107,7 @@ func TestRmRefusesARunningSandbox(t *testing.T) {
 	// A sandbox the gateway runs that the state never saw counts as running too.
 	fakeRuntime(t, map[string]reply{"sandbox list": {out: "bl-other-9999\n"}}, "")
 	out, code = runCLI(t, "", "rm", "bl-other-9999")
-	if code != 1 || !strings.Contains(out, "! bl-other-9999") || !strings.Contains(out, "is running; boundlane stop bl-other-9999 ends it first") {
+	if code != 1 || !strings.Contains(out, "! bl-other-9999") || !strings.Contains(out, "is running; fenzi stop bl-other-9999 ends it first") {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
 }
@@ -171,7 +171,7 @@ func TestJSONRm(t *testing.T) {
 	if len(doc.Removed) != 1 || doc.Removed[0] != (jsonRemoved{Name: "bl-old-2222", SavedLog: true}) {
 		t.Errorf("removed = %+v", doc.Removed)
 	}
-	if len(doc.Refused) != 1 || doc.Refused[0] != (jsonRefused{Name: "bl-live-0000", Reason: "bl-live-0000 is running; boundlane stop bl-live-0000 ends it first"}) {
+	if len(doc.Refused) != 1 || doc.Refused[0] != (jsonRefused{Name: "bl-live-0000", Reason: "bl-live-0000 is running; fenzi stop bl-live-0000 ends it first"}) {
 		t.Errorf("refused = %+v", doc.Refused)
 	}
 	if got := strings.Join(names(t, dirs), " "); got != "bl-live-0000 bl-old-1111" {
@@ -206,7 +206,7 @@ func TestKeyRemoveNamesTheRunningSandbox(t *testing.T) {
 	if code := cli([]string{"key", "remove", "claude"}, strings.NewReader(""), &out, &errOut); code != 1 {
 		t.Fatalf("exit %d:\n%s%s", code, out.String(), errOut.String())
 	}
-	if !strings.Contains(errOut.String(), "bl-live-0000 is running with the Claude Code key; stop it first (boundlane stop bl-live-0000)") {
+	if !strings.Contains(errOut.String(), "bl-live-0000 is running with the Claude Code key; stop it first (fenzi stop bl-live-0000)") {
 		t.Errorf("stderr %q", errOut.String())
 	}
 	// Codex has no running sandbox, so its key can go.

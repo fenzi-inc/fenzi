@@ -17,14 +17,14 @@ import (
 	"strings"
 	"time"
 
-	"boundlane/agents"
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/forward"
-	"boundlane/cli/internal/openshell"
-	"boundlane/cli/internal/run"
-	"boundlane/cli/internal/team"
-	"boundlane/compiler"
-	"boundlane/teamapi"
+	"fenzi/agents"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/forward"
+	"fenzi/cli/internal/openshell"
+	"fenzi/cli/internal/run"
+	"fenzi/cli/internal/team"
+	"fenzi/compiler"
+	"fenzi/teamapi"
 )
 
 // Gateway is the local OpenShell gateway. openshell.Client implements it.
@@ -308,7 +308,7 @@ func push(ctx context.Context, opt Option, name, agent string, have int, res run
 	if err != nil {
 		return "", false, 0, err
 	}
-	dir, err := os.MkdirTemp("", "boundlane-sync-")
+	dir, err := os.MkdirTemp("", "fenzi-sync-")
 	if err != nil {
 		return "", false, 0, err
 	}
@@ -407,7 +407,7 @@ func (p *pass) ship(ctx context.Context) error {
 // again on every pass, so one the server did not take is reported next time.
 //
 // A full list goes with PUT, an empty one too, so the console learns that a
-// request it holds was answered on the machine with boundlane approve or
+// request it holds was answered on the machine with fenzi approve or
 // deny, or in the Mac app. A console that predates the call answers 405; it
 // then gets the older report, which only adds and is skipped when empty.
 func (p *pass) report(ctx context.Context, name string, props []teamapi.Proposal, full bool) {
@@ -447,7 +447,7 @@ func older(props []teamapi.Proposal) []teamapi.Proposal {
 }
 
 // proposals turns pending chunks into the requests the console lists. Draft
-// follows the rule boundlane requests uses: the log is read only when a
+// follows the rule fenzi requests uses: the log is read only when a
 // chunk looks drafted, to see whether the agent filed it after all.
 func (p *pass) proposals(ctx context.Context, sandbox string, rules []openshell.Proposal) []teamapi.Proposal {
 	var filed map[string]bool
@@ -525,7 +525,7 @@ func (p *pass) finished(listed []string, cur *cursorFile) ([]forward.Record, err
 		delete(cur.Last, sb.Name)
 		delete(cur.Stream, sb.Name)
 	}
-	// A sandbox boundlane rm forgot has no saved log left to read.
+	// A sandbox fenzi rm forgot has no saved log left to read.
 	for name := range cur.Done {
 		if !known[name] {
 			delete(cur.Done, name)

@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/openshell"
-	"boundlane/cli/internal/team"
-	"boundlane/compiler"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/openshell"
+	"fenzi/cli/internal/team"
+	"fenzi/compiler"
 )
 
 func TestRequestHostFromRecordedRules(t *testing.T) {
@@ -49,7 +49,7 @@ func TestRequestHostFromRecordedRules(t *testing.T) {
 }
 
 func TestSaveKeepsCommentsInAStarterFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "boundlane.yaml")
+	path := filepath.Join(t.TempDir(), "fenzi.yaml")
 	if err := os.WriteFile(path, []byte(initTemplate), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestSaveKeepsCommentsInAStarterFile(t *testing.T) {
 	}
 	raw, _ := os.ReadFile(path)
 	for _, want := range []string{
-		"# Boundlane project policy.",
+		"# Fenzi project policy.",
 		"# Hosts this project needs beyond developer-default.",
 		"#  - host: api.stripe.com",
 		"#      - POST /repos/acme/web/pulls",
@@ -88,7 +88,7 @@ func TestSaveKeepsCommentsInAStarterFile(t *testing.T) {
 }
 
 func TestSaveAddsToAnExistingEntry(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "boundlane.yaml")
+	path := filepath.Join(t.TempDir(), "fenzi.yaml")
 	file := "version: 1\nhosts:\n  # Our API.\n  - host: api.example.com\n    access: read-write\n    allow:\n      - GET /v1/** # reads\n  - host: cdn.example.com\n    access: read-only\n"
 	if err := os.WriteFile(path, []byte(file), 0o600); err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func TestSaveAddsToAnExistingEntry(t *testing.T) {
 }
 
 func TestSaveIntoAFileOfComments(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "boundlane.yaml")
+	path := filepath.Join(t.TempDir(), "fenzi.yaml")
 	if err := os.WriteFile(path, []byte("# Hosts for the web app.\n# Ask Ana first.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestSaveIntoAFileOfComments(t *testing.T) {
 }
 
 func TestSaveRefusesABrokenFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "boundlane.yaml")
+	path := filepath.Join(t.TempDir(), "fenzi.yaml")
 	if err := os.WriteFile(path, []byte("version: 1\nhosts: [\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -174,12 +174,12 @@ func TestApproveSaveWritesTheHost(t *testing.T) {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
 	out = strings.Join(strings.Fields(out), " ")
-	for _, want := range []string{"Approved", "Saved", "github.com, read-only", "lets any traffic through to github.com:443", "GET, HEAD, and OPTIONS", "Policy check", "inside the boundary", "developer-default (built in) + ./boundlane.yaml"} {
+	for _, want := range []string{"Approved", "Saved", "github.com, read-only", "lets any traffic through to github.com:443", "GET, HEAD, and OPTIONS", "Policy check", "inside the boundary", "developer-default (built in) + ./fenzi.yaml"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
-	raw, err := os.ReadFile(filepath.Join(repo, "boundlane.yaml"))
+	raw, err := os.ReadFile(filepath.Join(repo, "fenzi.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestApproveSaveWritesTheHost(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "allowed GET / only") || !strings.Contains(out, "www.example.com, read-only") {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
-	raw, _ = os.ReadFile(filepath.Join(repo, "boundlane.yaml"))
+	raw, _ = os.ReadFile(filepath.Join(repo, "fenzi.yaml"))
 	if !strings.Contains(string(raw), "- host: github.com") || !strings.Contains(string(raw), "- host: www.example.com") {
 		t.Errorf("file:\n%s", raw)
 	}
@@ -204,11 +204,11 @@ func TestApproveSaveRefusedOnATeamMachine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := (team.Enrollment{Server: "https://boundlane.example", Token: "t", Email: "ana@acme.dev", Tenant: "acme", Machine: "m"}).Save(dirs); err != nil {
+	if err := (team.Enrollment{Server: "https://fenzi.example", Token: "t", Email: "ana@acme.dev", Tenant: "acme", Machine: "m"}).Save(dirs); err != nil {
 		t.Fatal(err)
 	}
 	out, code := runCLI(t, "", "approve", "59b83e6d", "--save", "--sandbox", "bl-web-1a2b")
-	if code != 1 || !strings.Contains(out, "team policy") || !strings.Contains(out, "https://boundlane.example/console") {
+	if code != 1 || !strings.Contains(out, "team policy") || !strings.Contains(out, "https://fenzi.example/console") {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
 	// The runtime lists nothing here, so the full id is unknown: the console
@@ -227,10 +227,10 @@ func TestApproveSaveOnATeamMachineNamesTheRequestPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := (team.Enrollment{Server: "https://boundlane.example/", Token: "t", Email: "ana@acme.dev", Tenant: "acme", Machine: "m"}).Save(dirs); err != nil {
+	if err := (team.Enrollment{Server: "https://fenzi.example/", Token: "t", Email: "ana@acme.dev", Tenant: "acme", Machine: "m"}).Save(dirs); err != nil {
 		t.Fatal(err)
 	}
-	page := "https://boundlane.example/console/requests/bl-web-1a2b/59b83e6d-8a8a-43e4-a597-066a5d16fc36"
+	page := "https://fenzi.example/console/requests/bl-web-1a2b/59b83e6d-8a8a-43e4-a597-066a5d16fc36"
 	for _, args := range [][]string{
 		{"approve", "59b83e6d", "--save", "--sandbox", "bl-web-1a2b"},
 		{"approve", "59b83e6d", "--save", "--dry-run", "--sandbox", "bl-web-1a2b"},
@@ -246,14 +246,14 @@ func TestApproveSaveOnATeamMachineNamesTheRequestPage(t *testing.T) {
 	if called(t, "rule approve") {
 		t.Errorf("approved on a team machine: %q", runtimeCalls(t))
 	}
-	if _, err := os.Stat(filepath.Join(repo, "boundlane.yaml")); err == nil {
-		t.Error("boundlane.yaml was written")
+	if _, err := os.Stat(filepath.Join(repo, "fenzi.yaml")); err == nil {
+		t.Error("fenzi.yaml was written")
 	}
 }
 
 func TestApproveSaveDryRunChangesNothing(t *testing.T) {
 	repo := saveFixture(t)
-	path := filepath.Join(repo, "boundlane.yaml")
+	path := filepath.Join(repo, "fenzi.yaml")
 	before := "# Hosts for the web app.\nversion: 1\nhosts:\n  - host: cdn.example.com\n    access: read-only\n"
 	if err := os.WriteFile(path, []byte(before), 0o600); err != nil {
 		t.Fatal(err)
@@ -264,11 +264,11 @@ func TestApproveSaveDryRunChangesNothing(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Preview of approve --save", "nothing is approved or written",
-		"boundlane.yaml, exists", "Adds  github.com, read-only",
-		"--- a/boundlane.yaml\n", "+++ b/boundlane.yaml\n", "@@ -3,3 +3,5 @@\n",
+		"fenzi.yaml, exists", "Adds  github.com, read-only",
+		"--- a/fenzi.yaml\n", "+++ b/fenzi.yaml\n", "@@ -3,3 +3,5 @@\n",
 		"      access: read-only\n    +  - host: github.com\n    +    access: read-only\n",
-		"Policy check", "inside the boundary", "developer-default (built in) + ./boundlane.yaml",
-		"boundlane approve 59b83e6d --save",
+		"Policy check", "inside the boundary", "developer-default (built in) + ./fenzi.yaml",
+		"fenzi approve 59b83e6d --save",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -290,10 +290,10 @@ func TestApproveSaveDryRunChangesNothing(t *testing.T) {
 	if doc.File != path || !doc.Exists || doc.Before != before || doc.After != after || doc.Host != "github.com" || doc.Port != 443 || doc.Access != "read-only" || doc.Already || len(doc.Allow) != 0 || doc.Allow == nil {
 		t.Errorf("preview = %+v", doc)
 	}
-	if !strings.Contains(doc.Note, "lets any traffic through") || !strings.HasPrefix(doc.Diff, "--- a/boundlane.yaml\n+++ b/boundlane.yaml\n@@ -3,3 +3,5 @@\n") || !strings.HasSuffix(doc.Diff, "+  - host: github.com\n+    access: read-only\n") {
+	if !strings.Contains(doc.Note, "lets any traffic through") || !strings.HasPrefix(doc.Diff, "--- a/fenzi.yaml\n+++ b/fenzi.yaml\n@@ -3,3 +3,5 @@\n") || !strings.HasSuffix(doc.Diff, "+  - host: github.com\n+    access: read-only\n") {
 		t.Errorf("note %q diff:\n%s", doc.Note, doc.Diff)
 	}
-	if want := (jsonSaveCheck{Passed: true, Result: "within_boundary", Checked: "developer-default (built in) + ./boundlane.yaml", Agent: "Claude Code"}); doc.Check != want {
+	if want := (jsonSaveCheck{Passed: true, Result: "within_boundary", Checked: "developer-default (built in) + ./fenzi.yaml", Agent: "Claude Code"}); doc.Check != want {
 		t.Errorf("check = %+v", doc.Check)
 	}
 	if raw, _ := os.ReadFile(path); string(raw) != before || called(t, "rule approve") {
@@ -310,14 +310,14 @@ func TestApproveSaveDryRunNewFileAndAlreadyThere(t *testing.T) {
 	if doc.Exists || doc.Before != "" || doc.After != "version: 1\nhosts:\n  - host: www.example.com\n    access: read-only\n" || doc.Host != "www.example.com" || !strings.Contains(doc.Note, "allowed GET / only") {
 		t.Errorf("new file: %+v", doc)
 	}
-	if !strings.HasPrefix(doc.Diff, "--- /dev/null\n+++ b/boundlane.yaml\n@@ -0,0 +1,4 @@\n+version: 1\n") {
+	if !strings.HasPrefix(doc.Diff, "--- /dev/null\n+++ b/fenzi.yaml\n@@ -0,0 +1,4 @@\n+version: 1\n") {
 		t.Errorf("diff:\n%s", doc.Diff)
 	}
-	if _, err := os.Stat(filepath.Join(repo, "boundlane.yaml")); err == nil {
-		t.Fatal("a dry run wrote boundlane.yaml")
+	if _, err := os.Stat(filepath.Join(repo, "fenzi.yaml")); err == nil {
+		t.Fatal("a dry run wrote fenzi.yaml")
 	}
 
-	if err := os.WriteFile(filepath.Join(repo, "boundlane.yaml"), []byte("version: 1\nhosts:\n  - host: github.com\n    access: read-only\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, "fenzi.yaml"), []byte("version: 1\nhosts:\n  - host: github.com\n    access: read-only\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	doc = jsonSavePreview{}
@@ -328,7 +328,7 @@ func TestApproveSaveDryRunNewFileAndAlreadyThere(t *testing.T) {
 		t.Errorf("already there: %+v", doc)
 	}
 	out, code := runCLI(t, "", "approve", "59b83e6d", "--save", "--dry-run", "--sandbox", "bl-web-1a2b")
-	if code != 0 || !strings.Contains(out, "Adds  nothing") || !strings.Contains(out, "boundlane.yaml stays as it is.") || !strings.Contains(out, "boundlane approve 59b83e6d  ") {
+	if code != 0 || !strings.Contains(out, "Adds  nothing") || !strings.Contains(out, "fenzi.yaml stays as it is.") || !strings.Contains(out, "fenzi approve 59b83e6d  ") {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
 }
@@ -350,7 +350,7 @@ func TestApproveSaveDryRunFailingCheck(t *testing.T) {
 		t.Errorf("check = %+v", doc.Check)
 	}
 	out, code := runCLI(t, "", "approve", "59b83e6d", "--save", "--dry-run", "--sandbox", "bl-web-1a2b")
-	if code != 2 || !strings.Contains(out, "exceeds_boundary") || !strings.Contains(out, "Nothing was approved or written.") || strings.Contains(out, "boundlane approve 59b83e6d --save") {
+	if code != 2 || !strings.Contains(out, "exceeds_boundary") || !strings.Contains(out, "Nothing was approved or written.") || strings.Contains(out, "fenzi approve 59b83e6d --save") {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
 	if called(t, "rule approve") {
@@ -360,7 +360,7 @@ func TestApproveSaveDryRunFailingCheck(t *testing.T) {
 
 func TestApproveSavePolicyFrom(t *testing.T) {
 	repo := saveFixture(t)
-	path := filepath.Join(repo, "boundlane.yaml")
+	path := filepath.Join(repo, "fenzi.yaml")
 	if err := os.WriteFile(path, []byte("version: 1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +389,7 @@ func TestApproveSavePolicyFrom(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
-	for _, want := range []string{"Approved", "Saved", "inside the boundary", "developer-default (built in) + ./boundlane.yaml"} {
+	for _, want := range []string{"Approved", "Saved", "inside the boundary", "developer-default (built in) + ./fenzi.yaml"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
@@ -414,7 +414,7 @@ func TestApproveSavePolicyFromRefusesAFailingFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, code := runCLI(t, "", "approve", "59b83e6d", "--save", "--policy-from", edited, "--sandbox", "bl-web-1a2b")
-	if code != 2 || !strings.Contains(out, "exceeds_boundary") || !strings.Contains(out, "Nothing was approved, and boundlane.yaml was not changed.") {
+	if code != 2 || !strings.Contains(out, "exceeds_boundary") || !strings.Contains(out, "Nothing was approved, and fenzi.yaml was not changed.") {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
 
@@ -430,8 +430,8 @@ func TestApproveSavePolicyFromRefusesAFailingFile(t *testing.T) {
 	if called(t, "rule approve") {
 		t.Errorf("approved: %q", runtimeCalls(t))
 	}
-	if _, err := os.Stat(filepath.Join(repo, "boundlane.yaml")); err == nil {
-		t.Error("boundlane.yaml was written")
+	if _, err := os.Stat(filepath.Join(repo, "fenzi.yaml")); err == nil {
+		t.Error("fenzi.yaml was written")
 	}
 }
 

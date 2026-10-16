@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"boundlane/cli/internal/config"
+	"fenzi/cli/internal/config"
 )
 
 // A server before roles sends only the admin flag; a server with roles sends
@@ -64,7 +64,7 @@ func TestMeAndWithRole(t *testing.T) {
 // and reads as it did.
 func TestAnOldEnrollmentFileLoads(t *testing.T) {
 	dirs := config.Dirs{Config: t.TempDir()}
-	old := Enrollment{Server: "https://boundlane.dev", Token: "t", Email: "dana@acme.dev", Tenant: "acme", Machine: "mbp", Admin: true}
+	old := Enrollment{Server: "https://fenzi.dev", Token: "t", Email: "dana@acme.dev", Tenant: "acme", Machine: "mbp", Admin: true}
 	if err := old.Save(dirs); err != nil {
 		t.Fatal(err)
 	}

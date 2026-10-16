@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"os"
 
-	"boundlane/agents"
+	"fenzi/agents"
 )
 
 func main() {

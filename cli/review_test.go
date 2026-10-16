@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/workspace"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/workspace"
 )
 
 const sandboxName = "bl-web-1a2b"
@@ -88,7 +88,7 @@ func TestDiffShowsSummaryAndLines(t *testing.T) {
 		"    2 + import sys",
 		"    5 -     print('hi')",
 		"    6 +     print('hello', sys.argv)",
-		"boundlane apply --sandbox " + sandboxName,
+		"fenzi apply --sandbox " + sandboxName,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -108,7 +108,7 @@ func TestApplyKeepsChangesUnlessYes(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(repo, "old.txt")); err != nil {
 		t.Fatal("a file was deleted without a yes")
 	}
-	for _, want := range []string{"Kept for later", "boundlane apply --sandbox " + sandboxName} {
+	for _, want := range []string{"Kept for later", "fenzi apply --sandbox " + sandboxName} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"boundlane/cli/internal/openshell"
+	"fenzi/cli/internal/openshell"
 )
 
 // acmeBoundary is wider than hostDoc by api.stripe.com and lists no

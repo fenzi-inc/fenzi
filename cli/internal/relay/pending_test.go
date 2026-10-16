@@ -17,13 +17,13 @@ const onePending = `Network Rules:  (version 2, 1 chunks)
 
   Chunk: aea27fd2-2745-484c-8470-de07913e70d9
   Status: pending
-  Rule: boundlane_dev
+  Rule: fenzi_dev
   Binary: /usr/bin/curl
   Confidence: 75%
-  Rationale: Curl to boundlane.dev to fetch content
+  Rationale: Curl to fenzi.dev to fetch content
   Prover: prover: no new findings
   Candidate: 62770fa70661
-  Endpoints: boundlane.dev:443 [L7 rest, allow GET /**]
+  Endpoints: fenzi.dev:443 [L7 rest, allow GET /**]
   Binaries: /usr/bin/curl
 `
 
@@ -38,7 +38,7 @@ func TestTheFullPendingListIsSentWithItsRuleNames(t *testing.T) {
 	if f.puts != 1 || len(got) != 1 || rep.Requests != 1 {
 		t.Fatalf("puts %d lists %+v report %+v", f.puts, f.lists, rep)
 	}
-	if got[0].Chunk != "aea27fd2-2745-484c-8470-de07913e70d9" || got[0].Rule != "boundlane_dev" || got[0].Destination != "boundlane.dev:443" {
+	if got[0].Chunk != "aea27fd2-2745-484c-8470-de07913e70d9" || got[0].Rule != "fenzi_dev" || got[0].Destination != "fenzi.dev:443" {
 		t.Fatalf("request %+v", got[0])
 	}
 }

@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"boundlane/cli/internal/config"
-	"boundlane/cli/internal/team"
-	"boundlane/teamapi"
+	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/team"
+	"fenzi/teamapi"
 )
 
 // acmeBoundary is the team's boundary. It lists api.stripe.com, which the
@@ -89,7 +89,7 @@ func readSeen(t *testing.T, path string) string {
 	return string(b)
 }
 
-// The policy boundlane run uses on a signed-in machine is proved against the
+// The policy fenzi run uses on a signed-in machine is proved against the
 // boundary in the same signed bundle, and so is an org file checked there.
 func TestPolicyCheckUsesTheTeamBoundary(t *testing.T) {
 	fakeRuntime(t, nil, "")
@@ -140,7 +140,7 @@ func TestPolicyCheckUsesTheTeamBoundary(t *testing.T) {
 	}
 }
 
-// resolvePolicy is what boundlane run uses to pick its policy: on a
+// resolvePolicy is what fenzi run uses to pick its policy: on a
 // signed-in machine it carries the boundary from the signed bundle, which run
 // then proves both the compiled and the effective policy against.
 func TestRunResolvesTheBundleBoundary(t *testing.T) {

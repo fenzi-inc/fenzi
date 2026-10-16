@@ -5,7 +5,7 @@ package main
 import (
 	"fmt"
 
-	"boundlane/cli/internal/tui"
+	"fenzi/cli/internal/tui"
 )
 
 // includedTeam is true in a build that carries the local team server. This
@@ -15,8 +15,8 @@ const includedTeam = false
 func cmdServer(e env, args []string) (int, error) {
 	u := tui.ForOutput(e.stderr)
 	u.Blank()
-	u.Println(fmt.Sprintf("  %s %s", u.Bold("!"), u.Bold("boundlane server is not part of this build.")))
-	u.Note("The team control plane is hosted. Sign this machine in with boundlane login.")
+	u.Println(fmt.Sprintf("  %s %s", u.Bold("!"), u.Bold("fenzi server is not part of this build.")))
+	u.Note("The team control plane is hosted. Sign this machine in with fenzi login.")
 	u.Blank()
 	return 0, quietExit(1)
 }

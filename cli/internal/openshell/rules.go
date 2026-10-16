@@ -110,7 +110,7 @@ func (p Proposal) Drafted() bool {
 	return p.Rationale == "" || drafted.MatchString(p.Rationale)
 }
 
-// IsDraft is the rule boundlane requests uses to split requests: a chunk the
+// IsDraft is the rule fenzi requests uses to split requests: a chunk the
 // log shows the agent filed is the agent's, and so is one whose rationale is
 // not a generated one. Everything else was drafted from a refused connection.
 // filed comes from AgentFiled and may be nil when the log could not be read.
@@ -142,7 +142,7 @@ func ResolveChunk(list []Proposal, prefix string) (string, error) {
 	case 1:
 		return match[0], nil
 	case 0:
-		return "", fmt.Errorf("no pending request starts with %q; run boundlane requests", prefix)
+		return "", fmt.Errorf("no pending request starts with %q; run fenzi requests", prefix)
 	}
 	return "", fmt.Errorf("%q matches %d requests; use more characters", prefix, len(match))
 }
