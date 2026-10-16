@@ -52,14 +52,14 @@ func TestCheckFolder(t *testing.T) {
 func TestLooksSecret(t *testing.T) {
 	secret := []string{
 		".env", "app/.env", ".env.local", ".env.production", "certs/server.pem", "tls.key",
-		"id_rsa", "id_rsa.pub", "deploy/id_ed25519", "id_ecdsa_sk", "store.p12", "store.PFX",
+		"id_rsa", "deploy/id_ed25519", "id_ecdsa_sk", "store.p12", "store.PFX",
 		".npmrc", "sub/.pypirc", ".netrc", "credentials.json", "credentials-prod.json",
 		"prod.tfvars", "service-account.json", "gcp/service-account-ci.json",
 	}
 	plain := []string{
 		".env.example", ".env.sample", ".env.template", "config/.env.local.example",
 		"env.go", "README.md", "keys.go", "credentials.yaml", "service.json", "main.tf",
-		"pem.go", "monkey.txt", ".environment", "id.go",
+		"pem.go", "monkey.txt", ".environment", "id.go", "id_rsa.pub", "deploy/id_ed25519.pub",
 	}
 	for _, p := range secret {
 		if !LooksSecret(p) {

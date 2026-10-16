@@ -118,7 +118,8 @@ func LooksSecret(rel string) bool {
 		}
 	}
 	for _, p := range secretPrefixes {
-		if strings.HasPrefix(name, p) {
+		// The .pub half of an SSH key pair is public and safe to copy.
+		if strings.HasPrefix(name, p) && !strings.HasSuffix(name, ".pub") {
 			return true
 		}
 	}
