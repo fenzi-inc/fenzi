@@ -66,7 +66,7 @@ The site also has the [argument](https://fenzi.dev/beliefs), the [price](https:/
 | [Requests and approvals](https://fenzi.dev/docs/approvals) | A person decides when the agent wants a host the policy does not name. |
 | [Agents](https://fenzi.dev/docs/agents) | Claude Code, Codex, OpenCode, and Grok. Cursor CLI and Muse are listed as next. |
 | [Agent images](https://fenzi.dev/docs/images) | Each agent runs from an image you build on your machine, from a pinned Dockerfile. |
-| [Model keys](https://fenzi.dev/docs/keys) | Where the key is stored, what the agent sees, and why a subscription login is not enough. |
+| [Model keys](https://fenzi.dev/docs/keys) | Where the key is stored, what the agent sees, and what changes when Claude Code signs in with a subscription. |
 | [Workspace and changes](https://fenzi.dev/docs/workspace) | What is copied in, what is left out, and how changes come back through `diff` and `apply`. |
 | [Decision log](https://fenzi.dev/docs/log) | Every allow and deny `fenzi log` can show, and what the log never holds. |
 
