@@ -255,7 +255,7 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 	if o.Policy.Boundary != nil {
 		say("boundary", "%s", o.Policy.BoundarySource)
 	}
-	r, err := d.Prover.Check(ctx, c.Policy, c.Boundary)
+	r, err := d.Prover.Check(ctx, c.ProvePolicy, c.ProveBoundary)
 	if err != nil {
 		return res, err
 	}
@@ -263,6 +263,9 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		return res, &PolicyError{Stage: "compiled policy", Result: r}
 	}
 	say("prover", "%s", r.Result)
+	if c.MCP > 0 {
+		say("mcp", "%s, rules checked by Fenzi, not by the prover", plural(c.MCP, "server"))
+	}
 	// Kept so fenzi policy apply can tell a host change from one that
 	// needs a new sandbox.
 	if err := SaveResolved(runDir, o.Policy.Doc); err != nil {
@@ -326,6 +329,19 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		}
 		say("key", "%s, created from %s", provider, a.Key.Env)
 	}
+	// MCP servers: their tokens are providers bound to their endpoints, and
+	// the agent gets its own config for them.
+	var mcpProviders []string
+	var mcpFiles []agents.File
+	if doc := o.Policy.Doc; doc != nil && len(doc.MCP) > 0 {
+		if mcpProviders, err = MCPProviders(ctx, d.OpenShell, doc); err != nil {
+			return res, err
+		}
+		if a, mcpFiles, err = a.WithMCP(doc); err != nil {
+			return res, err
+		}
+		say("mcp", "%s", mcpSummary(doc))
+	}
 	state, err := d.Dirs.LoadState()
 	if err != nil {
 		return res, err
@@ -343,11 +359,12 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		labels["team_rev"] = strconv.Itoa(o.Policy.TeamRevision)
 	}
 	if _, err := d.OpenShell.SandboxCreate(ctx, openshell.CreateOptions{
-		Name:     name,
-		From:     a.Tag(),
-		Policy:   c.Policy,
-		Provider: provider,
-		Labels:   labels,
+		Name:      name,
+		From:      a.Tag(),
+		Policy:    c.Policy,
+		Provider:  provider,
+		Providers: mcpProviders,
+		Labels:    labels,
 	}); err != nil {
 		return res, err
 	}
@@ -375,7 +392,17 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 	if err := os.WriteFile(effPath, eff, 0o600); err != nil {
 		return res, err
 	}
-	r, err = d.Prover.Check(ctx, effPath, c.Boundary)
+	if bytes.Contains(eff, []byte("protocol: mcp")) {
+		stripped, err := compiler.StripMCP(eff)
+		if err != nil {
+			return res, err
+		}
+		effPath = filepath.Join(runDir, "prove.effective.yaml")
+		if err := os.WriteFile(effPath, stripped, 0o600); err != nil {
+			return res, err
+		}
+	}
+	r, err = d.Prover.Check(ctx, effPath, c.ProveBoundary)
 	if err != nil {
 		return res, err
 	}
@@ -420,6 +447,9 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 	}
 
 	// 11. Start the agent.
+	if err := writeFiles(ctx, d, name, mcpFiles); err != nil {
+		return res, err
+	}
 	if a.GuideFile != "" {
 		if err := writeGuide(ctx, d, name, a.GuideFile); err != nil {
 			return res, err

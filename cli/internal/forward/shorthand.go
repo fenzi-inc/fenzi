@@ -34,6 +34,16 @@ var (
 	// CONFIG:REJECTED and the other CONFIG events have not been recorded, so
 	// they are not mapped.
 	approval = regexp.MustCompile(`^CONFIG:APPROVED \[\w+\] chunk:(\S+) approved on (.+) by (\S+)$`)
+	// MCP requests, recorded from OpenShell 0.1.2 (engine:l7-mcp):
+	//
+	//	HTTP:POST [MED] DENIED POST http://mcp.deepwiki.com:443/mcp [policy:mcp_deepwiki_com engine:l7-mcp] [reason:JSONRPC_L7_REQUEST decision=deny rule_methods=tools/call tools=read_wiki_contents http_method=POST endpoint=mcp.deepwiki.com:443/mcp policy_version=2 reason=POST /mcp not permitted by policy]
+	//	HTTP:POST [INFO] ALLOWED POST http://mcp.deepwiki.com:443/mcp [policy:mcp_deepwiki_com engine:l7-mcp] [msg:JSONRPC_L7_REQUEST decision=allow rule_methods=tools/call tools=read_wiki_structure http_method=POST endpoint=mcp.deepwi...]
+	//
+	// An allowed line's message is cut short, so a long tool name can be cut
+	// too; a name that ends in ... is dropped.
+	mcpMethod = regexp.MustCompile(`rule_methods=(\S+)`)
+	mcpTool   = regexp.MustCompile(`tools=([^\s\]]+)`)
+	mcpReason = regexp.MustCompile(` reason=(.*)$`)
 	// lineTime is the time prefix every line of `openshell logs` carries.
 	lineTime = regexp.MustCompile(`^\[(\d+(?:\.\d+)?)\] `)
 )
@@ -96,8 +106,25 @@ func FromStream(t time.Time, level, message, sandbox string) (Record, bool) {
 		if hm := shortHTTP.FindStringSubmatch(rest); hm != nil {
 			r.Destination = hm[1] + " " + hostPath(hm[2])
 		}
+		if strings.Contains(rest, "engine:l7-mcp") {
+			mcpFields(&r, rest)
+		}
 	}
 	return r, r.Destination != ""
+}
+
+// mcpFields adds the MCP method and tool, and keeps only OpenShell's own
+// reason from the JSON-RPC summary.
+func mcpFields(r *Record, rest string) {
+	if m := mcpMethod.FindStringSubmatch(rest); m != nil && m[1] != "-" && !strings.HasSuffix(m[1], "...") {
+		r.MCPMethod = m[1]
+	}
+	if m := mcpTool.FindStringSubmatch(rest); m != nil && m[1] != "-" && !strings.HasSuffix(m[1], "...") {
+		r.MCPTool = m[1]
+	}
+	if m := mcpReason.FindStringSubmatch(r.Reason); m != nil {
+		r.Reason = strings.TrimSpace(m[1])
+	}
 }
 
 // ReadShorthand maps every decision line in a shorthand log.

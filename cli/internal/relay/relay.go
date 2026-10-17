@@ -703,6 +703,21 @@ func (p *pass) upload(ctx context.Context, sp *spool) error {
 	return nil
 }
 
+// mcpRequest reports whether a pending request is for an MCP server, from
+// the gateway's own pending list.
+func (p *pass) mcpRequest(ctx context.Context, sandbox, chunk string) bool {
+	out, err := p.Option.Gateway.PendingRules(ctx, sandbox)
+	if err != nil {
+		return false
+	}
+	for _, q := range openshell.ParseRules(out) {
+		if q.Chunk == chunk {
+			return q.MCP()
+		}
+	}
+	return false
+}
+
 func (p *pass) apply(ctx context.Context) error {
 	if !p.up() {
 		return nil
@@ -724,6 +739,13 @@ func (p *pass) apply(ctx context.Context) error {
 				// Left pending on the gateway, and listed again next pass.
 				rep.Notes = append(rep.Notes, fmt.Sprintf("%s %s not approved here: %s", r.Sandbox, r.Chunk, why))
 				continue
+			}
+			if p.mcpRequest(ctx, r.Sandbox, r.Chunk) {
+				// Approving it would open every tool on the server; the
+				// agent hears why instead of waiting.
+				err = opt.Gateway.RuleReject(ctx, r.Sandbox, r.Chunk, openshell.MCPApprovalRefused+". Ask the team to add the tool to the policy's mcp section.")
+				rep.Notes = append(rep.Notes, fmt.Sprintf("%s %s is an MCP request and was rejected, not approved: %s", r.Sandbox, r.Chunk, openshell.MCPApprovalRefused))
+				break
 			}
 			err = opt.Gateway.RuleApprove(ctx, r.Sandbox, r.Chunk)
 		case "denied":

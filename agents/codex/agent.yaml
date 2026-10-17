@@ -66,6 +66,8 @@ guide_config: developer_instructions
 # without showing the picker". resume takes the same --no-daemon, --disable
 # and -c options as the top-level command.
 resume: [resume, --last]
+# How the agent reads the MCP servers in the policy's mcp section (agents/mcp.go).
+mcp_format: codex-config
 key:
   env: OPENAI_API_KEY
   profile_type: fenzi-codex

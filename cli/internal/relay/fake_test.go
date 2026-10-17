@@ -34,6 +34,8 @@ type fakeGW struct {
 	set          bool
 	policy       []byte
 	approved     string
+	rejected     string
+	rejectReason string
 	approveCalls int
 	approveErr   error
 	pendingCalls int
@@ -98,7 +100,10 @@ func (g *fakeGW) RuleApprove(_ context.Context, _, chunk string) error {
 	g.approved = chunk
 	return g.approveErr
 }
-func (g *fakeGW) RuleReject(context.Context, string, string, string) error { return nil }
+func (g *fakeGW) RuleReject(_ context.Context, _, chunk, reason string) error {
+	g.rejected, g.rejectReason = chunk, reason
+	return nil
+}
 func (g *fakeGW) PolicySet(_ context.Context, _, file string) error {
 	g.set = true
 	b, err := os.ReadFile(file)

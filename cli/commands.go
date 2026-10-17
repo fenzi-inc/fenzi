@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -643,8 +644,16 @@ const approvedNote = "The sandbox loads it on its next poll, about 10 seconds. T
 
 func deniedNote(reason string) string { return "The agent sees: " + reason }
 
+// errMCPApproval is approve's answer to an MCP request.
+func errMCPApproval(p openshell.Proposal, sandbox string) error {
+	return fmt.Errorf("%s. Add the tool the agent needs to the server's entry (fenzi mcp add <name> <url> --tool <tool>) and start a new run, or deny the request: fenzi deny %s --sandbox %s --reason \"...\"", openshell.MCPApprovalRefused, shortID(p.Chunk), sandbox)
+}
+
 func approveOne(e env, u *tui.UI, sb config.Sandbox, p openshell.Proposal) error {
 	id := p.Chunk
+	if p.MCP() {
+		return errMCPApproval(p, sb.Name)
+	}
 	if err := client().RuleApprove(e.ctx, sb.Name, id); err != nil {
 		return err
 	}
@@ -716,6 +725,9 @@ func cmdApprove(e env, args []string) (int, error) {
 		return 1, err
 	}
 	id := p.Chunk
+	if p.MCP() {
+		return 1, errMCPApproval(p, sb.Name)
+	}
 	if err := checkTeamBoundary(sb, p.Destination()); err != nil {
 		return 1, err
 	}
@@ -1075,11 +1087,11 @@ func logRow(r forward.Record, deny bool) ([]screen.Cell, bool) {
 	t := r.Time.Local().Format("15:04:05")
 	switch {
 	case deny && r.Denied() && !r.Reset():
-		return []screen.Cell{{Text: t}, {Text: proc}, {Text: r.Destination}, {Text: dash(r.Reason), Tone: "deny"}}, true
+		return []screen.Cell{{Text: t}, {Text: proc}, {Text: r.What()}, {Text: dash(r.Reason), Tone: "deny"}}, true
 	case deny:
 		return nil, false
 	case r.Reset():
-		return []screen.Cell{{Text: t}, {Text: "reset"}, {Text: proc}, {Text: r.Destination}, {Text: "policy changed, the client reconnects"}}, true
+		return []screen.Cell{{Text: t}, {Text: "reset"}, {Text: proc}, {Text: r.What()}, {Text: "policy changed, the client reconnects"}}, true
 	}
 	action := strings.ToLower(r.Action)
 	tone := ""
@@ -1089,7 +1101,7 @@ func logRow(r forward.Record, deny bool) ([]screen.Cell, bool) {
 	case "denied":
 		tone = "deny"
 	}
-	return []screen.Cell{{Text: t}, {Text: action, Tone: tone}, {Text: proc}, {Text: r.Destination}, {Text: dash(r.Rule)}}, true
+	return []screen.Cell{{Text: t}, {Text: action, Tone: tone}, {Text: proc}, {Text: r.What()}, {Text: dash(r.Rule)}}, true
 }
 
 // followWidths are the column widths of log --follow, which prints each row
@@ -1276,7 +1288,12 @@ func cmdPolicy(e env, args []string) (int, error) {
 				return 1, err
 			}
 		} else {
-			printCheck(tui.New(e.stdin, e.stdout), r, from, resolved.BoundarySource, entry)
+			u := tui.New(e.stdin, e.stdout)
+			printCheck(u, r, from, resolved.BoundarySource, entry)
+			if n := remoteMCP(resolved.Doc); n > 0 {
+				u.Note(fmt.Sprintf("MCP: %d remote %s left out of the prover, which cannot read MCP rules; Fenzi checks those itself.", n, map[bool]string{true: "server", false: "servers"}[n == 1]))
+				u.Blank()
+			}
 		}
 		if !r.Passed() {
 			return 0, &run.PolicyError{Stage: "policy check", Result: r}
@@ -1327,9 +1344,19 @@ func proveResolved(e env, resolved run.Resolved, entry agents.Entry, boundary st
 		return openshell.Result{}, err
 	}
 	if boundary == "" {
-		boundary = c.Boundary
+		boundary = c.ProveBoundary
+	} else if raw, err := os.ReadFile(boundary); err == nil && bytes.Contains(raw, []byte("protocol: mcp")) {
+		// The prover cannot read MCP rules; CheckMCP covers them.
+		stripped, err := compiler.StripMCP(raw)
+		if err != nil {
+			return openshell.Result{}, err
+		}
+		boundary = filepath.Join(tmp, "given.boundary.yaml")
+		if err := os.WriteFile(boundary, stripped, 0o600); err != nil {
+			return openshell.Result{}, err
+		}
 	}
-	return prover().Check(e.ctx, c.Policy, boundary)
+	return prover().Check(e.ctx, c.ProvePolicy, boundary)
 }
 
 // printCheck prints a policy check result as fenzi policy check does.

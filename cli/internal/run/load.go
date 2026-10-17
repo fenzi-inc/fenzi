@@ -41,7 +41,7 @@ func Prove(ctx context.Context, p Checker, c Compiled, stage string) (openshell.
 	if p == nil {
 		return openshell.Result{}, &ProverError{Err: errors.New("no prover on this machine")}
 	}
-	r, err := p.Check(ctx, c.Policy, c.Boundary)
+	r, err := p.Check(ctx, c.ProvePolicy, c.ProveBoundary)
 	if err != nil {
 		return r, &ProverError{Err: err}
 	}

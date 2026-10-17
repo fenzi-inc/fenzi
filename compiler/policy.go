@@ -40,22 +40,49 @@ type NetworkRule struct {
 }
 
 type Endpoint struct {
-	Host              string `yaml:"host"`
-	Port              int    `yaml:"port"`
-	Protocol          string `yaml:"protocol,omitempty"`
-	Enforcement       string `yaml:"enforcement,omitempty"`
-	Access            string `yaml:"access,omitempty"`
-	Rules             []Rule `yaml:"rules,omitempty"`
-	AllowEncodedSlash bool   `yaml:"allow_encoded_slash,omitempty"`
+	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
+	// Path, DenyRules, MCP, and CredentialBinding are set only on an MCP
+	// server's endpoint (protocol mcp), as recorded on OpenShell 0.1.2.
+	Path              string             `yaml:"path,omitempty"`
+	Protocol          string             `yaml:"protocol,omitempty"`
+	Enforcement       string             `yaml:"enforcement,omitempty"`
+	Access            string             `yaml:"access,omitempty"`
+	Rules             []Rule             `yaml:"rules,omitempty"`
+	AllowEncodedSlash bool               `yaml:"allow_encoded_slash,omitempty"`
+	DenyRules         []DenyRule         `yaml:"deny_rules,omitempty"`
+	MCP               *MCPOptions        `yaml:"mcp,omitempty"`
+	CredentialBinding *CredentialBinding `yaml:"credential_binding,omitempty"`
 }
 
 type Rule struct {
 	Allow Match `yaml:"allow"`
 }
 
+// Match is a REST method and path, or an MCP method and, for tools/call,
+// a tool name.
 type Match struct {
 	Method string `yaml:"method"`
-	Path   string `yaml:"path"`
+	Path   string `yaml:"path,omitempty"`
+	Tool   string `yaml:"tool,omitempty"`
+}
+
+// DenyRule refuses an MCP method, or one tool of tools/call, even when an
+// allow rule matches.
+type DenyRule struct {
+	Method string `yaml:"method"`
+	Tool   string `yaml:"tool,omitempty"`
+}
+
+// MCPOptions are the protocol revisions an MCP endpoint accepts.
+type MCPOptions struct {
+	Versions []string `yaml:"versions"`
+}
+
+// CredentialBinding names the provider whose token the sandbox puts on this
+// endpoint's requests. The provider's profile has no endpoints of its own.
+type CredentialBinding struct {
+	Provider string `yaml:"provider"`
 }
 
 type Binary struct {

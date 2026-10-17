@@ -155,3 +155,27 @@ func TestSpan(t *testing.T) {
 		t.Errorf("oldest %v newest %v", oldest, newest)
 	}
 }
+
+// Recorded from OpenShell 0.1.2 with an MCP rule for mcp.deepwiki.com.
+func TestShorthandMCP(t *testing.T) {
+	deny := "[1792229821.710] [sandbox] [OCSF ] [ocsf] HTTP:POST [MED] DENIED POST http://mcp.deepwiki.com:443/mcp [policy:mcp_deepwiki_com engine:l7-mcp] [reason:JSONRPC_L7_REQUEST decision=deny rule_methods=tools/call tools=read_wiki_contents http_method=POST endpoint=mcp.deepwiki.com:443/mcp policy_version=2 reason=POST /mcp not permitted by policy]"
+	r, ok := FromShorthand(deny, "e13-mcp")
+	if !ok || r.Action != "Denied" || r.Destination != "POST mcp.deepwiki.com/mcp" || r.MCPMethod != "tools/call" || r.MCPTool != "read_wiki_contents" || r.Reason != "POST /mcp not permitted by policy" || r.Rule != "mcp_deepwiki_com" {
+		t.Fatalf("%+v", r)
+	}
+	if r.What() != "POST mcp.deepwiki.com/mcp tools/call read_wiki_contents" {
+		t.Errorf("What = %q", r.What())
+	}
+	allow := "[1792229820.079] [sandbox] [OCSF ] [ocsf] HTTP:POST [INFO] ALLOWED POST http://mcp.deepwiki.com:443/mcp [policy:mcp_deepwiki_com engine:l7-mcp] [msg:JSONRPC_L7_REQUEST decision=allow rule_methods=tools/call tools=read_wiki_structure http_method=POST endpoint=mcp.deepwi...]"
+	if r, ok := FromShorthand(allow, "e13-mcp"); !ok || r.Action != "Allowed" || r.MCPTool != "read_wiki_structure" || r.MCPMethod != "tools/call" {
+		t.Fatalf("%+v", r)
+	}
+	version := "[1792229823.832] [sandbox] [OCSF ] [ocsf] HTTP:POST [MED] DENIED POST http://mcp.deepwiki.com:443/mcp [policy:mcp_deepwiki_com engine:l7-mcp] [reason:L7_REQUEST deny POST mcp.deepwiki.com:443/mcp rule_methods=tools/list tools=- reason=MCP protocol version 2025-06-18 is not allowed by endpoint policy]"
+	if r, ok := FromShorthand(version, "e13-mcp"); !ok || r.MCPMethod != "tools/list" || r.MCPTool != "" || r.Reason != "MCP protocol version 2025-06-18 is not allowed by endpoint policy" {
+		t.Fatalf("%+v", r)
+	}
+	cut := "[1792229820.079] [sandbox] [OCSF ] [ocsf] HTTP:POST [INFO] ALLOWED POST http://mcp.example.com:443/mcp [policy:mcp_x engine:l7-mcp] [msg:JSONRPC_L7_REQUEST decision=allow rule_methods=tools/call tools=a_very_long_tool_na...]"
+	if r, ok := FromShorthand(cut, "x"); !ok || r.MCPTool != "" {
+		t.Errorf("a cut tool name is dropped, not shown wrong: %+v", r)
+	}
+}

@@ -65,7 +65,7 @@ func sameKind(e env, dirs config.Dirs, sb config.Sandbox, p openshell.Proposal) 
 	// covered by the rule now; answering them clears the pending list.
 	if out, err := client().PendingRules(e.ctx, sb.Name); err == nil {
 		for _, q := range openshell.ParseRules(out) {
-			if q.Chunk == p.Chunk {
+			if q.Chunk == p.Chunk || q.MCP() {
 				continue
 			}
 			qh, err := requestHost(q.Endpoints)

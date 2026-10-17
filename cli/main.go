@@ -46,6 +46,7 @@ var helpGroups = []struct {
 		{"key", "Store, replace, or remove a model key"},
 		{"init", "Write a starter fenzi.yaml"},
 		{"policy", "Compile or check a policy file"},
+		{"mcp", "MCP servers for every agent, checked per tool"},
 		{"agents", "List agents, or build an image"},
 		{"update", "Install the latest fenzi"},
 		{"version", "Show the version. --version does the same"},
@@ -156,6 +157,7 @@ type env struct {
 
 func cli(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	e := env{ctx: context.Background(), stdin: stdin, stdout: stdout, stderr: stderr}
+	run.MachineMCP = machineMCPFile
 	if len(args) == 0 && setupNeeded(e) {
 		args = []string{"setup"}
 	} else if len(args) == 0 && tui.New(stdin, stdout).Interactive() {
@@ -189,6 +191,7 @@ func cli(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		"diff":     cmdDiff,
 		"apply":    cmdApply,
 		"policy":   cmdPolicy,
+		"mcp":      cmdMCP,
 		"agents":   cmdAgents,
 		"ps":       cmdPs,
 		"key":      cmdKey,

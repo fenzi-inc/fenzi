@@ -146,6 +146,15 @@ func connectTo(e env, u *tui.UI, sb config.Sandbox, agentArgs []string, shell, f
 		if err != nil {
 			return 1, fmt.Errorf("%s was not started by fenzi run, so its agent is not known; use --shell", sb.Name)
 		}
+		// The MCP servers the sandbox was started with: their config files
+		// are still in it, and their flags and variables go on again.
+		if dirs, err := config.Default(); err == nil {
+			if doc, err := run.LoadResolved(dirs.Run(sb.Name)); err == nil {
+				if a, _, err = a.WithMCP(doc); err != nil {
+					return 1, err
+				}
+			}
+		}
 		argv, envv, what = a.Argv(agentArgs), a.Env, a.Display
 		if r := a.ResumeArgv(agentArgs); r != nil && !fresh {
 			argv, resumed = resumeOrStart(r, argv, a.Display), true

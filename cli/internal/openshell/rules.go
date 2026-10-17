@@ -29,6 +29,15 @@ type Proposal struct {
 	Hits      string
 }
 
+// MCP reports whether the request is for an MCP server. `rule get` prints
+// such an endpoint as [mcp, allow initialize *, ...] (0.1.2).
+func (p Proposal) MCP() bool { return strings.Contains(p.Endpoints, "[mcp") }
+
+// MCPApprovalRefused is why Fenzi does not pass an MCP request to `rule
+// approve`: OpenShell 0.1.2 stores it without the tool it named, which
+// allows every tool on that server (NVIDIA/OpenShell#4679).
+const MCPApprovalRefused = "This request is for an MCP server. OpenShell would approve it as every tool on that server (NVIDIA/OpenShell#4679), so Fenzi does not approve it"
+
 // ParseRules reads the text of `openshell rule get`. Unknown lines are ignored.
 func ParseRules(out []byte) []Proposal {
 	var list []Proposal

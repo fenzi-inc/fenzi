@@ -8,6 +8,7 @@ import (
 // Merge layers a project file over a base document, such as developer-default
 // on the Free plan. A project may add hosts and paths and change workspace
 // access. A host the project lists on the same port replaces the base entry.
+// A project may add MCP servers and narrow one the base has.
 // Name, agents, and approvals belong to the base and cannot be set by a project.
 func Merge(base, project *Document) (*Document, error) {
 	if project == nil {
@@ -56,6 +57,9 @@ func Merge(base, project *Document) (*Document, error) {
 		}
 		index[key(h)] = len(out.Hosts)
 		out.Hosts = append(out.Hosts, h)
+	}
+	if p := mergeMCP(out, project); len(p) > 0 {
+		return nil, &ValidationError{Problems: prefix("project file: ", p)}
 	}
 	return out, nil
 }

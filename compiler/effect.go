@@ -7,8 +7,9 @@ const (
 	EffectSame = "same"
 	// EffectNetwork means only hosts changed. OpenShell can load that on a running sandbox.
 	EffectNetwork = "network"
-	// EffectWall means workspace, paths, agents, or approvals changed.
-	// Those are fixed when the sandbox is created.
+	// EffectWall means workspace, paths, agents, approvals, or MCP servers
+	// changed. Those are fixed when the sandbox is created: the agent reads
+	// its MCP servers when it starts.
 	EffectWall = "wall"
 )
 
@@ -25,7 +26,8 @@ func Effect(prev, next *Document) string {
 		a.Approvals != b.Approvals ||
 		!sameStrings(a.Agents, b.Agents) ||
 		!sameStrings(a.Paths.ReadOnly, b.Paths.ReadOnly) ||
-		!sameStrings(a.Paths.ReadWrite, b.Paths.ReadWrite)
+		!sameStrings(a.Paths.ReadWrite, b.Paths.ReadWrite) ||
+		!sameMCP(a.MCP, b.MCP)
 	network := !sameHosts(a.Hosts, b.Hosts)
 	switch {
 	case wall:

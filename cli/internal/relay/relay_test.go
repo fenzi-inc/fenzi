@@ -391,3 +391,30 @@ type missingRunner struct{ *openshell.Fake }
 func (missingRunner) Output(context.Context, ...string) ([]byte, error) {
 	return nil, errors.New("openshell-prover is not installed or not on PATH: exec: \"openshell-prover\": executable file not found in $PATH")
 }
+
+// An MCP request approved in the console is rejected on the machine, with
+// the reason: OpenShell 0.1.2 would store it as every tool on the server.
+func TestConsoleApprovalOfAnMCPRequestIsRejected(t *testing.T) {
+	s, opt, gw := teamFixture(t)
+	gw.rules = []byte("Chunk: abcdef\nStatus: pending\nRule: mcp_proposal\nBinary: /usr/bin/curl\nRationale: read one wiki\nEndpoints: mcp.example.org:443 [mcp, allow initialize *, allow tools/list *, allow tools/call *]\n")
+	if _, err := Pass(context.Background(), opt); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := s.Proposals("acme", "pending")
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("pending %+v %v", pending, err)
+	}
+	if err := s.Review(pending[0].ID, "dana@acme.dev", "approved", ""); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := Pass(context.Background(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gw.approveCalls != 0 || gw.rejected != "abcdef" || !strings.Contains(gw.rejectReason, "every tool") {
+		t.Fatalf("approve calls %d, rejected %q: %s", gw.approveCalls, gw.rejected, gw.rejectReason)
+	}
+	if !strings.Contains(strings.Join(rep.Notes, " "), "MCP request") {
+		t.Errorf("notes %v", rep.Notes)
+	}
+}

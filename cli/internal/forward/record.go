@@ -31,6 +31,22 @@ type Record struct {
 	Gap bool `json:"gap,omitempty"`
 	// Chunk is the OpenShell proposal an approval record is about.
 	Chunk string `json:"chunk,omitempty"`
+	// MCPMethod and MCPTool are set on a request to an MCP server: the
+	// JSON-RPC method and, for tools/call, the tool.
+	MCPMethod string `json:"mcp_method,omitempty"`
+	MCPTool   string `json:"mcp_tool,omitempty"`
+}
+
+// What is the destination as people read it: for an MCP request, with the
+// method and the tool.
+func (r Record) What() string {
+	switch {
+	case r.MCPTool != "":
+		return r.Destination + " " + r.MCPMethod + " " + r.MCPTool
+	case r.MCPMethod != "":
+		return r.Destination + " " + r.MCPMethod
+	}
+	return r.Destination
 }
 
 // ocsf holds the OCSF fields the contract reads. Which of them OpenShell

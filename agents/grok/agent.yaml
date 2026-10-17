@@ -37,6 +37,8 @@ guide_flag: --rules
 # for the current working directory". With no session it prints "No session
 # found for current directory" and exits 1; fenzi connect then starts a new one.
 resume: [--continue]
+# How the agent reads the MCP servers in the policy's mcp section (agents/mcp.go).
+mcp_format: grok-toml
 key:
   env: XAI_API_KEY
   profile_type: fenzi-grok

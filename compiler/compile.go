@@ -139,6 +139,12 @@ func Compile(doc *Document, t Target) (*Policy, error) {
 		}
 		p.NetworkPolicies[key] = NetworkRule{Name: h.Host, Endpoints: []Endpoint{ep}, Binaries: bins}
 	}
+	if err := checkMCPHosts(d, t.Agent); err != nil {
+		return nil, err
+	}
+	if err := mcpRules(p, d, bins); err != nil {
+		return nil, err
+	}
 	if len(p.NetworkPolicies) == 0 {
 		p.NetworkPolicies = nil
 	}

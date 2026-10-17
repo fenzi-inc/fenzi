@@ -59,6 +59,8 @@ start_note: "Claude may ask whether to use the API key it found. Choose Yes for 
 # platform.claude.com (hosts above). The token is kept in ~/.claude inside the
 # sandbox, outside the project copy, and goes when the sandbox is deleted.
 sign_in_note: "Claude asks you to sign in. Choose your Claude subscription and paste back the code your browser shows. To use a key instead, run fenzi key set claude, then fenzi run without --sign-in."
+# How the agent reads the MCP servers in the policy's mcp section (agents/mcp.go).
+mcp_format: claude-json
 key:
   env: ANTHROPIC_API_KEY
   profile_type: fenzi-claude-code

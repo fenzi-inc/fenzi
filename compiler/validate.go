@@ -118,6 +118,7 @@ func (d *Document) Validate() error {
 			add("%s.access: must be %q or %q, got %q", f, AccessReadOnly, AccessReadWrite, h.Access)
 		}
 	}
+	p = append(p, d.validateMCP(seenHost)...)
 
 	if len(p) == 0 {
 		return nil

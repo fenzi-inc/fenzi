@@ -16,6 +16,7 @@ import (
 	"fenzi/cli/internal/config"
 	"fenzi/cli/internal/openshell"
 	"fenzi/cli/internal/workspace"
+	"fenzi/compiler"
 )
 
 const pass = `{"result":"within_boundary","coverage":{"domains":["filesystem","network_l4","network_rest","process","landlock"]}}`
@@ -676,4 +677,77 @@ func (s *switchRunner) Output(ctx context.Context, args ...string) ([]byte, erro
 
 func (s *switchRunner) Attach(ctx context.Context, args ...string) error {
 	return s.then.Attach(ctx, args...)
+}
+
+func withMCP(t *testing.T, h *harness) {
+	t.Helper()
+	project, err := compiler.Parse([]byte("version: 1\nmcp:\n  linear:\n    url: https://mcp.linear.app/mcp\n    token: true\n    tools: {allow: [list_issues]}\n  files:\n    command: [npx, -y, server-filesystem]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := compiler.Merge(h.opts.Policy.Doc, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.opts.Policy.Doc = doc
+}
+
+// A run with MCP servers: the token's provider is attached, the prover gets
+// the policy without the MCP rule (0.1.2 returns unsupported for it), the
+// agent's config is written before it starts, and its flags are on the line.
+func TestRunWithMCP(t *testing.T) {
+	h := setup(t)
+	withMCP(t, h)
+	h.os.Replies["provider get fenzi-mcp-linear"] = openshell.Reply{}
+	res, err := Run(context.Background(), h.deps, h.opts)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, h.out)
+	}
+	var create, exec string
+	wrote := false
+	for _, c := range h.os.Calls {
+		switch {
+		case strings.HasPrefix(c, "sandbox create"):
+			create = c
+		case strings.HasPrefix(c, "sandbox exec") && strings.Contains(c, "--tty"):
+			exec = c
+		case strings.HasPrefix(c, "sandbox exec") && strings.Contains(c, "python3") && strings.Contains(c, "/sandbox/.fenzi/mcp.json"):
+			wrote = true
+		}
+	}
+	if !strings.Contains(create, "--provider bl-claude --provider fenzi-mcp-linear") {
+		t.Errorf("create: %q", create)
+	}
+	if !wrote {
+		t.Errorf("the MCP config was not written: %v", h.os.Calls)
+	}
+	if !strings.Contains(exec, "--mcp-config /sandbox/.fenzi/mcp.json --strict-mcp-config") {
+		t.Errorf("exec: %q", exec)
+	}
+	for _, c := range h.prover.Calls {
+		if !strings.Contains(c, "prove.") {
+			t.Errorf("the prover read a file with MCP rules: %s", c)
+		}
+	}
+	pol, err := os.ReadFile(filepath.Join(h.deps.Dirs.Run(res.Sandbox), "policy.yaml"))
+	if err != nil || !strings.Contains(string(pol), "protocol: mcp") || !strings.Contains(string(pol), "provider: fenzi-mcp-linear") {
+		t.Errorf("the loaded policy keeps the MCP rule: %v\n%s", err, pol)
+	}
+	out := h.out.String()
+	if !strings.Contains(out, "rules checked by Fenzi, not by the prover") || !strings.Contains(out, "files (local), linear (1 tool)") {
+		t.Errorf("output:\n%s", out)
+	}
+}
+
+func TestRunWithMCPNeedsTheToken(t *testing.T) {
+	h := setup(t)
+	withMCP(t, h)
+	_, err := Run(context.Background(), h.deps, h.opts)
+	var missing *ErrNoMCPToken
+	if !errors.As(err, &missing) || missing.Server != "linear" {
+		t.Fatalf("want ErrNoMCPToken, got %v", err)
+	}
+	if h.called("sandbox create") {
+		t.Error("nothing may be created without the token")
+	}
 }

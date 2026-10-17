@@ -108,6 +108,17 @@ func TestCreateArgs(t *testing.T) {
 	}
 }
 
+// MCP server tokens are more providers, one --provider each.
+func TestCreateArgsWithMCPProviders(t *testing.T) {
+	f := &Fake{}
+	_, _ = Client{R: f}.SandboxCreate(context.Background(), CreateOptions{
+		Name: "n", From: "img:1", Policy: "p.yaml", Provider: "bl-claude", Providers: []string{"fenzi-mcp-a", "fenzi-mcp-b"},
+	})
+	if !strings.Contains(f.Calls[0], "--provider bl-claude --provider fenzi-mcp-a --provider fenzi-mcp-b ") {
+		t.Errorf("got %s", f.Calls[0])
+	}
+}
+
 // Sandboxes created before the rename from Boundlane carry boundlane=1.
 func TestSandboxesListsBothLabels(t *testing.T) {
 	f := &Fake{Replies: map[string]Reply{

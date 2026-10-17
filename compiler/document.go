@@ -34,6 +34,8 @@ type Document struct {
 	Paths     Paths    `yaml:"paths,omitempty"`
 	Hosts     []Host   `yaml:"hosts,omitempty"`
 	Approvals string   `yaml:"approvals,omitempty"`
+	// MCP lists the MCP servers every agent is given, by name.
+	MCP map[string]MCPServer `yaml:"mcp,omitempty"`
 }
 
 type Paths struct {
@@ -92,5 +94,25 @@ func (d *Document) clone() *Document {
 		h.Allow = append([]string(nil), h.Allow...)
 		out.Hosts[i] = h
 	}
+	if d.MCP != nil {
+		out.MCP = make(map[string]MCPServer, len(d.MCP))
+		for n, s := range d.MCP {
+			out.MCP[n] = s.clone()
+		}
+	}
 	return &out
+}
+
+func (s MCPServer) clone() MCPServer {
+	s.Command = append([]string(nil), s.Command...)
+	s.Tools.Allow = append([]string(nil), s.Tools.Allow...)
+	s.Tools.Deny = append([]string(nil), s.Tools.Deny...)
+	if s.Env != nil {
+		env := make(map[string]string, len(s.Env))
+		for k, v := range s.Env {
+			env[k] = v
+		}
+		s.Env = env
+	}
+	return s
 }

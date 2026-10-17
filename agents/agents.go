@@ -48,6 +48,9 @@ type Entry struct {
 	DefaultFlags map[string]string `yaml:"default_flags"`
 	// StartNote is printed just before the agent starts.
 	StartNote string `yaml:"start_note"`
+	// MCPFormat is how the agent reads MCP servers Fenzi gives it: one of
+	// the MCP* constants. Empty means the agent takes none yet.
+	MCPFormat string `yaml:"mcp_format"`
 	// SignInNote is set for an agent that can start with no key stored and
 	// sign in itself. run then creates the sandbox without a provider and
 	// prints this note instead of StartNote.

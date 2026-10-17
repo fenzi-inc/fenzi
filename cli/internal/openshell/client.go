@@ -247,7 +247,10 @@ type CreateOptions struct {
 	From     string
 	Policy   string
 	Provider string
-	Labels   map[string]string
+	// Providers are attached as well, one --provider each (the flag is
+	// repeatable in 0.1.2's sandbox create help): MCP server tokens.
+	Providers []string
+	Labels    map[string]string
 }
 
 // SandboxCreate: `openshell sandbox create --detach` with a saved policy,
@@ -256,6 +259,9 @@ func (c Client) SandboxCreate(ctx context.Context, o CreateOptions) ([]byte, err
 	args := []string{"sandbox", "create", "--name", o.Name, "--from", o.From, "--policy", o.Policy}
 	if o.Provider != "" {
 		args = append(args, "--provider", o.Provider)
+	}
+	for _, p := range o.Providers {
+		args = append(args, "--provider", p)
 	}
 	for _, k := range sortedKeys(o.Labels) {
 		args = append(args, "--label", k+"="+o.Labels[k])

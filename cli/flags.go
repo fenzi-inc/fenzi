@@ -51,6 +51,7 @@ var usage = map[string]string{
 	"fenzi agents":   "fenzi agents",
 	"fenzi key":      "fenzi key",
 	"fenzi policy":   "fenzi policy",
+	"fenzi mcp add":  "fenzi mcp add <name> <url> --tool <tool> | fenzi mcp add <name> -- <command>",
 }
 
 func writeFlags(out io.Writer, fs *flag.FlagSet) {
