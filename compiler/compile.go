@@ -33,8 +33,8 @@ type Agent struct {
 	// effective policy fails.
 	Model []ModelEndpoint
 	// Hosts the agent cannot start without, such as a vendor's connectivity
-	// check. Compiled read-only for the agent's binaries, in the candidate and
-	// so in the boundary. A host the document lists keeps the document's rule.
+	// check. Compiled for the agent's binaries, in the candidate and so in the
+	// boundary. A host the document lists keeps the document's rule.
 	Hosts []AgentHost
 }
 
@@ -42,6 +42,9 @@ type Agent struct {
 type AgentHost struct {
 	Host string
 	Port int
+	// Allow lists "METHOD /path" lines, as a document host's allow does.
+	// Empty means read-only.
+	Allow []string
 }
 
 // ModelEndpoint mirrors one endpoint of the provider profile.
@@ -116,11 +119,15 @@ func Compile(doc *Document, t Target) (*Policy, error) {
 		if _, listed := p.NetworkPolicies[key]; listed {
 			continue
 		}
-		p.NetworkPolicies[key] = NetworkRule{
-			Name:      h.Host,
-			Endpoints: []Endpoint{{Host: h.Host, Port: port, Protocol: "rest", Enforcement: "enforce", Access: AccessReadOnly}},
-			Binaries:  bins,
+		ep := Endpoint{Host: h.Host, Port: port, Protocol: "rest", Enforcement: "enforce"}
+		if len(h.Allow) == 0 {
+			ep.Access = AccessReadOnly
 		}
+		for _, line := range h.Allow {
+			m, path, _ := parseAllow(line)
+			ep.Rules = append(ep.Rules, Rule{Allow: Match{Method: m, Path: path}})
+		}
+		p.NetworkPolicies[key] = NetworkRule{Name: h.Host, Endpoints: []Endpoint{ep}, Binaries: bins}
 	}
 	if len(p.NetworkPolicies) == 0 {
 		p.NetworkPolicies = nil
@@ -238,6 +245,11 @@ func checkTarget(d *Document, t Target) error {
 		}
 		if model[h.Host] {
 			p = append(p, fmt.Sprintf("agent %s host: %s is a model endpoint; the provider adds it", t.Agent.Name, h.Host))
+		}
+		for _, line := range h.Allow {
+			if _, _, err := parseAllow(line); err != nil {
+				p = append(p, fmt.Sprintf("agent %s host %s: allow: %v", t.Agent.Name, h.Host, err))
+			}
 		}
 	}
 	if len(t.Agent.Hosts) > 0 && len(t.Agent.Binaries) == 0 {

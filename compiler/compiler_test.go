@@ -8,6 +8,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -174,6 +175,24 @@ func TestAgentHosts(t *testing.T) {
 	a.Hosts = []AgentHost{{Host: "api.anthropic.com"}}
 	if _, err := Compile(load(t, "default.yaml"), Target{Agent: a}); err == nil {
 		t.Error("an agent host that is also a model endpoint must be rejected")
+	}
+
+	a.Hosts = []AgentHost{{Host: "platform.claude.com", Allow: []string{"GET /**", "POST /v1/oauth/token"}}}
+	for name, build := range map[string]func(*Document, Target) (*Policy, error){"compile": Compile, "boundary": Boundary} {
+		p, err := build(load(t, "default.yaml"), Target{Agent: a})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ep := p.NetworkPolicies["platform_claude_com"].Endpoints[0]
+		want := []Rule{{Allow: Match{Method: "GET", Path: "/**"}}, {Allow: Match{Method: "POST", Path: "/v1/oauth/token"}}}
+		if ep.Access != "" || !reflect.DeepEqual(ep.Rules, want) {
+			t.Errorf("%s: an agent host with allow lines: %+v", name, ep)
+		}
+	}
+
+	a.Hosts = []AgentHost{{Host: "platform.claude.com", Allow: []string{"TRACE /"}}}
+	if _, err := Compile(load(t, "default.yaml"), Target{Agent: a}); err == nil {
+		t.Error("an agent host's allow lines must be checked like a document's")
 	}
 }
 

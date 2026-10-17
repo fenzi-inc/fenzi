@@ -5,8 +5,11 @@ package main
 // them the way sync loads a team revision: compiled, proved, then policy set
 // and policy list. A change to the workspace or paths is fixed when the
 // sandbox is created, so it waits for the next run and nothing changes here.
+// A new fenzi whose catalog changes an agent's rules, with the same file,
+// loads them too.
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -95,8 +98,10 @@ func cmdPolicyApply(e env, args []string) (int, error) {
 		}
 		switch compiler.Effect(prev, mine.Doc) {
 		case compiler.EffectSame:
-			u.Done(sb.Name, "already runs this policy")
-			continue
+			if !agentRulesChanged(mine, sb, sbRun) {
+				u.Done(sb.Name, "already runs this policy")
+				continue
+			}
 		case compiler.EffectWall:
 			u.Skip(sb.Name, "not changed. "+compiler.EffectNote(compiler.EffectWall))
 			u.Note("Workspace and path rules are fixed when a sandbox is created. fenzi stop " + sb.Name + ", then fenzi run, starts one with them.")
@@ -181,4 +186,44 @@ func loadHosts(e env, dirs config.Dirs, sb config.Sandbox, next run.Resolved) (l
 	default:
 		return fmt.Sprintf("hosts accepted, %s. The runtime did not report them loaded yet.", c.Revision), c.Revision, nil
 	}
+}
+
+// agentRulesChanged says whether the same document now compiles to another
+// policy for the sandbox's agent: a catalog change, such as a host the agent
+// needs, that comparing documents cannot see. It compares with the
+// policy.yaml in the run folder, without the header comment; with none there,
+// it reports no change.
+func agentRulesChanged(next run.Resolved, sb config.Sandbox, runDir string) bool {
+	was, err := os.ReadFile(filepath.Join(runDir, "policy.yaml"))
+	if err != nil {
+		return false
+	}
+	entry, err := agents.Get(sb.Agent)
+	if err != nil {
+		return false
+	}
+	tmp, err := os.MkdirTemp("", "fenzi-apply-")
+	if err != nil {
+		return false
+	}
+	defer os.RemoveAll(tmp)
+	c, err := run.WriteCompiled(next, entry, tmp)
+	if err != nil {
+		return false
+	}
+	now, err := os.ReadFile(c.Policy)
+	if err != nil {
+		return false
+	}
+	return !bytes.Equal(withoutComments(was), withoutComments(now))
+}
+
+func withoutComments(b []byte) []byte {
+	var out [][]byte
+	for _, line := range bytes.Split(b, []byte("\n")) {
+		if !bytes.HasPrefix(line, []byte("#")) {
+			out = append(out, line)
+		}
+	}
+	return bytes.Join(out, []byte("\n"))
 }

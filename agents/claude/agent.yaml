@@ -20,10 +20,18 @@ model:
 # First-run setup checks api.anthropic.com and platform.claude.com and exits
 # if either fails (code.claude.com/docs/en/errors, "Unable to connect to
 # Anthropic services"). Seen in the first real run: ECONNREFUSED on
-# platform.claude.com. Read-only, and the key is never sent there.
+# platform.claude.com. Signing in with a Claude subscription then trades the
+# pasted code for a token: denied on 17 October 2026 as
+# POST platform.claude.com/v1/oauth/token under the read-only rule. Reads
+# stay open; that one path is the only write. The key is never sent there.
 hosts:
   - host: platform.claude.com
     port: 443
+    allow:
+      - GET /**
+      - HEAD /**
+      - OPTIONS /**
+      - POST /v1/oauth/token
 # Documented in code.claude.com/docs/en/env-vars: turns off auto-updates,
 # telemetry, error reporting, and the release notes fetch from
 # raw.githubusercontent.com, which would otherwise file a request every run.

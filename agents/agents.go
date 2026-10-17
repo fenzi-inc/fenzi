@@ -37,8 +37,9 @@ type Entry struct {
 	Binaries []string   `yaml:"binaries"`
 	Model    []Endpoint `yaml:"model"`
 	// Hosts the agent needs to start that are not model endpoints. They get a
-	// read-only rule for the agent's binaries and never receive the key.
-	Hosts []Endpoint `yaml:"hosts"`
+	// rule for the agent's binaries, read-only unless allow lists more, and
+	// never receive the key.
+	Hosts []Host `yaml:"hosts"`
 	// Env is passed with `sandbox exec --env`. Non-secret values only.
 	Env map[string]string `yaml:"env"`
 	// Args go before the guide and the user's arguments. Non-secret values only.
@@ -52,15 +53,15 @@ type Entry struct {
 	// `-c key=<TOML value>` instead. GuideFile is a path in the sandbox where
 	// run writes the guide, for agents that read instruction files. With none
 	// of them, the agent is not told about policy.local.
-	GuideFlag   string `yaml:"guide_flag"`
+	GuideFlag string `yaml:"guide_flag"`
 	// Resume goes right after the command when fenzi connect opens the agent
 	// again, so it continues its last session in the project folder.
-	Resume []string `yaml:"resume"`
-	GuideConfig string `yaml:"guide_config"`
-	GuideFile   string `yaml:"guide_file"`
-	Key         Key    `yaml:"key"`
-	Status      string `yaml:"status"`
-	Verified    bool   `yaml:"verified"`
+	Resume      []string `yaml:"resume"`
+	GuideConfig string   `yaml:"guide_config"`
+	GuideFile   string   `yaml:"guide_file"`
+	Key         Key      `yaml:"key"`
+	Status      string   `yaml:"status"`
+	Verified    bool     `yaml:"verified"`
 }
 
 // Endpoint is a model endpoint, copied from the reviewed provider profile.
@@ -70,6 +71,14 @@ type Endpoint struct {
 	Protocol    string `yaml:"protocol,omitempty"`
 	Access      string `yaml:"access,omitempty"`
 	Enforcement string `yaml:"enforcement,omitempty"`
+}
+
+// Host is a host the agent needs that is not a model endpoint. Allow takes
+// "METHOD /path" lines, as a policy document's hosts do; empty is read-only.
+type Host struct {
+	Host  string   `yaml:"host"`
+	Port  int      `yaml:"port"`
+	Allow []string `yaml:"allow,omitempty"`
 }
 
 type Key struct {
@@ -297,7 +306,7 @@ func (e Entry) CompilerAgent() compiler.Agent {
 		a.Model = append(a.Model, compiler.ModelEndpoint{Host: m.Host, Port: m.Port, Protocol: m.Protocol, Access: m.Access, Enforcement: m.Enforcement})
 	}
 	for _, h := range e.Hosts {
-		a.Hosts = append(a.Hosts, compiler.AgentHost{Host: h.Host, Port: h.Port})
+		a.Hosts = append(a.Hosts, compiler.AgentHost{Host: h.Host, Port: h.Port, Allow: append([]string(nil), h.Allow...)})
 	}
 	return a
 }
