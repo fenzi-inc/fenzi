@@ -112,7 +112,7 @@ func TestDrafted(t *testing.T) {
 
 func TestAgentFiled(t *testing.T) {
 	// Recorded from a Codex session on OpenShell 0.1.2; the host is replaced.
-	log := []byte(`[1791297763.974] [sandbox] [INFO ] [openshell_supervisor] Flushed denial analysis to gateway proposals=1 sandbox_name=bl-mouse-keepe-a3a6 summaries=1
+	log := []byte(`[1791297763.974] [sandbox] [INFO ] [openshell_supervisor] Flushed denial analysis to gateway proposals=1 sandbox_name=fenzi-mouse-keepe-a3a6 summaries=1
 [1791297778.239] [sandbox] [OCSF ] [ocsf] CONFIG:PROPOSED [INFO] agent_authored proposal chunk:fad7c2ed-3aca-4fb7-bb37-495820dd7562 on example.com:443 HEAD / by /usr/bin/curl
 [1791297802.289] [sandbox] [OCSF ] [ocsf] CONFIG:APPROVED [INFO] chunk:fad7c2ed-3aca-4fb7-bb37-495820dd7562 approved on example.com:443 HEAD / by /usr/bin/curl
 `)

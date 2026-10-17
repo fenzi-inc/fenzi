@@ -76,7 +76,7 @@ func epoch(s string) time.Time {
 // structured fields, and the shorthand text without its time and source
 // prefix:
 //
-//	NET:OPEN [INFO] ALLOWED /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe(0) -> api.anthropic.com:443 [policy:_provider_bl_claude engine:opa]
+//	NET:OPEN [INFO] ALLOWED /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe(0) -> api.anthropic.com:443 [policy:_provider_fenzi_claude engine:opa]
 func FromStream(t time.Time, level, message, sandbox string) (Record, bool) {
 	if level != "OCSF" {
 		return Record{}, false

@@ -13,7 +13,7 @@ import (
 	"fenzi/cli/internal/workspace"
 )
 
-const sandboxName = "bl-web-1a2b"
+const sandboxName = "fenzi-web-1a2b"
 
 // stagedFixture makes a project, a snapshot of it, and a staged copy in
 // which the agent edited one file, added one, and deleted one.

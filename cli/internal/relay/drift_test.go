@@ -8,10 +8,10 @@ import (
 	"testing"
 )
 
-// providerClaude is the rule the runtime added for the bl_claude provider:
+// providerClaude is the rule the runtime added for the fenzi-claude provider:
 // the profile's endpoint and the agent's program, copied as written.
 const providerClaude = `
-  _provider_bl_claude:
+  _provider_fenzi_claude:
     endpoints:
       - host: api.anthropic.com
         port: 443
@@ -24,7 +24,7 @@ const providerClaude = `
 // effectiveDefault reproduces the shape recorded on 16 October 2026 from a
 // live OpenShell 0.1.2 sandbox, as `sandbox get --policy-only` printed it:
 // the compiled policy without its leading comment line and without a
-// trailing newline, with one added _provider_bl_claude entry under
+// trailing newline, with one added _provider_fenzi_claude entry under
 // network_policies. allow_encoded_slash on the read-only rules is printed
 // right after access, as OpenShell 0.1.2 printed it on 17 October 2026.
 // The rest is compiler/testdata/golden/default.policy.yaml

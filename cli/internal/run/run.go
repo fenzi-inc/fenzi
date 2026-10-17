@@ -219,15 +219,10 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 	if o.SignIn && !a.CanSignIn() {
 		return res, fmt.Errorf("%s does not sign in itself; it runs with a key (fenzi key set %s)", a.Display, a.Name)
 	}
-	// A key stored before the rename sits under bl-<agent>; it is used as
-	// it is until it is set again.
-	provider, err := StoredProvider(ctx, d.OpenShell, a)
+	provider := ProviderName(a)
+	stored, err := d.OpenShell.ProviderExists(ctx, provider)
 	if err != nil {
 		return res, err
-	}
-	stored := provider != ""
-	if !stored {
-		provider = ProviderName(a)
 	}
 	if o.SignIn {
 		a.SignedIn = true
@@ -324,11 +319,7 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		if err := ensureProfile(ctx, d, a, o.Profile, runDir); err != nil {
 			return res, err
 		}
-		if provider == LegacyProviderName(a) {
-			say("key", "%s, already stored on this machine, under its name from before Fenzi; fenzi key set %s moves it to %s", provider, a.Name, ProviderName(a))
-		} else {
-			say("key", "%s, already stored on this machine", provider)
-		}
+		say("key", "%s, already stored on this machine", provider)
 	default:
 		if err := ensureProfile(ctx, d, a, o.Profile, runDir); err != nil {
 			return res, err
@@ -650,8 +641,7 @@ func markStopped(dirs config.Dirs, name string) {
 var unsafe = regexp.MustCompile(`[^a-z0-9-]+`)
 
 // SandboxName is fenzi-<folder>-<4 hex>, with the folder shortened to fit
-// openshell.MaxSandboxName. Sandboxes made before the rename keep their
-// bl- names.
+// openshell.MaxSandboxName.
 func SandboxName(repo string) string {
 	base := strings.Trim(unsafe.ReplaceAllString(strings.ToLower(filepath.Base(repo)), "-"), "-")
 	if base == "" {

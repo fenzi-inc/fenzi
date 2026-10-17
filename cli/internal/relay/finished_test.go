@@ -27,9 +27,9 @@ func TestAFinishedSandboxIsShippedOnce(t *testing.T) {
 	gw := &fakeGW{listed: []string{}}
 	f, opt := fakeFixture(t, gw)
 	opt.Dirs.Cache = t.TempDir()
-	// bl-1 was started from r1 and ended between two passes: the gateway no
+	// fenzi-1 was started from r1 and ended between two passes: the gateway no
 	// longer lists it, and only its saved log is left.
-	saveLog(t, opt.Dirs, "bl-1", denyLine(1791059085.948, "paste.example.net")+denyLine(1791059086.100, "other.example.net"))
+	saveLog(t, opt.Dirs, "fenzi-1", denyLine(1791059085.948, "paste.example.net")+denyLine(1791059086.100, "other.example.net"))
 
 	rep, err := Pass(context.Background(), opt)
 	if err != nil {
@@ -38,7 +38,7 @@ func TestAFinishedSandboxIsShippedOnce(t *testing.T) {
 	if rep.Decisions != 2 || len(f.records) != 2 {
 		t.Fatalf("report %+v records %+v", rep, f.records)
 	}
-	if r := f.records[0]; r.Sandbox != "bl-1" || r.Machine != "mbp" || r.PolicyRevision != "1" || r.Destination != "paste.example.net" {
+	if r := f.records[0]; r.Sandbox != "fenzi-1" || r.Machine != "mbp" || r.PolicyRevision != "1" || r.Destination != "paste.example.net" {
 		t.Fatalf("record %+v", r)
 	}
 
@@ -66,7 +66,7 @@ func TestAFinishedSandboxSendsOnlyWhatTheStreamDidNot(t *testing.T) {
 	// The agent made one more call, then the run saved the log and deleted
 	// the sandbox before the next pass.
 	gw.listed = []string{}
-	saveLog(t, opt.Dirs, "bl-1", first+denyLine(1791059090.5, "late.example.net"))
+	saveLog(t, opt.Dirs, "fenzi-1", first+denyLine(1791059090.5, "late.example.net"))
 	if _, err := Pass(context.Background(), opt); err != nil {
 		t.Fatal(err)
 	}
@@ -86,11 +86,11 @@ func TestAFreeSessionFromBeforeSignInIsNotSent(t *testing.T) {
 	f, opt := fakeFixture(t, gw)
 	opt.Dirs.Cache = t.TempDir()
 	state := &config.State{}
-	state.Put(config.Sandbox{Name: "bl-free", Agent: "claude", Created: time.Now()})
+	state.Put(config.Sandbox{Name: "fenzi-free", Agent: "claude", Created: time.Now()})
 	if err := opt.Dirs.SaveState(state); err != nil {
 		t.Fatal(err)
 	}
-	saveLog(t, opt.Dirs, "bl-free", denyLine(1791059085.948, "paste.example.net"))
+	saveLog(t, opt.Dirs, "fenzi-free", denyLine(1791059085.948, "paste.example.net"))
 	if _, err := Pass(context.Background(), opt); err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestRequestsCarryTheDraftFlagAndTheRevision(t *testing.T) {
 	// Recorded from a Codex session on OpenShell 0.1.2; the host is replaced.
 	// The log shows the agent filed the third chunk, though its rationale
 	// reads like a generated one.
-	log := `[1791297763.974] [sandbox] [INFO ] [openshell_supervisor] Flushed denial analysis to gateway proposals=1 sandbox_name=bl-mouse-keepe-a3a6 summaries=1
+	log := `[1791297763.974] [sandbox] [INFO ] [openshell_supervisor] Flushed denial analysis to gateway proposals=1 sandbox_name=fenzi-mouse-keepe-a3a6 summaries=1
 [1791297778.239] [sandbox] [OCSF ] [ocsf] CONFIG:PROPOSED [INFO] agent_authored proposal chunk:fad7c2ed-3aca-4fb7-bb37-495820dd7562 on example.com:443 HEAD / by /usr/bin/curl
 `
 	gw := &fakeGW{rules: []byte(rules), logs: []byte(log)}

@@ -14,7 +14,7 @@ not json
 `
 
 func TestReadJSONL(t *testing.T) {
-	recs, skipped, err := ReadJSONL(strings.NewReader(events), "bl-web-4f2a")
+	recs, skipped, err := ReadJSONL(strings.NewReader(events), "fenzi-web-4f2a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +25,7 @@ func TestReadJSONL(t *testing.T) {
 	if r.Destination != "POST api.github.com/repos/acme/web/hooks" {
 		t.Errorf("destination = %q; the query string must be dropped", r.Destination)
 	}
-	if r.Sandbox != "bl-web-4f2a" || r.Process != "gh" || r.Rule != "api_github_com" || !r.Denied() {
+	if r.Sandbox != "fenzi-web-4f2a" || r.Process != "gh" || r.Rule != "api_github_com" || !r.Denied() {
 		t.Errorf("record = %+v", r)
 	}
 	if r.Time.Unix() != 1759484527 {

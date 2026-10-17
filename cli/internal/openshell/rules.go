@@ -80,7 +80,7 @@ func ParseRules(out []byte) []Proposal {
 // noRules is what `rule get <name> --status pending` printed in 0.1.2, with
 // exit 0, for a sandbox with nothing pending (recorded 16 October 2026):
 //
-//	No network rules for sandbox 'bl-mouse-keepe-5561'
+//	No network rules for sandbox 'fenzi-mouse-keepe-5561'
 var noRules = regexp.MustCompile(`^No network rules for sandbox '[^']*'$`)
 
 // NoRules reports whether out is the recorded answer for no chunks. Output

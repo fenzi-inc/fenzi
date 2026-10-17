@@ -32,7 +32,7 @@ import (
 // approval is the shorthand line recorded in a Codex session without its
 // prefix; the host is replaced.
 const (
-	streamAllow    = "NET:OPEN [INFO] ALLOWED /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe(0) -> api.anthropic.com:443 [policy:_provider_bl_claude engine:opa]"
+	streamAllow    = "NET:OPEN [INFO] ALLOWED /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe(0) -> api.anthropic.com:443 [policy:_provider_fenzi_claude engine:opa]"
 	streamApproval = "CONFIG:APPROVED [INFO] chunk:fad7c2ed-3aca-4fb7-bb37-495820dd7562 approved on example.com:443 HEAD / by /usr/bin/curl"
 	// Recorded for a cursor from another cursor space.
 	streamOutOfRange = "Restart the watch with an empty resume_after_cursor"
@@ -103,7 +103,7 @@ func TestReadStreamResumesAfterTheCursor(t *testing.T) {
 	w := bufWatch(t, f)
 	ctx := context.Background()
 
-	read, err := w.ReadStream(ctx, "bl-1", "", 200)
+	read, err := w.ReadStream(ctx, "fenzi-1", "", 200)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,13 +114,13 @@ func TestReadStreamResumesAfterTheCursor(t *testing.T) {
 		t.Errorf("line %+v", l)
 	}
 	req := f.reqs[0]
-	if req.GetSandbox() != "bl-1" || !req.GetFollowLogs() || req.GetLogTailLines() != 200 ||
+	if req.GetSandbox() != "fenzi-1" || !req.GetFollowLogs() || req.GetLogTailLines() != 200 ||
 		len(req.GetLogSources()) != 1 || req.GetLogSources()[0] != "sandbox" || req.GetWorkspaceScope().GetWorkspace() != "default" {
 		t.Errorf("request %v", req)
 	}
 
 	// Resuming after the highest cursor replays nothing.
-	read, err = w.ReadStream(ctx, "bl-1", read.Cursor, 200)
+	read, err = w.ReadStream(ctx, "fenzi-1", read.Cursor, 200)
 	if err != nil || len(read.Lines) != 0 || read.Cursor != "v1:s1:2" {
 		t.Fatalf("resume %+v %v", read, err)
 	}
@@ -133,7 +133,7 @@ func TestReadStreamResumesAfterTheCursor(t *testing.T) {
 		&pb.SandboxStreamEvent{Payload: &pb.SandboxStreamEvent_Warning{Warning: &pb.SandboxStreamWarning{Message: "log buffer overflowed"}}},
 		logEvent("v1:s1:3", at.Add(2*time.Second), streamAllow))
 	f.mu.Unlock()
-	read, err = w.ReadStream(ctx, "bl-1", "v1:s1:2", 200)
+	read, err = w.ReadStream(ctx, "fenzi-1", "v1:s1:2", 200)
 	if err != nil || len(read.Lines) != 1 || read.Cursor != "v1:s1:3" || len(read.Warnings) != 1 {
 		t.Fatalf("after more events %+v %v", read, err)
 	}
@@ -144,7 +144,7 @@ func TestReadStreamRestartsOnARefusedCursor(t *testing.T) {
 	f := &fakeShell{events: []*pb.SandboxStreamEvent{logEvent("v1:s1:1", at, streamAllow)}}
 	w := bufWatch(t, f)
 	for _, cursor := range []string{"v1:old:7", "garbage"} {
-		read, err := w.ReadStream(context.Background(), "bl-1", cursor, 200)
+		read, err := w.ReadStream(context.Background(), "fenzi-1", cursor, 200)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -160,11 +160,11 @@ func TestReadStreamRestartsOnARefusedCursor(t *testing.T) {
 func TestWatchNeedsTheCLIClientCertificate(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	fake := &Fake{Replies: map[string]Reply{"status --output json": {Out: statusRecorded}}}
-	if _, err := NewWatch(Client{R: fake}).ReadStream(context.Background(), "bl-1", "", 200); !errors.Is(err, ErrNoStream) {
+	if _, err := NewWatch(Client{R: fake}).ReadStream(context.Background(), "fenzi-1", "", 200); !errors.Is(err, ErrNoStream) {
 		t.Fatalf("err = %v", err)
 	}
 	fake.Replies["status --output json"] = Reply{Out: `{"gateway":"../../etc","server":"https://localhost:17670","status":"connected"}`}
-	if _, err := NewWatch(Client{R: fake}).ReadStream(context.Background(), "bl-1", "", 200); !errors.Is(err, ErrNoStream) {
+	if _, err := NewWatch(Client{R: fake}).ReadStream(context.Background(), "fenzi-1", "", 200); !errors.Is(err, ErrNoStream) {
 		t.Fatalf("a gateway name that is not a plain name must not become a path: %v", err)
 	}
 }
@@ -194,7 +194,7 @@ func TestWatchDialsWithTheCLIClientCertificate(t *testing.T) {
 	w := NewWatch(Client{R: &Fake{Replies: map[string]Reply{"status --output json": {Out: status}}}})
 	w.Idle = 200 * time.Millisecond
 	t.Cleanup(func() { w.Close() })
-	read, err := w.ReadStream(context.Background(), "bl-1", "", 200)
+	read, err := w.ReadStream(context.Background(), "fenzi-1", "", 200)
 	if err != nil || len(read.Lines) != 1 {
 		t.Fatalf("read %+v %v", read, err)
 	}

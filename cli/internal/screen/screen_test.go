@@ -31,7 +31,7 @@ func TestPlainLayoutMatchesPrintf(t *testing.T) {
 func TestTableMatchesTabwriter(t *testing.T) {
 	rows := [][]Cell{
 		{{Text: "time"}, {Text: "action"}, {Text: "process"}, {Text: "destination"}, {Text: "rule"}},
-		{{Text: "10:42:05", Tone: "allow"}, {Text: "allowed", Tone: "allow"}, {Text: "claude"}, {Text: "POST api.anthropic.com/v1/messages"}, {Text: "_provider_bl-claude"}},
+		{{Text: "10:42:05", Tone: "allow"}, {Text: "allowed", Tone: "allow"}, {Text: "claude"}, {Text: "POST api.anthropic.com/v1/messages"}, {Text: "_provider_fenzi_claude"}},
 		{{Text: "10:42:07"}, {Text: "denied", Tone: "deny"}, {Text: "curl"}, {Text: "paste.example.net:443"}, {Text: "-"}},
 	}
 	var got bytes.Buffer
@@ -40,7 +40,7 @@ func TestTableMatchesTabwriter(t *testing.T) {
 	var want bytes.Buffer
 	tw := tabwriter.NewWriter(&want, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "time\taction\tprocess\tdestination\trule")
-	fmt.Fprintln(tw, "10:42:05\tallowed\tclaude\tPOST api.anthropic.com/v1/messages\t_provider_bl-claude")
+	fmt.Fprintln(tw, "10:42:05\tallowed\tclaude\tPOST api.anthropic.com/v1/messages\t_provider_fenzi_claude")
 	fmt.Fprintln(tw, "10:42:07\tdenied\tcurl\tpaste.example.net:443\t-")
 	tw.Flush()
 	if got.String() != want.String() {

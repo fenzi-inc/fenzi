@@ -53,7 +53,7 @@ const mixedRules = `  Chunk: ccd96a39-17bd-4710-af49-c88725b0540f
 
 func TestRequestsShowsWhatTheAgentAskedFor(t *testing.T) {
 	fakeOpenShell(t, mixedRules)
-	out, code := runCLI(t, "", "requests", "--sandbox", "bl-web-1a2b")
+	out, code := runCLI(t, "", "requests", "--sandbox", "fenzi-web-1a2b")
 	if code != 0 {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
@@ -66,7 +66,7 @@ func TestRequestsShowsWhatTheAgentAskedFor(t *testing.T) {
 		t.Errorf("drafts are listed without --all:\n%s", out)
 	}
 
-	out, _ = runCLI(t, "", "requests", "--all", "--sandbox", "bl-web-1a2b")
+	out, _ = runCLI(t, "", "requests", "--all", "--sandbox", "fenzi-web-1a2b")
 	for _, want := range []string{"1 request from the agent", "2 drafts from refused connections", "59b83e6d", "7682170e"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("--all: missing %q in:\n%s", want, out)
@@ -76,7 +76,7 @@ func TestRequestsShowsWhatTheAgentAskedFor(t *testing.T) {
 
 func TestRequestsOnlyDrafts(t *testing.T) {
 	fakeOpenShell(t, mixedRules[strings.Index(mixedRules, "  Chunk: 59b8"):])
-	out, code := runCLI(t, "", "requests", "--sandbox", "bl-web-1a2b")
+	out, code := runCLI(t, "", "requests", "--sandbox", "fenzi-web-1a2b")
 	if code != 0 || !strings.Contains(out, "No requests from the agent") || !strings.Contains(out, "2 more were drafted") {
 		t.Errorf("exit %d:\n%s", code, out)
 	}

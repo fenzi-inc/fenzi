@@ -49,9 +49,9 @@ func TestResumeOrStartFallsBackOnlyWhenResumeFailsAtOnce(t *testing.T) {
 }
 
 func TestConnectResumesTheAgentByDefault(t *testing.T) {
-	fakeRuntime(t, map[string]reply{"sandbox list": {out: "bl-web-1a2b\n"}}, "")
-	seedState(t, config.Sandbox{Name: "bl-web-1a2b", Agent: "claude", Repo: t.TempDir(), Created: time.Now(), Running: true})
-	if out, code := runCLI(t, "", "connect", "bl-web-1a2b"); code != 0 {
+	fakeRuntime(t, map[string]reply{"sandbox list": {out: "fenzi-web-1a2b\n"}}, "")
+	seedState(t, config.Sandbox{Name: "fenzi-web-1a2b", Agent: "claude", Repo: t.TempDir(), Created: time.Now(), Running: true})
+	if out, code := runCLI(t, "", "connect", "fenzi-web-1a2b"); code != 0 {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
 	exec := lastCall(t, "sandbox exec")
@@ -59,7 +59,7 @@ func TestConnectResumesTheAgentByDefault(t *testing.T) {
 		t.Errorf("connect ran %q", exec)
 	}
 
-	if out, code := runCLI(t, "", "connect", "--new", "bl-web-1a2b"); code != 0 {
+	if out, code := runCLI(t, "", "connect", "--new", "fenzi-web-1a2b"); code != 0 {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
 	if exec := lastCall(t, "sandbox exec"); strings.Contains(exec, "--continue") || strings.Contains(exec, "sh -c") {

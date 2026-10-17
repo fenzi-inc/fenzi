@@ -54,11 +54,11 @@ func TestReadShorthand(t *testing.T) {
 func TestFromStream(t *testing.T) {
 	// Recorded from the gateway's watch stream, OpenShell 0.1.2. The same event in the shorthand log carried the prefix
 	// "[1791063979.337] [sandbox] [OCSF ] [ocsf] ".
-	msg := "NET:OPEN [INFO] ALLOWED /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe(0) -> api.anthropic.com:443 [policy:_provider_bl_claude engine:opa]"
+	msg := "NET:OPEN [INFO] ALLOWED /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe(0) -> api.anthropic.com:443 [policy:_provider_fenzi_claude engine:opa]"
 	at := time.Date(2026, 10, 3, 21, 46, 19, 337e6, time.UTC)
 	r, ok := FromStream(at, "OCSF", msg, "s")
 	want := Record{Time: at, Sandbox: "s", Class: "Network Activity", Action: "Allowed",
-		Process: "/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe", Destination: "api.anthropic.com:443", Rule: "_provider_bl_claude"}
+		Process: "/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe", Destination: "api.anthropic.com:443", Rule: "_provider_fenzi_claude"}
 	if !ok || r != want {
 		t.Errorf("FromStream = %+v, want %+v", r, want)
 	}
@@ -102,9 +102,9 @@ func TestShorthandReason(t *testing.T) {
 const approvedLine = `[1791297802.289] [sandbox] [OCSF ] [ocsf] CONFIG:APPROVED [INFO] chunk:fad7c2ed-3aca-4fb7-bb37-495820dd7562 approved on example.com:443 HEAD / by /usr/bin/curl`
 
 func TestAuditMapsAnApproval(t *testing.T) {
-	r, ok := AuditFromShorthand(approvedLine, "bl-mouse-keepe-a3a6")
+	r, ok := AuditFromShorthand(approvedLine, "fenzi-mouse-keepe-a3a6")
 	want := Record{
-		Time: time.Unix(1791297802, 289e6).UTC(), Sandbox: "bl-mouse-keepe-a3a6", Class: "Config", Action: "Approved",
+		Time: time.Unix(1791297802, 289e6).UTC(), Sandbox: "fenzi-mouse-keepe-a3a6", Class: "Config", Action: "Approved",
 		Destination: "example.com:443 HEAD /", Process: "/usr/bin/curl", Chunk: "fad7c2ed-3aca-4fb7-bb37-495820dd7562",
 	}
 	if !ok || r != want {

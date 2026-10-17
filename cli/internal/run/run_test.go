@@ -120,7 +120,6 @@ func TestRunSequence(t *testing.T) {
 		"status --output json",
 		"settings get --global --json",
 		"provider get fenzi-claude",
-		"provider get bl-claude",
 		"profile import -f ",
 		"provider create --name fenzi-claude --type fenzi-claude-code --from-existing",
 		"sandbox create --name fenzi-test-0001 --from fenzi/claude:2.1.288 --policy ",
@@ -150,7 +149,7 @@ func TestRunSequence(t *testing.T) {
 			t.Errorf("call %d:\n got  %s\n want %s...", i, calls[i], w)
 		}
 	}
-	create := calls[6]
+	create := calls[5]
 	for _, frag := range []string{"--provider fenzi-claude", "--label fenzi=1", "--label policy_rev=local-", "--approval-mode manual", "--no-auto-providers", "--detach"} {
 		if !strings.Contains(create, frag) {
 			t.Errorf("sandbox create is missing %q: %s", frag, create)
@@ -856,26 +855,5 @@ func TestMCPConfigSecrets(t *testing.T) {
 	}
 	if got := MCPConfigSecrets(repo, workspace.Manifest{}); len(got) != 0 {
 		t.Errorf("a file .gitignore leaves out is not copied, so not listed: %v", got)
-	}
-}
-
-// A key stored before the rename, under bl-claude, is still used as it is.
-func TestRunUsesAKeyStoredUnderTheOldName(t *testing.T) {
-	h := setup(t)
-	h.os.Replies["provider get bl-claude"] = openshell.Reply{}
-	h.deps.Getenv = func(string) string { return "" }
-	if _, err := Run(context.Background(), h.deps, h.opts); err != nil {
-		t.Fatalf("%v\n%s", err, h.out)
-	}
-	if h.called("provider create") || !h.called("sandbox create --name fenzi-test-0001") {
-		t.Errorf("calls %v", h.os.Calls)
-	}
-	if !strings.Contains(h.out.String(), "fenzi key set claude moves it to fenzi-claude") {
-		t.Errorf("output:\n%s", h.out)
-	}
-	for _, c := range h.os.Calls {
-		if strings.HasPrefix(c, "sandbox create") && !strings.Contains(c, "--provider bl-claude ") {
-			t.Errorf("create: %s", c)
-		}
 	}
 }

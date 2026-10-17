@@ -38,7 +38,7 @@ func TestPassLoadsAHostChangeAndShipsADeny(t *testing.T) {
 
 	dirs := config.Dirs{Config: t.TempDir()}
 	state := &config.State{}
-	state.Put(config.Sandbox{Name: "bl-1", Agent: "claude", Running: true, TeamRevision: 1, Created: time.Now()})
+	state.Put(config.Sandbox{Name: "fenzi-1", Agent: "claude", Running: true, TeamRevision: 1, Created: time.Now()})
 	if err := dirs.SaveState(state); err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func teamFixture(t *testing.T) (*controlplane.Service, Option, *fakeGW) {
 	t.Cleanup(srv.Close)
 	dirs := config.Dirs{Config: t.TempDir()}
 	state := &config.State{}
-	state.Put(config.Sandbox{Name: "bl-1", Agent: "claude", Running: true, TeamRevision: 1, Created: time.Now()})
+	state.Put(config.Sandbox{Name: "fenzi-1", Agent: "claude", Running: true, TeamRevision: 1, Created: time.Now()})
 	if err := dirs.SaveState(state); err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestWallChangeDoesNotTouchTheRunningSandbox(t *testing.T) {
 	tok := signIn(t, srv, "mbp")
 	dirs := config.Dirs{Config: t.TempDir()}
 	state := &config.State{}
-	state.Put(config.Sandbox{Name: "bl-1", Agent: "claude", Running: true, TeamRevision: 1, Created: time.Now()})
+	state.Put(config.Sandbox{Name: "fenzi-1", Agent: "claude", Running: true, TeamRevision: 1, Created: time.Now()})
 	if err := dirs.SaveState(state); err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestPushKeepsTheModelRuleOfASignInSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sb, _ := state.Find("bl-1")
+	sb, _ := state.Find("fenzi-1")
 	sb.SignIn = true
 	state.Put(sb)
 	if err := opt.Dirs.SaveState(state); err != nil {
@@ -337,7 +337,7 @@ func TestPushIsProvedFirst(t *testing.T) {
 	if len(calls.Calls) != 1 {
 		t.Fatalf("prover calls %v", calls.Calls)
 	}
-	want := "bl-1: r2 not loaded, the policy check on this machine returned exceeds_boundary (any program can GET paste.example.net:443/). It keeps r1."
+	want := "fenzi-1: r2 not loaded, the policy check on this machine returned exceeds_boundary (any program can GET paste.example.net:443/). It keeps r1."
 	if !strings.Contains(strings.Join(rep.Notes, "\n"), want) {
 		t.Fatalf("notes %q", rep.Notes)
 	}
@@ -345,7 +345,7 @@ func TestPushIsProvedFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sb, _ := state.Find("bl-1"); sb.TeamRevision != 1 {
+	if sb, _ := state.Find("fenzi-1"); sb.TeamRevision != 1 {
 		t.Fatalf("sandbox recorded as r%d", sb.TeamRevision)
 	}
 
@@ -369,7 +369,7 @@ func TestPushWithoutAProverLoadsNothing(t *testing.T) {
 	if gw.set {
 		t.Fatal("loaded without a prover")
 	}
-	if !strings.Contains(strings.Join(rep.Notes, "\n"), "bl-1: r2 not loaded, the policy prover could not run: no prover on this machine. It keeps r1.") {
+	if !strings.Contains(strings.Join(rep.Notes, "\n"), "fenzi-1: r2 not loaded, the policy prover could not run: no prover on this machine. It keeps r1.") {
 		t.Fatalf("notes %q", rep.Notes)
 	}
 

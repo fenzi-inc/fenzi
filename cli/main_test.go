@@ -11,11 +11,11 @@ func TestParseInterspersed(t *testing.T) {
 	fs := newFlags("deny", &bytes.Buffer{})
 	reason := fs.String("reason", "", "")
 	sandbox := fs.String("sandbox", "", "")
-	pos, err := parse(fs, []string{"7f3a", "--reason", "use the vendored copy", "--sandbox", "bl-x", "--", "--not-a-flag"})
+	pos, err := parse(fs, []string{"7f3a", "--reason", "use the vendored copy", "--sandbox", "fenzi-x", "--", "--not-a-flag"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(pos, []string{"7f3a", "--not-a-flag"}) || *reason != "use the vendored copy" || *sandbox != "bl-x" {
+	if !reflect.DeepEqual(pos, []string{"7f3a", "--not-a-flag"}) || *reason != "use the vendored copy" || *sandbox != "fenzi-x" {
 		t.Fatalf("pos=%v reason=%q sandbox=%q", pos, *reason, *sandbox)
 	}
 }
@@ -92,8 +92,8 @@ func TestRunArgs(t *testing.T) {
 }
 
 func TestSplitDash(t *testing.T) {
-	before, after := splitDash([]string{"bl-web-1a2b", "--shell", "--", "--resume"})
-	if !reflect.DeepEqual(before, []string{"bl-web-1a2b", "--shell"}) || !reflect.DeepEqual(after, []string{"--resume"}) {
+	before, after := splitDash([]string{"fenzi-web-1a2b", "--shell", "--", "--resume"})
+	if !reflect.DeepEqual(before, []string{"fenzi-web-1a2b", "--shell"}) || !reflect.DeepEqual(after, []string{"--resume"}) {
 		t.Fatalf("before %v after %v", before, after)
 	}
 }

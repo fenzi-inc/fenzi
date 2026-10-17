@@ -163,13 +163,13 @@ func saveFixture(t *testing.T) string {
 	t.Helper()
 	fakeRuntime(t, map[string]reply{"rule get": {out: mixedRules}}, proverWithin)
 	repo := t.TempDir()
-	seedState(t, config.Sandbox{Name: "bl-web-1a2b", Agent: "claude", Repo: repo, Created: time.Now(), Running: true})
+	seedState(t, config.Sandbox{Name: "fenzi-web-1a2b", Agent: "claude", Repo: repo, Created: time.Now(), Running: true})
 	return repo
 }
 
 func TestApproveSaveWritesTheHost(t *testing.T) {
 	repo := saveFixture(t)
-	out, code := runCLI(t, "", "approve", "59b83e6d", "--save", "--sandbox", "bl-web-1a2b")
+	out, code := runCLI(t, "", "approve", "59b83e6d", "--save", "--sandbox", "fenzi-web-1a2b")
 	if code != 0 {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
@@ -187,7 +187,7 @@ func TestApproveSaveWritesTheHost(t *testing.T) {
 		t.Errorf("file:\n%s", raw)
 	}
 
-	out, code = runCLI(t, "", "approve", "ccd96a39", "--save", "--sandbox", "bl-web-1a2b")
+	out, code = runCLI(t, "", "approve", "ccd96a39", "--save", "--sandbox", "fenzi-web-1a2b")
 	out = strings.Join(strings.Fields(out), " ")
 	if code != 0 || !strings.Contains(out, "allowed GET / only") || !strings.Contains(out, "www.example.com, read-only") {
 		t.Errorf("exit %d:\n%s", code, out)
@@ -207,7 +207,7 @@ func TestApproveSaveRefusedOnATeamMachine(t *testing.T) {
 	if err := (team.Enrollment{Server: "https://fenzi.example", Token: "t", Email: "ana@acme.dev", Tenant: "acme", Machine: "m"}).Save(dirs); err != nil {
 		t.Fatal(err)
 	}
-	out, code := runCLI(t, "", "approve", "59b83e6d", "--save", "--sandbox", "bl-web-1a2b")
+	out, code := runCLI(t, "", "approve", "59b83e6d", "--save", "--sandbox", "fenzi-web-1a2b")
 	if code != 1 || !strings.Contains(out, "team policy") || !strings.Contains(out, "https://fenzi.example/console") {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
@@ -230,12 +230,12 @@ func TestApproveSaveOnATeamMachineNamesTheRequestPage(t *testing.T) {
 	if err := (team.Enrollment{Server: "https://fenzi.example/", Token: "t", Email: "ana@acme.dev", Tenant: "acme", Machine: "m"}).Save(dirs); err != nil {
 		t.Fatal(err)
 	}
-	page := "https://fenzi.example/console/requests/bl-web-1a2b/59b83e6d-8a8a-43e4-a597-066a5d16fc36"
+	page := "https://fenzi.example/console/requests/fenzi-web-1a2b/59b83e6d-8a8a-43e4-a597-066a5d16fc36"
 	for _, args := range [][]string{
-		{"approve", "59b83e6d", "--save", "--sandbox", "bl-web-1a2b"},
-		{"approve", "59b83e6d", "--save", "--dry-run", "--sandbox", "bl-web-1a2b"},
-		{"approve", "59b83e6d-8a8a-43e4-a597-066a5d16fc36", "--save", "--dry-run", "--json", "--sandbox", "bl-web-1a2b"},
-		{"approve", "59b83e6d", "--save", "--policy-from", filepath.Join(repo, "edited.yaml"), "--sandbox", "bl-web-1a2b"},
+		{"approve", "59b83e6d", "--save", "--sandbox", "fenzi-web-1a2b"},
+		{"approve", "59b83e6d", "--save", "--dry-run", "--sandbox", "fenzi-web-1a2b"},
+		{"approve", "59b83e6d-8a8a-43e4-a597-066a5d16fc36", "--save", "--dry-run", "--json", "--sandbox", "fenzi-web-1a2b"},
+		{"approve", "59b83e6d", "--save", "--policy-from", filepath.Join(repo, "edited.yaml"), "--sandbox", "fenzi-web-1a2b"},
 	} {
 		var stdout, stderr strings.Builder
 		code := cli(args, strings.NewReader(""), &stdout, &stderr)
@@ -258,7 +258,7 @@ func TestApproveSaveDryRunChangesNothing(t *testing.T) {
 	if err := os.WriteFile(path, []byte(before), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out, code := runCLI(t, "", "approve", "59b83e6d", "--save", "--dry-run", "--sandbox", "bl-web-1a2b")
+	out, code := runCLI(t, "", "approve", "59b83e6d", "--save", "--dry-run", "--sandbox", "fenzi-web-1a2b")
 	if code != 0 {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
@@ -282,7 +282,7 @@ func TestApproveSaveDryRunChangesNothing(t *testing.T) {
 	}
 
 	var doc jsonSavePreview
-	stderr, code := runJSON(t, &doc, "approve", "59b83e6d", "--save", "--dry-run", "--json", "--sandbox", "bl-web-1a2b")
+	stderr, code := runJSON(t, &doc, "approve", "59b83e6d", "--save", "--dry-run", "--json", "--sandbox", "fenzi-web-1a2b")
 	if code != 0 || stderr != "" {
 		t.Fatalf("exit %d stderr %q", code, stderr)
 	}
@@ -304,7 +304,7 @@ func TestApproveSaveDryRunChangesNothing(t *testing.T) {
 func TestApproveSaveDryRunNewFileAndAlreadyThere(t *testing.T) {
 	repo := saveFixture(t)
 	var doc jsonSavePreview
-	if stderr, code := runJSON(t, &doc, "approve", "ccd96a39", "--save", "--dry-run", "--json", "--sandbox", "bl-web-1a2b"); code != 0 {
+	if stderr, code := runJSON(t, &doc, "approve", "ccd96a39", "--save", "--dry-run", "--json", "--sandbox", "fenzi-web-1a2b"); code != 0 {
 		t.Fatalf("exit %d stderr %q", code, stderr)
 	}
 	if doc.Exists || doc.Before != "" || doc.After != "version: 1\nhosts:\n  - host: www.example.com\n    access: read-only\n" || doc.Host != "www.example.com" || !strings.Contains(doc.Note, "allowed GET / only") {
@@ -321,13 +321,13 @@ func TestApproveSaveDryRunNewFileAndAlreadyThere(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc = jsonSavePreview{}
-	if stderr, code := runJSON(t, &doc, "approve", "59b83e6d", "--save", "--dry-run", "--json", "--sandbox", "bl-web-1a2b"); code != 0 {
+	if stderr, code := runJSON(t, &doc, "approve", "59b83e6d", "--save", "--dry-run", "--json", "--sandbox", "fenzi-web-1a2b"); code != 0 {
 		t.Fatalf("exit %d stderr %q", code, stderr)
 	}
 	if !doc.Already || doc.Diff != "" || doc.Before != doc.After || !strings.Contains(doc.Note, "already read-only") || !doc.Check.Passed {
 		t.Errorf("already there: %+v", doc)
 	}
-	out, code := runCLI(t, "", "approve", "59b83e6d", "--save", "--dry-run", "--sandbox", "bl-web-1a2b")
+	out, code := runCLI(t, "", "approve", "59b83e6d", "--save", "--dry-run", "--sandbox", "fenzi-web-1a2b")
 	if code != 0 || !strings.Contains(out, "Adds  nothing") || !strings.Contains(out, "fenzi.yaml stays as it is.") || !strings.Contains(out, "fenzi approve 59b83e6d  ") {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
@@ -340,16 +340,16 @@ var proverExceeds = strings.Replace(strings.Replace(proverWithin, `"result":"wit
 
 func TestApproveSaveDryRunFailingCheck(t *testing.T) {
 	fakeRuntime(t, map[string]reply{"rule get": {out: mixedRules}}, proverExceeds)
-	seedState(t, config.Sandbox{Name: "bl-web-1a2b", Agent: "claude", Repo: t.TempDir(), Created: time.Now(), Running: true})
+	seedState(t, config.Sandbox{Name: "fenzi-web-1a2b", Agent: "claude", Repo: t.TempDir(), Created: time.Now(), Running: true})
 	var doc jsonSavePreview
-	stderr, code := runJSON(t, &doc, "approve", "59b83e6d", "--save", "--dry-run", "--json", "--sandbox", "bl-web-1a2b")
+	stderr, code := runJSON(t, &doc, "approve", "59b83e6d", "--save", "--dry-run", "--json", "--sandbox", "fenzi-web-1a2b")
 	if code != 2 || !strings.Contains(stderr, "policy check") {
 		t.Fatalf("exit %d, want 2; stderr %q", code, stderr)
 	}
 	if doc.Check.Passed || doc.Check.Result != "exceeds_boundary" || doc.Check.Example != "any program can GET paste.example.net:443/" {
 		t.Errorf("check = %+v", doc.Check)
 	}
-	out, code := runCLI(t, "", "approve", "59b83e6d", "--save", "--dry-run", "--sandbox", "bl-web-1a2b")
+	out, code := runCLI(t, "", "approve", "59b83e6d", "--save", "--dry-run", "--sandbox", "fenzi-web-1a2b")
 	if code != 2 || !strings.Contains(out, "exceeds_boundary") || !strings.Contains(out, "Nothing was approved or written.") || strings.Contains(out, "fenzi approve 59b83e6d --save") {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
@@ -372,7 +372,7 @@ func TestApproveSavePolicyFrom(t *testing.T) {
 
 	// The preview of the edited text: its diff and its check, nothing else.
 	var doc jsonSavePreview
-	if stderr, code := runJSON(t, &doc, "approve", "59b83e6d", "--save", "--dry-run", "--json", "--policy-from", edited, "--sandbox", "bl-web-1a2b"); code != 0 {
+	if stderr, code := runJSON(t, &doc, "approve", "59b83e6d", "--save", "--dry-run", "--json", "--policy-from", edited, "--sandbox", "fenzi-web-1a2b"); code != 0 {
 		t.Fatalf("exit %d stderr %q", code, stderr)
 	}
 	if doc.From != edited || doc.Before != "version: 1\n" || doc.After != text || !strings.Contains(doc.Diff, "+  # Docs the agent reads.\n") || !doc.Check.Passed {
@@ -385,7 +385,7 @@ func TestApproveSavePolicyFrom(t *testing.T) {
 		t.Fatalf("the preview changed something:\n%s", raw)
 	}
 
-	out, code := runCLI(t, "", "approve", "59b83e6d", "--save", "--policy-from", edited, "--sandbox", "bl-web-1a2b")
+	out, code := runCLI(t, "", "approve", "59b83e6d", "--save", "--policy-from", edited, "--sandbox", "fenzi-web-1a2b")
 	if code != 0 {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
@@ -394,7 +394,7 @@ func TestApproveSavePolicyFrom(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
-	if !called(t, "rule approve bl-web-1a2b --chunk-id 59b83e6d-8a8a-43e4-a597-066a5d16fc36") {
+	if !called(t, "rule approve fenzi-web-1a2b --chunk-id 59b83e6d-8a8a-43e4-a597-066a5d16fc36") {
 		t.Errorf("not approved: %q", runtimeCalls(t))
 	}
 	if raw, _ := os.ReadFile(path); string(raw) != text {
@@ -408,12 +408,12 @@ func TestApproveSavePolicyFrom(t *testing.T) {
 func TestApproveSavePolicyFromRefusesAFailingFile(t *testing.T) {
 	fakeRuntime(t, map[string]reply{"rule get": {out: mixedRules}}, proverExceeds)
 	repo := t.TempDir()
-	seedState(t, config.Sandbox{Name: "bl-web-1a2b", Agent: "claude", Repo: repo, Created: time.Now(), Running: true})
+	seedState(t, config.Sandbox{Name: "fenzi-web-1a2b", Agent: "claude", Repo: repo, Created: time.Now(), Running: true})
 	edited := filepath.Join(t.TempDir(), "edited.yaml")
 	if err := os.WriteFile(edited, []byte("version: 1\nhosts:\n  - host: github.com\n    access: read-only\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, code := runCLI(t, "", "approve", "59b83e6d", "--save", "--policy-from", edited, "--sandbox", "bl-web-1a2b")
+	out, code := runCLI(t, "", "approve", "59b83e6d", "--save", "--policy-from", edited, "--sandbox", "fenzi-web-1a2b")
 	if code != 2 || !strings.Contains(out, "exceeds_boundary") || !strings.Contains(out, "Nothing was approved, and fenzi.yaml was not changed.") {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
@@ -423,7 +423,7 @@ func TestApproveSavePolicyFromRefusesAFailingFile(t *testing.T) {
 	if err := os.WriteFile(broken, []byte("version: 1\nhosts: [\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, code = runCLI(t, "", "approve", "59b83e6d", "--save", "--policy-from", broken, "--sandbox", "bl-web-1a2b")
+	out, code = runCLI(t, "", "approve", "59b83e6d", "--save", "--policy-from", broken, "--sandbox", "fenzi-web-1a2b")
 	if code != 1 || !strings.Contains(out, "not approved: "+broken) {
 		t.Errorf("exit %d:\n%s", code, out)
 	}

@@ -18,23 +18,23 @@ func recentLine() string {
 }
 
 func TestLogSinceAppliesToRunningSandboxes(t *testing.T) {
-	fakeRuntime(t, map[string]reply{"logs bl-web-1a2b --source sandbox -n": {out: decisionLines + recentLine()}}, "")
-	seedState(t, config.Sandbox{Name: "bl-web-1a2b", Agent: "claude", Repo: "/Users/ana/web", Created: time.Now(), Running: true})
+	fakeRuntime(t, map[string]reply{"logs fenzi-web-1a2b --source sandbox -n": {out: decisionLines + recentLine()}}, "")
+	seedState(t, config.Sandbox{Name: "fenzi-web-1a2b", Agent: "claude", Repo: "/Users/ana/web", Created: time.Now(), Running: true})
 	var recs []forward.Record
-	if stderr, code := runJSON(t, &recs, "log", "--sandbox", "bl-web-1a2b", "--json"); code != 0 || stderr != "" || len(recs) != 4 {
+	if stderr, code := runJSON(t, &recs, "log", "--sandbox", "fenzi-web-1a2b", "--json"); code != 0 || stderr != "" || len(recs) != 4 {
 		t.Fatalf("exit %d stderr %q records %d", code, stderr, len(recs))
 	}
-	if stderr, code := runJSON(t, &recs, "log", "--since", "1h", "--sandbox", "bl-web-1a2b", "--json"); code != 0 || stderr != "" {
+	if stderr, code := runJSON(t, &recs, "log", "--since", "1h", "--sandbox", "fenzi-web-1a2b", "--json"); code != 0 || stderr != "" {
 		t.Fatalf("exit %d stderr %q", code, stderr)
 	}
 	if len(recs) != 1 || recs[0].Destination != "pypi.org:443" {
 		t.Errorf("--since 1h on a running sandbox = %+v", recs)
 	}
-	out, code := runCLI(t, "", "log", "--since", "1h", "--sandbox", "bl-web-1a2b")
+	out, code := runCLI(t, "", "log", "--since", "1h", "--sandbox", "fenzi-web-1a2b")
 	if code != 0 || !strings.Contains(out, "1 decision") || strings.Contains(out, "api.github.com") {
 		t.Errorf("text, exit %d:\n%s", code, out)
 	}
-	if out, code := runCLI(t, "", "log", "--since", "soon", "--sandbox", "bl-web-1a2b"); code != 1 || !strings.Contains(out, "--since") {
+	if out, code := runCLI(t, "", "log", "--since", "soon", "--sandbox", "fenzi-web-1a2b"); code != 1 || !strings.Contains(out, "--since") {
 		t.Errorf("a bad --since: exit %d:\n%s", code, out)
 	}
 }
@@ -51,12 +51,12 @@ func runFollow(t *testing.T, args ...string) (string, int) {
 
 func TestLogFollowPrintsDecisionRows(t *testing.T) {
 	fakeRuntime(t, map[string]reply{
-		"logs bl-web-1a2b --source sandbox --tail":             {out: decisionLines},
-		"logs bl-web-1a2b --source sandbox --since 10m --tail": {out: recentLine()},
+		"logs fenzi-web-1a2b --source sandbox --tail":             {out: decisionLines},
+		"logs fenzi-web-1a2b --source sandbox --since 10m --tail": {out: recentLine()},
 	}, "")
-	seedState(t, config.Sandbox{Name: "bl-web-1a2b", Agent: "claude", Repo: "/Users/ana/web", Created: time.Now(), Running: true})
+	seedState(t, config.Sandbox{Name: "fenzi-web-1a2b", Agent: "claude", Repo: "/Users/ana/web", Created: time.Now(), Running: true})
 
-	out, code := runFollow(t, "log", "--follow", "--sandbox", "bl-web-1a2b")
+	out, code := runFollow(t, "log", "--follow", "--sandbox", "fenzi-web-1a2b")
 	if code != 0 {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
@@ -73,13 +73,13 @@ func TestLogFollowPrintsDecisionRows(t *testing.T) {
 		t.Errorf("raw runtime lines were printed:\n%s", out)
 	}
 
-	out, _ = runFollow(t, "log", "--follow", "--deny", "--sandbox", "bl-web-1a2b")
+	out, _ = runFollow(t, "log", "--follow", "--deny", "--sandbox", "fenzi-web-1a2b")
 	lines = strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if len(lines) != 3 || !strings.Contains(lines[0], "reason") || strings.Contains(out, "allowed") || !strings.Contains(out, "policy_dns_ineligible") {
 		t.Errorf("--deny:\n%s", out)
 	}
 
-	out, _ = runFollow(t, "log", "--follow", "--since", "10m", "--sandbox", "bl-web-1a2b")
+	out, _ = runFollow(t, "log", "--follow", "--since", "10m", "--sandbox", "fenzi-web-1a2b")
 	if !strings.Contains(out, "pypi.org:443") || strings.Contains(out, "api.github.com") {
 		t.Errorf("--since is passed to the runtime's follow:\n%s", out)
 	}

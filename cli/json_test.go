@@ -175,23 +175,23 @@ func TestJSONAgents(t *testing.T) {
 }
 
 func TestJSONPs(t *testing.T) {
-	fakeRuntime(t, map[string]reply{"sandbox list": {out: "bl-web-1a2b\n"}}, "")
+	fakeRuntime(t, map[string]reply{"sandbox list": {out: "fenzi-web-1a2b\n"}}, "")
 	created := time.Date(2026, 10, 15, 21, 36, 0, 0, time.UTC)
 	seedState(t,
-		config.Sandbox{Name: "bl-web-1a2b", Agent: "claude", Repo: "/Users/ana/web", Created: created},
-		config.Sandbox{Name: "bl-web-0000", Agent: "codex", Repo: "/Users/ana/web", Created: created.Add(-time.Hour)},
+		config.Sandbox{Name: "fenzi-web-1a2b", Agent: "claude", Repo: "/Users/ana/web", Created: created},
+		config.Sandbox{Name: "fenzi-web-0000", Agent: "codex", Repo: "/Users/ana/web", Created: created.Add(-time.Hour)},
 	)
 	var docs []jsonSandbox
 	if stderr, code := runJSON(t, &docs, "ps", "--json"); code != 0 || stderr != "" {
 		t.Fatalf("exit %d stderr %q", code, stderr)
 	}
-	if len(docs) != 1 || docs[0] != (jsonSandbox{Name: "bl-web-1a2b", Agent: "claude", Folder: "/Users/ana/web", Created: "2026-10-15T21:36:00Z", Running: true}) {
+	if len(docs) != 1 || docs[0] != (jsonSandbox{Name: "fenzi-web-1a2b", Agent: "claude", Folder: "/Users/ana/web", Created: "2026-10-15T21:36:00Z", Running: true}) {
 		t.Errorf("ps = %+v", docs)
 	}
 	if stderr, code := runJSON(t, &docs, "ps", "--all", "--json"); code != 0 || stderr != "" {
 		t.Fatalf("--all: exit %d stderr %q", code, stderr)
 	}
-	if len(docs) != 2 || docs[1].Name != "bl-web-0000" || docs[1].Running {
+	if len(docs) != 2 || docs[1].Name != "fenzi-web-0000" || docs[1].Running {
 		t.Errorf("ps --all = %+v", docs)
 	}
 }
@@ -207,7 +207,7 @@ func TestJSONPsNone(t *testing.T) {
 func TestJSONRequests(t *testing.T) {
 	fakeOpenShell(t, mixedRules)
 	var docs []jsonRequest
-	if stderr, code := runJSON(t, &docs, "requests", "--sandbox", "bl-web-1a2b", "--json"); code != 0 || stderr != "" {
+	if stderr, code := runJSON(t, &docs, "requests", "--sandbox", "fenzi-web-1a2b", "--json"); code != 0 || stderr != "" {
 		t.Fatalf("exit %d stderr %q", code, stderr)
 	}
 	want := jsonRequest{
@@ -217,7 +217,7 @@ func TestJSONRequests(t *testing.T) {
 	if len(docs) != 1 || docs[0] != want {
 		t.Errorf("requests = %+v", docs)
 	}
-	if stderr, code := runJSON(t, &docs, "requests", "--all", "--sandbox", "bl-web-1a2b", "--json"); code != 0 || stderr != "" {
+	if stderr, code := runJSON(t, &docs, "requests", "--all", "--sandbox", "fenzi-web-1a2b", "--json"); code != 0 || stderr != "" {
 		t.Fatalf("--all: exit %d stderr %q", code, stderr)
 	}
 	if len(docs) != 3 || docs[0].Draft || !docs[1].Draft || !docs[2].Draft || docs[1].Destination != "github.com:443" {
@@ -228,7 +228,7 @@ func TestJSONRequests(t *testing.T) {
 func TestJSONRequestsNone(t *testing.T) {
 	fakeOpenShell(t, "")
 	var docs []jsonRequest
-	if _, code := runJSON(t, &docs, "requests", "--sandbox", "bl-web-1a2b", "--json"); code != 0 || docs == nil || len(docs) != 0 {
+	if _, code := runJSON(t, &docs, "requests", "--sandbox", "fenzi-web-1a2b", "--json"); code != 0 || docs == nil || len(docs) != 0 {
 		t.Fatalf("exit %d, docs %#v; want an empty list", code, docs)
 	}
 }
@@ -236,14 +236,14 @@ func TestJSONRequestsNone(t *testing.T) {
 func TestJSONApproveAndDeny(t *testing.T) {
 	fakeOpenShell(t, mixedRules)
 	var doc jsonAnswer
-	if stderr, code := runJSON(t, &doc, "approve", "ccd96a39", "--sandbox", "bl-web-1a2b", "--json"); code != 0 || stderr != "" {
+	if stderr, code := runJSON(t, &doc, "approve", "ccd96a39", "--sandbox", "fenzi-web-1a2b", "--json"); code != 0 || stderr != "" {
 		t.Fatalf("exit %d stderr %q", code, stderr)
 	}
-	if doc.ID != "ccd96a39-17bd-4710-af49-c88725b0540f" || doc.Sandbox != "bl-web-1a2b" || doc.Result != "approved" || doc.Note != approvedNote {
+	if doc.ID != "ccd96a39-17bd-4710-af49-c88725b0540f" || doc.Sandbox != "fenzi-web-1a2b" || doc.Result != "approved" || doc.Note != approvedNote {
 		t.Errorf("approve = %+v", doc)
 	}
 	doc = jsonAnswer{}
-	if stderr, code := runJSON(t, &doc, "deny", "59b83e6d", "--reason", "use the vendored copy", "--sandbox", "bl-web-1a2b", "--json"); code != 0 || stderr != "" {
+	if stderr, code := runJSON(t, &doc, "deny", "59b83e6d", "--reason", "use the vendored copy", "--sandbox", "fenzi-web-1a2b", "--json"); code != 0 || stderr != "" {
 		t.Fatalf("exit %d stderr %q", code, stderr)
 	}
 	if doc.Result != "denied" || doc.Note != "The agent sees: use the vendored copy" || !strings.HasPrefix(doc.ID, "59b83e6d-") {
@@ -251,7 +251,7 @@ func TestJSONApproveAndDeny(t *testing.T) {
 	}
 	// Errors stay on standard error, with nothing on standard output.
 	var none json.RawMessage
-	stderr, code := runJSON(t, &none, "approve", "zzzz", "--sandbox", "bl-web-1a2b", "--json")
+	stderr, code := runJSON(t, &none, "approve", "zzzz", "--sandbox", "fenzi-web-1a2b", "--json")
 	if code != 1 || none != nil || !strings.Contains(stderr, `no pending request starts with "zzzz"`) {
 		t.Errorf("exit %d, stdout %q, stderr %q", code, none, stderr)
 	}
@@ -266,22 +266,22 @@ const decisionLines = `[1791059016.500] [sandbox] [OCSF ] [ocsf] CONFIG:LOADED [
 
 func TestJSONLog(t *testing.T) {
 	fakeRuntime(t, nil, "")
-	dirs := seedState(t, config.Sandbox{Name: "bl-web-1a2b", Agent: "claude", Repo: "/Users/ana/web", Created: time.Now()})
-	if err := os.MkdirAll(dirs.Run("bl-web-1a2b"), 0o700); err != nil {
+	dirs := seedState(t, config.Sandbox{Name: "fenzi-web-1a2b", Agent: "claude", Repo: "/Users/ana/web", Created: time.Now()})
+	if err := os.MkdirAll(dirs.Run("fenzi-web-1a2b"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dirs.Run("bl-web-1a2b"), run.LogFile), []byte(decisionLines), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dirs.Run("fenzi-web-1a2b"), run.LogFile), []byte(decisionLines), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var recs []forward.Record
-	if stderr, code := runJSON(t, &recs, "log", "--sandbox", "bl-web-1a2b", "--json"); code != 0 || stderr != "" {
+	if stderr, code := runJSON(t, &recs, "log", "--sandbox", "fenzi-web-1a2b", "--json"); code != 0 || stderr != "" {
 		t.Fatalf("exit %d stderr %q", code, stderr)
 	}
 	if len(recs) != 3 {
 		t.Fatalf("records = %+v", recs)
 	}
 	r := recs[0]
-	if r.Sandbox != "bl-web-1a2b" || r.Action != "Allowed" || r.Process != "/usr/bin/curl" || r.Destination != "api.github.com:443" || r.Rule != "allow_api_github_com_443" {
+	if r.Sandbox != "fenzi-web-1a2b" || r.Action != "Allowed" || r.Process != "/usr/bin/curl" || r.Destination != "api.github.com:443" || r.Rule != "allow_api_github_com_443" {
 		t.Errorf("record = %+v", r)
 	}
 	if r.Time.UnixMilli() != 1791059126330 || r.Time.Location() != time.UTC {
@@ -290,38 +290,38 @@ func TestJSONLog(t *testing.T) {
 	if recs[1].Destination != "POST api.github.com/markdown" || !recs[1].Denied() {
 		t.Errorf("http record = %+v", recs[1])
 	}
-	if stderr, code := runJSON(t, &recs, "log", "--deny", "--sandbox", "bl-web-1a2b", "--json"); code != 0 || stderr != "" {
+	if stderr, code := runJSON(t, &recs, "log", "--deny", "--sandbox", "fenzi-web-1a2b", "--json"); code != 0 || stderr != "" {
 		t.Fatalf("--deny: exit %d stderr %q", code, stderr)
 	}
 	if len(recs) != 2 || recs[0].Rule != "allow_api_github_com_443" || recs[1].Reason != "policy_dns_ineligible" {
 		t.Errorf("denies = %+v", recs)
 	}
 	var none json.RawMessage
-	if stderr, code := runJSON(t, &none, "log", "--raw", "--sandbox", "bl-web-1a2b", "--json"); code != 1 || none != nil || !strings.Contains(stderr, "--raw") {
+	if stderr, code := runJSON(t, &none, "log", "--raw", "--sandbox", "fenzi-web-1a2b", "--json"); code != 1 || none != nil || !strings.Contains(stderr, "--raw") {
 		t.Errorf("--raw --json: exit %d stdout %q stderr %q", code, none, stderr)
 	}
 }
 
 func TestJSONLogEmpty(t *testing.T) {
 	fakeRuntime(t, nil, "")
-	dirs := seedState(t, config.Sandbox{Name: "bl-web-1a2b", Repo: "/Users/ana/web", Created: time.Now()})
-	if err := os.MkdirAll(dirs.Run("bl-web-1a2b"), 0o700); err != nil {
+	dirs := seedState(t, config.Sandbox{Name: "fenzi-web-1a2b", Repo: "/Users/ana/web", Created: time.Now()})
+	if err := os.MkdirAll(dirs.Run("fenzi-web-1a2b"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dirs.Run("bl-web-1a2b"), run.LogFile), []byte(decisionLines[:strings.Index(decisionLines, "\n")+1]), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dirs.Run("fenzi-web-1a2b"), run.LogFile), []byte(decisionLines[:strings.Index(decisionLines, "\n")+1]), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var recs []forward.Record
-	if _, code := runJSON(t, &recs, "log", "--sandbox", "bl-web-1a2b", "--json"); code != 0 || recs == nil || len(recs) != 0 {
+	if _, code := runJSON(t, &recs, "log", "--sandbox", "fenzi-web-1a2b", "--json"); code != 0 || recs == nil || len(recs) != 0 {
 		t.Fatalf("exit %d, records %#v; want an empty list", code, recs)
 	}
 }
 
 func TestJSONLogFollow(t *testing.T) {
-	fakeRuntime(t, map[string]reply{"logs bl-web-1a2b --source sandbox --tail": {out: decisionLines}}, "")
-	seedState(t, config.Sandbox{Name: "bl-web-1a2b", Agent: "claude", Repo: "/Users/ana/web", Created: time.Now(), Running: true})
+	fakeRuntime(t, map[string]reply{"logs fenzi-web-1a2b --source sandbox --tail": {out: decisionLines}}, "")
+	seedState(t, config.Sandbox{Name: "fenzi-web-1a2b", Agent: "claude", Repo: "/Users/ana/web", Created: time.Now(), Running: true})
 	var out, errOut bytes.Buffer
-	if code := cli([]string{"log", "--follow", "--sandbox", "bl-web-1a2b", "--json"}, strings.NewReader(""), &out, &errOut); code != 0 || errOut.Len() > 0 {
+	if code := cli([]string{"log", "--follow", "--sandbox", "fenzi-web-1a2b", "--json"}, strings.NewReader(""), &out, &errOut); code != 0 || errOut.Len() > 0 {
 		t.Fatalf("exit %d stderr %q", code, errOut.String())
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
@@ -333,12 +333,12 @@ func TestJSONLogFollow(t *testing.T) {
 		if err := json.Unmarshal([]byte(l), &r); err != nil {
 			t.Fatalf("line %d is not one JSON object: %v: %s", i, err, l)
 		}
-		if r.Sandbox != "bl-web-1a2b" || r.Destination == "" {
+		if r.Sandbox != "fenzi-web-1a2b" || r.Destination == "" {
 			t.Errorf("line %d = %+v", i, r)
 		}
 	}
 	out.Reset()
-	if code := cli([]string{"log", "--follow", "--deny", "--sandbox", "bl-web-1a2b", "--json"}, strings.NewReader(""), &out, &errOut); code != 0 {
+	if code := cli([]string{"log", "--follow", "--deny", "--sandbox", "fenzi-web-1a2b", "--json"}, strings.NewReader(""), &out, &errOut); code != 0 {
 		t.Fatalf("--deny: exit %d stderr %q", code, errOut.String())
 	}
 	if n := strings.Count(out.String(), "\n"); n != 2 {
@@ -347,7 +347,7 @@ func TestJSONLogFollow(t *testing.T) {
 }
 
 func TestJSONKeyList(t *testing.T) {
-	fakeRuntime(t, map[string]reply{"provider get fenzi-codex": {exit: 1}, "provider get bl-codex": {exit: 1}}, "")
+	fakeRuntime(t, map[string]reply{"provider get fenzi-codex": {exit: 1}}, "")
 	var docs []jsonKey
 	if stderr, code := runJSON(t, &docs, "key", "list", "--json"); code != 0 || stderr != "" {
 		t.Fatalf("exit %d stderr %q", code, stderr)
@@ -442,13 +442,13 @@ func TestJSONLogFollowLineTooLong(t *testing.T) {
 	// could print. The command must end and say why, not wait forever on the
 	// runtime's blocked write.
 	long := strings.Repeat("x", 5*1024*1024) + "\n" + decisionLines
-	fakeRuntime(t, map[string]reply{"logs bl-web-1a2b --source sandbox --tail": {out: long}}, "")
-	seedState(t, config.Sandbox{Name: "bl-web-1a2b", Agent: "claude", Repo: "/Users/ana/web", Created: time.Now(), Running: true})
+	fakeRuntime(t, map[string]reply{"logs fenzi-web-1a2b --source sandbox --tail": {out: long}}, "")
+	seedState(t, config.Sandbox{Name: "fenzi-web-1a2b", Agent: "claude", Repo: "/Users/ana/web", Created: time.Now(), Running: true})
 	done := make(chan struct{})
 	var code int
 	var out, errOut bytes.Buffer
 	go func() {
-		code = cli([]string{"log", "--follow", "--sandbox", "bl-web-1a2b", "--json"}, strings.NewReader(""), &out, &errOut)
+		code = cli([]string{"log", "--follow", "--sandbox", "fenzi-web-1a2b", "--json"}, strings.NewReader(""), &out, &errOut)
 		close(done)
 	}()
 	select {
@@ -462,8 +462,8 @@ func TestJSONLogFollowLineTooLong(t *testing.T) {
 }
 
 func TestPsLeavesAnUnchangedStateFileAlone(t *testing.T) {
-	fakeRuntime(t, map[string]reply{"sandbox list": {out: "bl-web-1a2b\n"}}, "")
-	dirs := seedState(t, config.Sandbox{Name: "bl-web-1a2b", Agent: "claude", Repo: "/Users/ana/web", Created: time.Now(), Running: true})
+	fakeRuntime(t, map[string]reply{"sandbox list": {out: "fenzi-web-1a2b\n"}}, "")
+	dirs := seedState(t, config.Sandbox{Name: "fenzi-web-1a2b", Agent: "claude", Repo: "/Users/ana/web", Created: time.Now(), Running: true})
 	path := filepath.Join(dirs.Config, "state.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {

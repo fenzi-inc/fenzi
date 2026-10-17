@@ -128,7 +128,7 @@ func fakeFixture(t *testing.T, gw *fakeGW) (*fakeTeam, Option) {
 	srv := f.start(t)
 	dirs := config.Dirs{Config: t.TempDir()}
 	state := &config.State{}
-	state.Put(config.Sandbox{Name: "bl-1", Agent: "claude", Running: true, TeamRevision: 1, Created: time.Now()})
+	state.Put(config.Sandbox{Name: "fenzi-1", Agent: "claude", Running: true, TeamRevision: 1, Created: time.Now()})
 	if err := dirs.SaveState(state); err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestHeartbeatOnEveryPass(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	want := `{"openshell_version":"0.1.2","driver":"docker","policy_revision":0,"approval_mode":"","sandboxes":[{"name":"bl-1","agent":"claude","revision":1,"running":true}],"notes":[]}`
+	want := `{"openshell_version":"0.1.2","driver":"docker","policy_revision":0,"approval_mode":"","sandboxes":[{"name":"fenzi-1","agent":"claude","revision":1,"running":true}],"notes":[]}`
 	if len(f.beats) != 2 || f.beats[0] != want {
 		t.Fatalf("beats %q", f.beats)
 	}
@@ -252,7 +252,7 @@ func TestUploadSplitsBatches(t *testing.T) {
 	base := time.Unix(1791059085, 0).UTC()
 	var recs []forward.Record
 	for i := range 1201 {
-		recs = append(recs, forward.Record{Time: base.Add(time.Duration(i) * time.Millisecond), Sandbox: "bl-1", Class: "Network Activity", Action: "Denied", Destination: "paste.example.net"})
+		recs = append(recs, forward.Record{Time: base.Add(time.Duration(i) * time.Millisecond), Sandbox: "fenzi-1", Class: "Network Activity", Action: "Denied", Destination: "paste.example.net"})
 	}
 	sp.add(recs)
 	if err := sp.save(); err != nil {
@@ -396,7 +396,7 @@ func TestLogWindowGap(t *testing.T) {
 }
 
 func TestLogFailureRecordsAGap(t *testing.T) {
-	gw := &fakeGW{logErr: errors.New("openshell logs bl-1: sandbox not found")}
+	gw := &fakeGW{logErr: errors.New("openshell logs fenzi-1: sandbox not found")}
 	f, opt := fakeFixture(t, gw)
 	rep, err := Pass(context.Background(), opt)
 	if err != nil {
@@ -426,7 +426,7 @@ func (f *fakeStream) ReadStream(_ context.Context, _, after string, _ int) (open
 // Messages recorded from the gateway's watch stream and the shorthand log,
 // OpenShell 0.1.2; the approval's host is replaced.
 const (
-	streamAllow    = "NET:OPEN [INFO] ALLOWED /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe(0) -> api.anthropic.com:443 [policy:_provider_bl_claude engine:opa]"
+	streamAllow    = "NET:OPEN [INFO] ALLOWED /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe(0) -> api.anthropic.com:443 [policy:_provider_fenzi_claude engine:opa]"
 	streamApproval = "CONFIG:APPROVED [INFO] chunk:fad7c2ed-3aca-4fb7-bb37-495820dd7562 approved on example.com:443 HEAD / by /usr/bin/curl"
 )
 
@@ -458,7 +458,7 @@ func TestStreamIsReadAfterItsCursor(t *testing.T) {
 		t.Fatalf("afters %q records %+v", st.afters, f.records)
 	}
 	cur, err := loadCursors(opt.Dirs)
-	if err != nil || cur.Stream["bl-1"] != "v1:s1:3" {
+	if err != nil || cur.Stream["fenzi-1"] != "v1:s1:3" {
 		t.Fatalf("cursor %+v %v", cur, err)
 	}
 }
@@ -467,8 +467,8 @@ func TestStreamGaps(t *testing.T) {
 	f, opt := fakeFixture(t, &fakeGW{})
 	at := time.Date(2026, 10, 3, 21, 46, 19, 0, time.UTC)
 	cur, _ := loadCursors(opt.Dirs)
-	cur.Stream["bl-1"] = "v1:old:7"
-	cur.Last["bl-1"] = at.Format(time.RFC3339Nano)
+	cur.Stream["fenzi-1"] = "v1:old:7"
+	cur.Last["fenzi-1"] = at.Format(time.RFC3339Nano)
 	if err := saveCursors(opt.Dirs, cur); err != nil {
 		t.Fatal(err)
 	}

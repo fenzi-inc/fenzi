@@ -248,13 +248,13 @@ const mcpPending = `Network Rules:  (version 1, 1 chunk)
 
 func TestApproveRefusesAnMCPRequest(t *testing.T) {
 	fakeRuntime(t, map[string]reply{
-		"sandbox list": {out: "bl-web-1a2b\n"},
+		"sandbox list": {out: "fenzi-web-1a2b\n"},
 		"rule get":     {out: mcpPending},
 	}, proverWithin)
 	repo := t.TempDir()
 	t.Chdir(repo)
-	seedState(t, config.Sandbox{Name: "bl-web-1a2b", Agent: "claude", Repo: repo, Created: time.Now(), Running: true})
-	out, code := runCLI(t, "", "approve", "3c58ba8c", "--sandbox", "bl-web-1a2b")
+	seedState(t, config.Sandbox{Name: "fenzi-web-1a2b", Agent: "claude", Repo: repo, Created: time.Now(), Running: true})
+	out, code := runCLI(t, "", "approve", "3c58ba8c", "--sandbox", "fenzi-web-1a2b")
 	if code == 0 || !strings.Contains(out, "OpenShell#4679") || !strings.Contains(out, "fenzi mcp add") {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}

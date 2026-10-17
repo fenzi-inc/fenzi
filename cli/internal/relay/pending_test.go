@@ -7,8 +7,8 @@ import (
 
 // Output of `rule get <name> --status pending`, OpenShell 0.1.2, recorded 16
 // October 2026 on a Claude Code sandbox after its requests were approved on
-// the machine. The sandbox name is replaced with bl-1.
-const noPending = "No network rules for sandbox 'bl-1'\n"
+// the machine. The sandbox name is replaced with fenzi-1.
+const noPending = "No network rules for sandbox 'fenzi-1'\n"
 
 // A block recorded from `rule get` on the same sandbox, 16 October 2026: the
 // request the agent filed through policy.local. It was listed as approved
@@ -34,7 +34,7 @@ func TestTheFullPendingListIsSentWithItsRuleNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := f.lists["bl-1"]
+	got := f.lists["fenzi-1"]
 	if f.puts != 1 || len(got) != 1 || rep.Requests != 1 {
 		t.Fatalf("puts %d lists %+v report %+v", f.puts, f.lists, rep)
 	}
@@ -44,12 +44,12 @@ func TestTheFullPendingListIsSentWithItsRuleNames(t *testing.T) {
 }
 
 func TestAnEmptyPendingListIsSent(t *testing.T) {
-	gw := &fakeGW{rules: []byte(noPending), listed: []string{"bl-1", "bl-2"}}
+	gw := &fakeGW{rules: []byte(noPending), listed: []string{"fenzi-1", "fenzi-2"}}
 	f, opt := fakeFixture(t, gw)
 	if _, err := Pass(context.Background(), opt); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"bl-1", "bl-2"} {
+	for _, name := range []string{"fenzi-1", "fenzi-2"} {
 		list, ok := f.lists[name]
 		if !ok || len(list) != 0 {
 			t.Errorf("%s: an empty list must be sent, got %+v (sent %v)", name, list, ok)
@@ -70,7 +70,7 @@ func TestUnreadablePendingOutputIsNotSentAsAFullList(t *testing.T) {
 }
 
 func TestAnOlderConsoleGetsTheOlderReport(t *testing.T) {
-	gw := &fakeGW{rules: []byte(onePending), listed: []string{"bl-1", "bl-2"}}
+	gw := &fakeGW{rules: []byte(onePending), listed: []string{"fenzi-1", "fenzi-2"}}
 	f, opt := fakeFixture(t, gw)
 	f.old = true
 	rep, err := Pass(context.Background(), opt)

@@ -79,13 +79,13 @@ func (g *fakeGW) GlobalSetting(context.Context, string) (string, error) {
 	return g.mode, g.modeErr
 }
 
-// Sandboxes lists bl-1 unless the test set listed; an empty list is a
+// Sandboxes lists fenzi-1 unless the test set listed; an empty list is a
 // gateway with no sandbox left.
 func (g *fakeGW) Sandboxes(context.Context) ([]string, error) {
 	if g.listed != nil {
 		return g.listed, nil
 	}
-	return []string{"bl-1"}, nil
+	return []string{"fenzi-1"}, nil
 }
 func (g *fakeGW) LogLines(context.Context, string, int) ([]byte, error) {
 	g.logCalls++

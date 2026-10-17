@@ -62,7 +62,7 @@ func TestPushForAnAgentOutsideTheBoundaryLoadsNothing(t *testing.T) {
 	if gw.set {
 		t.Fatal("loaded for an agent the boundary does not name")
 	}
-	if !strings.Contains(strings.Join(rep.Notes, "\n"), "bl-1: r2 not loaded, the team boundary does not name this agent: claude. It keeps r1.") {
+	if !strings.Contains(strings.Join(rep.Notes, "\n"), "fenzi-1: r2 not loaded, the team boundary does not name this agent: claude. It keeps r1.") {
 		t.Fatalf("notes %q", rep.Notes)
 	}
 }
@@ -90,7 +90,7 @@ func TestConsoleApprovalOutsideTheBoundaryIsNotApplied(t *testing.T) {
 	if gw.approveCalls != 0 || rep.Applied != 0 {
 		t.Fatalf("applied outside the boundary: calls %d report %+v", gw.approveCalls, rep)
 	}
-	if !strings.Contains(strings.Join(rep.Notes, "\n"), "bl-1 abcdef not approved here: paste.example.net:443 is outside the acme boundary in r2 (signed)") {
+	if !strings.Contains(strings.Join(rep.Notes, "\n"), "fenzi-1 abcdef not approved here: paste.example.net:443 is outside the acme boundary in r2 (signed)") {
 		t.Fatalf("notes %q", rep.Notes)
 	}
 

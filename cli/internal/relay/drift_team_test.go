@@ -41,7 +41,7 @@ func effectiveFor(t *testing.T, doc string) []byte {
 	return []byte(strings.TrimSuffix(string(b), "\n") + providerClaude)
 }
 
-// reported is the bl-1 entry of the last heartbeat the server stored.
+// reported is the fenzi-1 entry of the last heartbeat the server stored.
 func reported(t *testing.T, s *controlplane.Service) controlplane.MachineSandbox {
 	t.Helper()
 	machines, err := s.Machines("acme")
@@ -85,7 +85,7 @@ func TestComparedPolicyMismatchIsReported(t *testing.T) {
 		t.Fatalf("reported %+v", sb)
 	}
 	notes := strings.Join(rep.Notes, "\n")
-	if !strings.Contains(notes, "bl-1: the policy the runtime holds differs from r2 in network_policies") {
+	if !strings.Contains(notes, "fenzi-1: the policy the runtime holds differs from r2 in network_policies") {
 		t.Fatalf("notes %v", rep.Notes)
 	}
 	if strings.Contains(notes, "pypi.org") || strings.Contains(notes, "example.com") {
@@ -140,7 +140,7 @@ func TestCompareSkipsSandboxesOffTheTeamPolicy(t *testing.T) {
 	s, opt, gw := teamFixture(t)
 	gw.effective = effectiveFor(t, hostDoc)
 	state := &config.State{}
-	state.Put(config.Sandbox{Name: "bl-1", Agent: "claude", Running: true, Created: time.Now()})
+	state.Put(config.Sandbox{Name: "fenzi-1", Agent: "claude", Running: true, Created: time.Now()})
 	if err := opt.Dirs.SaveState(state); err != nil {
 		t.Fatal(err)
 	}

@@ -179,10 +179,10 @@ func TestPolicyCheckOnFreeHasNoTeamBoundary(t *testing.T) {
 // before OpenShell is asked. A listed host is approved as before.
 func TestApproveChecksTheTeamBoundary(t *testing.T) {
 	fakeRuntime(t, map[string]reply{"rule get": {out: mixedRules}}, proverWithin)
-	seedState(t, config.Sandbox{Name: "bl-web-1a2b", Agent: "claude", Repo: t.TempDir(), Created: time.Now(), Running: true})
+	seedState(t, config.Sandbox{Name: "fenzi-web-1a2b", Agent: "claude", Repo: t.TempDir(), Created: time.Now(), Running: true})
 	enrollWithBoundary(t, acmeBoundary)
 
-	out, code := runCLI(t, "", "approve", "59b83e6d", "--sandbox", "bl-web-1a2b")
+	out, code := runCLI(t, "", "approve", "59b83e6d", "--sandbox", "fenzi-web-1a2b")
 	if code != 1 || !strings.Contains(out, "github.com:443 is outside the acme boundary in r3 (signed)") {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
@@ -193,12 +193,12 @@ func TestApproveChecksTheTeamBoundary(t *testing.T) {
 	}
 
 	enrollWithBoundary(t, acmeBoundary+"  - host: github.com\n    access: read-only\n")
-	if out, code := runCLI(t, "", "approve", "59b83e6d", "--sandbox", "bl-web-1a2b"); code != 0 {
+	if out, code := runCLI(t, "", "approve", "59b83e6d", "--sandbox", "fenzi-web-1a2b"); code != 0 {
 		t.Fatalf("a listed host: exit %d:\n%s", code, out)
 	}
 	approved := false
 	for _, c := range runtimeCalls(t) {
-		approved = approved || strings.HasPrefix(c, "rule approve bl-web-1a2b --chunk-id 59b83e6d")
+		approved = approved || strings.HasPrefix(c, "rule approve fenzi-web-1a2b --chunk-id 59b83e6d")
 	}
 	if !approved {
 		t.Fatalf("not approved: %v", runtimeCalls(t))

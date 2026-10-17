@@ -99,10 +99,10 @@ func TestVersionRange(t *testing.T) {
 func TestCreateArgs(t *testing.T) {
 	f := &Fake{}
 	_, _ = Client{R: f}.SandboxCreate(context.Background(), CreateOptions{
-		Name: "n", From: "img:1", Policy: "p.yaml", Provider: "bl-claude",
+		Name: "n", From: "img:1", Policy: "p.yaml", Provider: "fenzi-claude",
 		Labels: map[string]string{"policy_rev": "r1", "fenzi": "1"},
 	})
-	want := "sandbox create --name n --from img:1 --policy p.yaml --provider bl-claude --label fenzi=1 --label policy_rev=r1 --approval-mode manual --no-auto-providers --detach --output json"
+	want := "sandbox create --name n --from img:1 --policy p.yaml --provider fenzi-claude --label fenzi=1 --label policy_rev=r1 --approval-mode manual --no-auto-providers --detach --output json"
 	if f.Calls[0] != want {
 		t.Errorf("got  %s\nwant %s", f.Calls[0], want)
 	}
@@ -112,9 +112,9 @@ func TestCreateArgs(t *testing.T) {
 func TestCreateArgsWithMCPProviders(t *testing.T) {
 	f := &Fake{}
 	_, _ = Client{R: f}.SandboxCreate(context.Background(), CreateOptions{
-		Name: "n", From: "img:1", Policy: "p.yaml", Provider: "bl-claude", Providers: []string{"fenzi-mcp-a", "fenzi-mcp-b"},
+		Name: "n", From: "img:1", Policy: "p.yaml", Provider: "fenzi-claude", Providers: []string{"fenzi-mcp-a", "fenzi-mcp-b"},
 	})
-	if !strings.Contains(f.Calls[0], "--provider bl-claude --provider fenzi-mcp-a --provider fenzi-mcp-b ") {
+	if !strings.Contains(f.Calls[0], "--provider fenzi-claude --provider fenzi-mcp-a --provider fenzi-mcp-b ") {
 		t.Errorf("got %s", f.Calls[0])
 	}
 }
@@ -122,11 +122,11 @@ func TestCreateArgsWithMCPProviders(t *testing.T) {
 // Sandboxes created before the rename from Boundlane carry boundlane=1.
 func TestSandboxesListsBothLabels(t *testing.T) {
 	f := &Fake{Replies: map[string]Reply{
-		"sandbox list --names --selector fenzi=1":     {Out: "bl-new-1a2b\n"},
-		"sandbox list --names --selector boundlane=1": {Out: "bl-old-3c4d\nbl-new-1a2b\n"},
+		"sandbox list --names --selector fenzi=1":     {Out: "fenzi-new-1a2b\n"},
+		"sandbox list --names --selector boundlane=1": {Out: "fenzi-old-3c4d\nfenzi-new-1a2b\n"},
 	}}
 	got, err := Client{R: f}.Sandboxes(context.Background())
-	if err != nil || strings.Join(got, " ") != "bl-new-1a2b bl-old-3c4d" {
+	if err != nil || strings.Join(got, " ") != "fenzi-new-1a2b fenzi-old-3c4d" {
 		t.Fatalf("%q %v", got, err)
 	}
 }
