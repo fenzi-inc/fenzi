@@ -118,8 +118,8 @@ func TestRunSequence(t *testing.T) {
 	want := []string{
 		"status --output json",
 		"settings get --global --json",
-		"profile import -f ",
 		"provider get bl-claude",
+		"profile import -f ",
 		"provider create --name bl-claude --type fenzi-claude-code --from-existing",
 		"sandbox create --name bl-test-0001 --from fenzi/claude:2.1.288 --policy ",
 		"sandbox get bl-test-0001 --policy-only",
@@ -318,11 +318,80 @@ func TestEffectivePolicyFailureDeletesSandbox(t *testing.T) {
 func TestMissingKey(t *testing.T) {
 	h := setup(t)
 	h.deps.Getenv = func(string) string { return "" }
+	h.opts.Agent.SignInNote = ""
 	if _, err := Run(context.Background(), h.deps, h.opts); err == nil || !strings.Contains(err.Error(), "ANTHROPIC_API_KEY") {
 		t.Fatalf("want a missing key error, got %v", err)
 	}
-	if h.called("provider create") || h.called("sandbox create") {
-		t.Errorf("nothing may be created without the key, got %v", h.os.Calls)
+	if h.called("provider create") || h.called("sandbox create") || len(h.images.built) > 0 {
+		t.Errorf("nothing may be built or created without the key, got %v", h.os.Calls)
+	}
+}
+
+func TestSignInWithoutKey(t *testing.T) {
+	h := setup(t)
+	h.deps.Getenv = func(string) string { return "" }
+	res, err := Run(context.Background(), h.deps, h.opts)
+	if err != nil {
+		t.Fatalf("claude signs in itself, so no key is needed: %v\n%s", err, h.out)
+	}
+	if h.called("profile import") || h.called("provider create") {
+		t.Errorf("a sandbox without a key needs no profile or provider, got %v", h.os.Calls)
+	}
+	var create string
+	for _, c := range h.os.Calls {
+		if strings.HasPrefix(c, "sandbox create") {
+			create = c
+		}
+	}
+	if create == "" || strings.Contains(create, "--provider") || !strings.Contains(create, "--no-auto-providers") {
+		t.Errorf("want a sandbox created with no provider and none picked automatically: %q", create)
+	}
+	if len(h.prover.Calls) != 2 {
+		t.Errorf("prover ran %d times, want 2 (compiled and effective)", len(h.prover.Calls))
+	}
+
+	// No provider adds the model API, so the policy holds it, for the
+	// agent's program only.
+	b, err := os.ReadFile(filepath.Join(h.deps.Dirs.Run("bl-test-0001"), "policy.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"model_api_anthropic_com:", "host: api.anthropic.com", "access: read-write"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("policy.yaml is missing %q:\n%s", want, b)
+		}
+	}
+
+	out := h.out.String()
+	if !strings.Contains(out, "none stored") || !strings.Contains(out, h.opts.Agent.SignInNote) || strings.Contains(out, h.opts.Agent.StartNote) {
+		t.Errorf("want the sign-in note instead of the key note:\n%s", out)
+	}
+	state, err := h.deps.Dirs.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sb, ok := state.Find(res.Sandbox)
+	if !ok || !sb.SignIn {
+		t.Errorf("the sandbox must be recorded as started without a key: %+v", sb)
+	}
+	a, err := AgentFor(sb)
+	if err != nil || !a.SignedIn {
+		t.Errorf("AgentFor must keep the sandbox's sign-in: %+v %v", a.SignedIn, err)
+	}
+}
+
+// A key in the environment still wins over signing in.
+func TestKeyInEnvironmentIsStillStored(t *testing.T) {
+	h := setup(t)
+	if _, err := Run(context.Background(), h.deps, h.opts); err != nil {
+		t.Fatal(err)
+	}
+	if !h.called("provider create --name bl-claude") {
+		t.Errorf("want the provider created from the key, got %v", h.os.Calls)
+	}
+	state, _ := h.deps.Dirs.LoadState()
+	if sb, _ := state.Find("bl-test-0001"); sb.SignIn {
+		t.Error("a sandbox with a key is not a sign-in sandbox")
 	}
 }
 

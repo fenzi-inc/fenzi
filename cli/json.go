@@ -57,6 +57,9 @@ type jsonAgent struct {
 	Status  string `json:"status"`
 	// Available is whether the agent can run: its provider profile is reviewed.
 	Available bool `json:"available"`
+	// SignIn is whether the agent can start with no key stored and sign in
+	// itself, as Claude Code does with a Claude subscription.
+	SignIn bool `json:"sign_in"`
 }
 
 type jsonSandbox struct {
@@ -109,6 +112,8 @@ type jsonKey struct {
 	Stored  bool   `json:"stored"`
 	// Available is false while the agent's provider profile is not reviewed.
 	Available bool `json:"available"`
+	// SignIn: with no key stored, the agent signs in itself when it starts.
+	SignIn bool `json:"sign_in"`
 }
 
 type jsonStatus struct {

@@ -169,7 +169,7 @@ func TestJSONAgents(t *testing.T) {
 	if strings.Join(names, " ") != "claude codex grok opencode" {
 		t.Fatalf("agents = %v", names)
 	}
-	if docs[0].Display != "Claude Code" || docs[0].KeyEnv != "ANTHROPIC_API_KEY" || docs[0].Version == "" || !docs[0].Available {
+	if docs[0].Display != "Claude Code" || docs[0].KeyEnv != "ANTHROPIC_API_KEY" || docs[0].Version == "" || !docs[0].Available || !docs[0].SignIn {
 		t.Errorf("claude = %+v", docs[0])
 	}
 }
@@ -352,10 +352,10 @@ func TestJSONKeyList(t *testing.T) {
 	if stderr, code := runJSON(t, &docs, "key", "list", "--json"); code != 0 || stderr != "" {
 		t.Fatalf("exit %d stderr %q", code, stderr)
 	}
-	if len(docs) != 4 || docs[0] != (jsonKey{Name: "claude", Display: "Claude Code", KeyEnv: "ANTHROPIC_API_KEY", Stored: true, Available: true}) {
+	if len(docs) != 4 || docs[0] != (jsonKey{Name: "claude", Display: "Claude Code", KeyEnv: "ANTHROPIC_API_KEY", Stored: true, Available: true, SignIn: true}) {
 		t.Errorf("keys = %+v", docs)
 	}
-	if docs[1].Name != "codex" || docs[1].Stored || !docs[1].Available {
+	if docs[1].Name != "codex" || docs[1].Stored || !docs[1].Available || docs[1].SignIn {
 		t.Errorf("codex = %+v", docs[1])
 	}
 }

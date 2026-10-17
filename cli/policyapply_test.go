@@ -128,6 +128,31 @@ func TestPolicyApplyLoadsAnAgentRuleChange(t *testing.T) {
 	}
 }
 
+// A sandbox started without a key holds the model API rule itself; a host
+// change loaded later must keep it, or the agent loses its model mid-session.
+func TestPolicyApplyKeepsTheModelRuleOfASignInSandbox(t *testing.T) {
+	repo, dirs := applyFixture(t, proverWithin)
+	s, err := dirs.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sb, _ := s.Find("bl-web-1a2b")
+	sb.SignIn = true
+	s.Put(sb)
+	if err := dirs.SaveState(s); err != nil {
+		t.Fatal(err)
+	}
+	writeProject(t, repo, "version: 1\nhosts:\n  - host: api.example.org\n    access: read-only\n")
+	out, code := runCLI(t, "", "policy", "apply")
+	if code != 0 || !called(t, "policy set bl-web-1a2b --policy ") {
+		t.Fatalf("exit %d calls %q\n%s", code, runtimeCalls(t), out)
+	}
+	pol, err := os.ReadFile(filepath.Join(dirs.Run("bl-web-1a2b"), "policy.yaml"))
+	if err != nil || !strings.Contains(string(pol), "api.example.org") || !strings.Contains(string(pol), "host: api.anthropic.com") {
+		t.Fatalf("run folder policy: %v\n%s", err, pol)
+	}
+}
+
 func TestPolicyApplyLeavesAPathChangeForTheNextRun(t *testing.T) {
 	repo, dirs := applyFixture(t, proverWithin)
 	writeProject(t, repo, "version: 1\npaths:\n  read_only: [/opt/data]\nhosts:\n  - host: api.example.org\n    access: read-only\n")

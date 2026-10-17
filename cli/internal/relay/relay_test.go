@@ -301,6 +301,28 @@ func TestPushNoteNamesTheTenant(t *testing.T) {
 	}
 }
 
+// A sandbox started without a key holds the model API rule itself, so a
+// team revision loaded into it must keep that rule.
+func TestPushKeepsTheModelRuleOfASignInSandbox(t *testing.T) {
+	_, opt, gw := teamFixture(t)
+	state, err := opt.Dirs.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sb, _ := state.Find("bl-1")
+	sb.SignIn = true
+	state.Put(sb)
+	if err := opt.Dirs.SaveState(state); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Pass(context.Background(), opt); err != nil {
+		t.Fatal(err)
+	}
+	if !gw.set || !strings.Contains(string(gw.policy), "host: api.anthropic.com") {
+		t.Fatalf("loaded policy:\n%s", gw.policy)
+	}
+}
+
 func TestPushIsProvedFirst(t *testing.T) {
 	_, opt, gw := teamFixture(t)
 	prover, calls := fakeProver(proverExceeds, 1)

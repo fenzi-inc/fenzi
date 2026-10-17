@@ -20,7 +20,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"fenzi/agents"
+	"fenzi/cli/internal/config"
 	"fenzi/cli/internal/run"
 	"fenzi/compiler"
 	"fenzi/teamapi"
@@ -93,7 +93,7 @@ func (p *pass) compare(ctx context.Context) error {
 		if doc == nil {
 			continue
 		}
-		c, ok := p.compareOne(ctx, sb.Name, sb.Agent, doc)
+		c, ok := p.compareOne(ctx, *sb, doc)
 		if !ok {
 			continue
 		}
@@ -142,8 +142,9 @@ func (p *pass) revisionDocument(ctx context.Context, n int, docs map[int]*compil
 
 // compareOne compiles doc for the agent and compares it with the policy the
 // runtime holds for the sandbox. ok is false when either could not be had.
-func (p *pass) compareOne(ctx context.Context, name, agent string, doc *compiler.Document) (policyCheck, bool) {
-	entry, err := agents.Get(agent)
+func (p *pass) compareOne(ctx context.Context, sb config.Sandbox, doc *compiler.Document) (policyCheck, bool) {
+	name := sb.Name
+	entry, err := run.AgentFor(sb)
 	if err != nil {
 		return policyCheck{}, false
 	}

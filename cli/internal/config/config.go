@@ -65,8 +65,11 @@ type State struct {
 }
 
 type Sandbox struct {
-	Name         string `json:"name"`
-	Agent        string `json:"agent"`
+	Name  string `json:"name"`
+	Agent string `json:"agent"`
+	// SignIn means the sandbox was started without a provider: the agent
+	// signs in itself, and its policy holds the model endpoints.
+	SignIn       bool   `json:"sign_in,omitempty"`
 	Repo         string `json:"repo"`
 	Revision     string `json:"policy_revision"`
 	TeamRevision int    `json:"team_revision,omitempty"`

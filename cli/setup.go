@@ -540,6 +540,19 @@ func setupKey(e env, u *tui.UI, a agents.Entry, back bool) error {
 				return storeKey(e, u, a, env)
 			}
 			first = false
+		} else if a.CanSignIn() {
+			i, err := u.Choose("How should "+a.Display+" reach its model?", []tui.Option{
+				{Label: "With an API key", Hint: "stored on this machine; the agent sees a placeholder"},
+				{Label: "With my subscription", Hint: a.Display + " asks you to sign in when it starts; the token stays in the sandbox"},
+			}, 0, back)
+			if err != nil {
+				return err
+			}
+			if i == 1 {
+				u.Done("Key", "none stored; "+a.Display+" signs in when it starts")
+				return nil
+			}
+			first = false
 		}
 		err := pasteKey(e, u, a, back || !first)
 		if errors.Is(err, tui.ErrBack) && !first {
@@ -556,7 +569,11 @@ func pasteKey(e env, u *tui.UI, a agents.Entry, back bool) error {
 			return err
 		}
 		if v == "" {
-			u.Note("Nothing was pasted. A subscription login does not work here; the agent needs an API key.")
+			if a.CanSignIn() && back {
+				u.Note("Nothing was pasted. Press Esc to go back and sign in with your subscription instead.")
+			} else {
+				u.Note("Nothing was pasted. A subscription login does not work here; the agent needs an API key.")
+			}
 			continue
 		}
 		if err := storeKey(e, u, a, v); err == nil {

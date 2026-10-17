@@ -15,7 +15,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"fenzi/agents"
 	"fenzi/cli/internal/config"
 	"fenzi/cli/internal/run"
 	"fenzi/cli/internal/team"
@@ -145,7 +144,7 @@ func cmdPolicyApply(e env, args []string) (int, error) {
 // refused change leaves the record of what the sandbox runs as it was. It
 // returns the line to show and the new local revision.
 func loadHosts(e env, dirs config.Dirs, sb config.Sandbox, next run.Resolved) (line, rev string, err error) {
-	entry, err := agents.Get(sb.Agent)
+	entry, err := run.AgentFor(sb)
 	if err != nil {
 		return "", "", err
 	}
@@ -198,7 +197,7 @@ func agentRulesChanged(next run.Resolved, sb config.Sandbox, runDir string) bool
 	if err != nil {
 		return false
 	}
-	entry, err := agents.Get(sb.Agent)
+	entry, err := run.AgentFor(sb)
 	if err != nil {
 		return false
 	}

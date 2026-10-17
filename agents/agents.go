@@ -48,6 +48,14 @@ type Entry struct {
 	DefaultFlags map[string]string `yaml:"default_flags"`
 	// StartNote is printed just before the agent starts.
 	StartNote string `yaml:"start_note"`
+	// SignInNote is set for an agent that can start with no key stored and
+	// sign in itself. run then creates the sandbox without a provider and
+	// prints this note instead of StartNote.
+	SignInNote string `yaml:"sign_in_note"`
+	// SignedIn is set by run for a sandbox started without a provider, never
+	// by the catalog. CompilerAgent then compiles the model endpoints into
+	// the policy, since no provider adds them.
+	SignedIn bool `yaml:"-"`
 	// GuideFlag is the agent's flag that appends text to its instructions.
 	// GuideConfig is the config key that does it, for agents that take
 	// `-c key=<TOML value>` instead. GuideFile is a path in the sandbox where
@@ -299,9 +307,12 @@ func (e Entry) Profile() ([]byte, error) {
 	return b, err
 }
 
+// CanSignIn reports whether the agent can start with no key stored.
+func (e Entry) CanSignIn() bool { return e.SignInNote != "" }
+
 // CompilerAgent is the part of the entry the policy compiler needs.
 func (e Entry) CompilerAgent() compiler.Agent {
-	a := compiler.Agent{Name: e.Name, Binaries: append([]string(nil), e.Binaries...)}
+	a := compiler.Agent{Name: e.Name, Binaries: append([]string(nil), e.Binaries...), ModelInPolicy: e.SignedIn}
 	for _, m := range e.Model {
 		a.Model = append(a.Model, compiler.ModelEndpoint{Host: m.Host, Port: m.Port, Protocol: m.Protocol, Access: m.Access, Enforcement: m.Enforcement})
 	}

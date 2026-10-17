@@ -259,7 +259,7 @@ func (p *pass) sync(ctx context.Context) error {
 		}
 		switch compiler.Effect(prev, next) {
 		case compiler.EffectNetwork:
-			note, loaded, how, err := push(ctx, opt, sb.Name, sb.Agent, sb.TeamRevision, resolved)
+			note, loaded, how, err := push(ctx, opt, *sb, sb.TeamRevision, resolved)
 			if err != nil {
 				return err
 			}
@@ -303,8 +303,9 @@ func (p *pass) sync(ctx context.Context) error {
 // keeps the revision it has, and the note says why. When the bundle carries
 // the team's boundary, the proof is against that boundary. how is what policy
 // list said after a load.
-func push(ctx context.Context, opt Option, name, agent string, have int, res run.Resolved) (note string, loaded bool, how run.LoadState, err error) {
-	entry, err := agents.Get(agent)
+func push(ctx context.Context, opt Option, sb config.Sandbox, have int, res run.Resolved) (note string, loaded bool, how run.LoadState, err error) {
+	name := sb.Name
+	entry, err := run.AgentFor(sb)
 	if err != nil {
 		return "", false, 0, err
 	}

@@ -148,6 +148,28 @@ const LogFile = "sandbox.log"
 // logLines is how many shorthand lines are saved when a run ends.
 const logLines = 100000
 
+// AgentFor returns the catalog entry of a sandbox's agent as the sandbox was
+// started, so a policy compiled for it again keeps the model endpoints of a
+// sandbox started without a provider.
+func AgentFor(sb config.Sandbox) (agents.Entry, error) {
+	e, err := agents.Get(sb.Agent)
+	if err != nil {
+		return agents.Entry{}, err
+	}
+	e.SignedIn = sb.SignIn
+	return e, nil
+}
+
+// ensureProfile imports the agent's reviewed provider profile, or updates it
+// when the catalog's copy changed.
+func ensureProfile(ctx context.Context, d Deps, a agents.Entry, profile []byte, runDir string) error {
+	pf := filepath.Join(runDir, "profile.yaml")
+	if err := os.WriteFile(pf, profile, 0o600); err != nil {
+		return err
+	}
+	return d.OpenShell.EnsureProfile(ctx, a.Key.ProfileType, pf)
+}
+
 // ProjectDir is where the project lives in the sandbox. An uploaded directory
 // lands as <workdir>/<basename>. HOME is the workdir, so agent config
 // such as ~/.claude stays outside the project and out of the diff.
@@ -180,13 +202,28 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		return res, fmt.Errorf("the gateway sets %s for every sandbox, and Fenzi needs true; run fenzi doctor --fix", strings.Join(keys, " and "))
 	}
 
-	// 2. Resolve the agent and its key.
+	// 2. Resolve the agent and its key. The gateway is the source of truth
+	// for a stored key, so a lost local state cannot skip or repeat it. With
+	// none stored or exported, an agent that signs in itself starts without
+	// a provider, and its model endpoints are compiled into the policy.
 	a := o.Agent
 	if a.Key.Env == "" {
 		return res, fmt.Errorf("%s: the catalog does not name a model key for this agent yet", a.Name)
 	}
 	if len(o.Profile) == 0 {
 		return res, fmt.Errorf("%s: %w", a.Name, agents.ErrNoProfile)
+	}
+	provider := ProviderName(a)
+	stored, err := d.OpenShell.ProviderExists(ctx, provider)
+	if err != nil {
+		return res, err
+	}
+	if !stored && d.Getenv(a.Key.Env) == "" {
+		if !a.CanSignIn() {
+			return res, fmt.Errorf("no key stored for %s; run fenzi key set %s, or export %s for this run. The key stays on this machine", a.Name, a.Name, a.Key.Env)
+		}
+		a.SignedIn = true
+		provider = ""
 	}
 
 	name := o.Name
@@ -258,26 +295,20 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 	}
 	say("image", "%s", a.Tag())
 
-	// 4. Ensure the reviewed profile and the provider. The gateway is the
-	// source of truth, so a lost local state cannot skip or repeat them. The
-	// key is read by openshell from this process's environment, once.
-	pf := filepath.Join(runDir, "profile.yaml")
-	if err := os.WriteFile(pf, o.Profile, 0o600); err != nil {
-		return res, err
-	}
-	if err := d.OpenShell.EnsureProfile(ctx, a.Key.ProfileType, pf); err != nil {
-		return res, err
-	}
-	provider := ProviderName(a)
-	exists, err := d.OpenShell.ProviderExists(ctx, provider)
-	if err != nil {
-		return res, err
-	}
-	if exists {
+	// 4. Ensure the reviewed profile and the provider. The key is read by
+	// openshell from this process's environment, once. A sandbox started
+	// without a key needs neither.
+	switch {
+	case a.SignedIn:
+		say("key", "none stored; %s signs in inside the sandbox", a.Display)
+	case stored:
+		if err := ensureProfile(ctx, d, a, o.Profile, runDir); err != nil {
+			return res, err
+		}
 		say("key", "%s, already stored on this machine", provider)
-	} else {
-		if d.Getenv(a.Key.Env) == "" {
-			return res, fmt.Errorf("no key stored for %s; run fenzi key set %s, or export %s for this run. The key stays on this machine", a.Name, a.Name, a.Key.Env)
+	default:
+		if err := ensureProfile(ctx, d, a, o.Profile, runDir); err != nil {
+			return res, err
 		}
 		if err := d.OpenShell.ProviderCreate(ctx, provider, a.Key.ProfileType); err != nil {
 			return res, err
@@ -310,7 +341,7 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		return res, err
 	}
 	say("sandbox", "%s, created", name)
-	sb := config.Sandbox{Name: name, Agent: a.Name, Repo: o.Repo, Revision: c.Revision, TeamRevision: o.Policy.TeamRevision, Created: d.Now(), Running: true}
+	sb := config.Sandbox{Name: name, Agent: a.Name, SignIn: a.SignedIn, Repo: o.Repo, Revision: c.Revision, TeamRevision: o.Policy.TeamRevision, Created: d.Now(), Running: true}
 	state.Put(sb)
 	_ = d.Dirs.SaveState(state)
 
@@ -387,8 +418,12 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		say("guide", "how to ask for access, added to the agent's instructions")
 	}
 	say("start", "%s", strings.Join(a.CommandLine(o.Args), " "))
-	if a.StartNote != "" {
-		say("note", "%s", a.StartNote)
+	note := a.StartNote
+	if a.SignedIn {
+		note = a.SignInNote
+	}
+	if note != "" {
+		say("note", "%s", note)
 	}
 	execErr := d.OpenShell.Exec(ctx, name, project, a.Env, a.Argv(o.Args)...)
 	if code := openshell.ExitCode(execErr); code >= 0 {

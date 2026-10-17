@@ -1413,7 +1413,7 @@ func cmdAgents(e env, args []string) (int, error) {
 		docs := make([]jsonAgent, 0, len(all))
 		for _, a := range all {
 			_, perr := a.Profile()
-			docs = append(docs, jsonAgent{Name: a.Name, Display: a.Display, Version: a.Version, KeyEnv: a.Key.Env, Status: a.Status, Available: perr == nil})
+			docs = append(docs, jsonAgent{Name: a.Name, Display: a.Display, Version: a.Version, KeyEnv: a.Key.Env, Status: a.Status, Available: perr == nil, SignIn: a.CanSignIn()})
 		}
 		return 0, writeJSON(e.stdout, docs)
 	}
@@ -1622,7 +1622,7 @@ func cmdKey(e env, args []string) (int, error) {
 		if *asJSON {
 			docs := make([]jsonKey, 0, len(all))
 			for _, a := range all {
-				k := jsonKey{Name: a.Name, Display: a.Display, KeyEnv: a.Key.Env}
+				k := jsonKey{Name: a.Name, Display: a.Display, KeyEnv: a.Key.Env, SignIn: a.CanSignIn()}
 				if _, err := a.Profile(); err == nil {
 					k.Available = true
 					if k.Stored, err = run.KeyStored(e.ctx, oc, a); err != nil {
@@ -1645,6 +1645,8 @@ func cmdKey(e env, args []string) (int, error) {
 			}
 			if ok {
 				u.Done(a.Display, a.Key.Env+" stored")
+			} else if a.CanSignIn() {
+				u.Skip(a.Display, "no key; signs in when it starts, or fenzi key set "+a.Name)
 			} else {
 				u.Skip(a.Display, "no key. fenzi key set "+a.Name)
 			}

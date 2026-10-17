@@ -37,6 +37,12 @@ func TestCatalog(t *testing.T) {
 			if _, err := compiler.Compile(policies.DeveloperDefault(), compiler.Target{Agent: e.CompilerAgent()}); err != nil {
 				t.Errorf("developer-default does not compile for %s: %v", e.Name, err)
 			}
+			if e.CanSignIn() {
+				e.SignedIn = true
+				if _, err := compiler.Compile(policies.DeveloperDefault(), compiler.Target{Agent: e.CompilerAgent()}); err != nil {
+					t.Errorf("developer-default does not compile for %s without a provider: %v", e.Name, err)
+				}
+			}
 		})
 	}
 }

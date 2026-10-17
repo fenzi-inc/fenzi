@@ -32,6 +32,11 @@ type Agent struct {
 	// provider adds them) but must be in the boundary, or the check of the
 	// effective policy fails.
 	Model []ModelEndpoint
+	// ModelInPolicy compiles the model endpoints into the candidate, for a
+	// sandbox started without a provider because the agent signs in itself.
+	// They take the same form the provider would add, so the boundary does
+	// not change, and no key is injected on them.
+	ModelInPolicy bool
 	// Hosts the agent cannot start without, such as a vendor's connectivity
 	// check. Compiled for the agent's binaries, in the candidate and so in the
 	// boundary. A host the document lists keeps the document's rule.
@@ -110,6 +115,11 @@ func Compile(doc *Document, t Target) (*Policy, error) {
 		}
 		p.NetworkPolicies[key] = NetworkRule{Name: h.Host, Endpoints: []Endpoint{ep}, Binaries: bins}
 	}
+	if t.Agent.ModelInPolicy {
+		if err := modelRules(p, t.Agent); err != nil {
+			return nil, err
+		}
+	}
 	for _, h := range t.Agent.Hosts {
 		port := h.Port
 		if port == 0 {
@@ -140,6 +150,10 @@ func Compile(doc *Document, t Target) (*Policy, error) {
 // document. A team can publish a boundary document of its own instead;
 // TeamBoundary compiles that one.
 func Boundary(doc *Document, t Target) (*Policy, error) {
+	// The boundary is the same with or without a provider: a provider adds
+	// the model endpoints to the effective policy, and ModelInPolicy compiles
+	// them into the candidate in the same form.
+	t.Agent.ModelInPolicy = false
 	p, err := Compile(doc, t)
 	if err != nil {
 		return nil, err
@@ -147,13 +161,25 @@ func Boundary(doc *Document, t Target) (*Policy, error) {
 	if p.NetworkPolicies == nil {
 		p.NetworkPolicies = map[string]NetworkRule{}
 	}
+	if err := modelRules(p, t.Agent); err != nil {
+		return nil, err
+	}
+	if len(p.NetworkPolicies) == 0 {
+		p.NetworkPolicies = nil
+	}
+	return p, nil
+}
+
+// modelRules adds one rule per model endpoint, in the form the provider
+// profile gives it, for the agent's binaries unless the endpoint names its own.
+func modelRules(p *Policy, a Agent) error {
 	listed := map[string]bool{}
 	for _, r := range p.NetworkPolicies {
 		for _, e := range r.Endpoints {
 			listed[fmt.Sprintf("%s:%d", e.Host, e.Port)] = true
 		}
 	}
-	for _, m := range t.Agent.Model {
+	for _, m := range a.Model {
 		port := m.Port
 		if port == 0 {
 			port = 443
@@ -161,22 +187,23 @@ func Boundary(doc *Document, t Target) (*Policy, error) {
 		if listed[fmt.Sprintf("%s:%d", m.Host, port)] {
 			// The prover returns unsupported when a host and port has both a
 			// REST endpoint and one without request rules.
-			return nil, fmt.Errorf("hosts: %s:%d is the %s model API; remove it from hosts, the provider adds it", m.Host, port, t.Agent.Name)
+			return fmt.Errorf("hosts: %s:%d is the %s model API; remove it from hosts, the agent gets it already", m.Host, port, a.Name)
 		}
 		bins := m.Binaries
 		if len(bins) == 0 {
-			bins = t.Agent.Binaries
+			bins = a.Binaries
 		}
-		p.NetworkPolicies["model_"+ruleKey(m.Host, port)] = NetworkRule{
+		key := "model_" + ruleKey(m.Host, port)
+		if _, dup := p.NetworkPolicies[key]; dup {
+			return fmt.Errorf("hosts: rule name %q collides with the %s model API", key, a.Name)
+		}
+		p.NetworkPolicies[key] = NetworkRule{
 			Name:      m.Host,
 			Endpoints: []Endpoint{{Host: m.Host, Port: port, Protocol: m.Protocol, Access: m.Access, Enforcement: m.Enforcement}},
 			Binaries:  binaries(bins),
 		}
 	}
-	if len(p.NetworkPolicies) == 0 {
-		p.NetworkPolicies = nil
-	}
-	return p, nil
+	return nil
 }
 
 // ErrNotInBoundary means the team boundary does not name the agent, so no
