@@ -31,7 +31,7 @@ func TestSetKeyCreatesThroughEnvironment(t *testing.T) {
 	if err != nil || replaced {
 		t.Fatalf("replaced %v, err %v", replaced, err)
 	}
-	if !strings.HasPrefix(f.Calls[len(f.Calls)-1], "provider create --name bl-claude --type fenzi-claude-code --from-existing") {
+	if !strings.HasPrefix(f.Calls[len(f.Calls)-1], "provider create --name fenzi-claude --type fenzi-claude-code --from-existing") {
 		t.Errorf("calls: %v", f.Calls)
 	}
 	for _, c := range f.Calls {
@@ -50,7 +50,7 @@ func TestSetKeyReplaces(t *testing.T) {
 	if err != nil || !replaced {
 		t.Fatalf("replaced %v, err %v", replaced, err)
 	}
-	if last := f.Calls[len(f.Calls)-1]; last != "provider update bl-claude --from-existing" {
+	if last := f.Calls[len(f.Calls)-1]; last != "provider update fenzi-claude --from-existing" {
 		t.Errorf("last call %q", last)
 	}
 }
@@ -100,21 +100,89 @@ func TestRemoveKeyIgnoresOtherAgentsSandboxes(t *testing.T) {
 	f, a := keyFake(t, true, "bl-web-4f2a\n")
 	dirs := stateWith(t, "bl-web-4f2a=codex", "bl-old-0000=claude")
 	removed, err := RemoveKey(context.Background(), openshell.Client{R: f}, dirs, a)
-	if err != nil || !removed || f.Calls[len(f.Calls)-1] != "provider delete bl-claude" {
+	if err != nil || !removed || !hasCall(f.Calls, "provider delete fenzi-claude") || !hasCall(f.Calls, "provider delete bl-claude") {
 		t.Errorf("removed %v, err %v, calls %v", removed, err, f.Calls)
 	}
 
 	// No sandbox at all.
 	f, a = keyFake(t, true, "")
 	removed, err = RemoveKey(context.Background(), openshell.Client{R: f}, stateWith(t), a)
-	if err != nil || !removed || f.Calls[len(f.Calls)-1] != "provider delete bl-claude" {
+	if err != nil || !removed || !hasCall(f.Calls, "provider delete fenzi-claude") {
 		t.Errorf("removed %v, err %v, calls %v", removed, err, f.Calls)
 	}
 
 	// No key stored: nothing to remove, and the gateway is not asked for sandboxes.
 	f, a = keyFake(t, false, "bl-web-4f2a\n")
 	removed, err = RemoveKey(context.Background(), openshell.Client{R: f}, stateWith(t, "bl-web-4f2a=claude"), a)
-	if err != nil || removed || len(f.Calls) != 1 {
+	if err != nil || removed || len(f.Calls) != 2 {
 		t.Errorf("removed %v, err %v, calls %v", removed, err, f.Calls)
+	}
+}
+
+// A local server's secret is stored like a key: through openshell's
+// environment, as a provider of an endpointless profile named for the
+// variable, which exposes the variable under its own name.
+func TestSetMCPSecretCreatesThroughEnvironment(t *testing.T) {
+	f, _ := keyFake(t, false, "")
+	replaced, err := SetMCPSecret(context.Background(), openshell.Client{R: f}, "DIGITALOCEAN_API_TOKEN", "dop_v1_not_a_real_one")
+	if err != nil || replaced {
+		t.Fatalf("replaced %v, err %v", replaced, err)
+	}
+	if !strings.HasPrefix(f.Calls[len(f.Calls)-1], "provider create --name fenzi-secret-digitalocean-api-token --type fenzi-secret-digitalocean-api-token --from-existing") {
+		t.Errorf("calls: %v", f.Calls)
+	}
+	for _, c := range f.Calls {
+		if strings.Contains(c, "dop_v1_") {
+			t.Fatalf("the value appeared in a command line: %s", c)
+		}
+	}
+	if len(f.Env) != 1 || f.Env[0] != "DIGITALOCEAN_API_TOKEN=dop_v1_not_a_real_one" {
+		t.Errorf("env = %v", f.Env)
+	}
+	prof := string(SecretProfile("DIGITALOCEAN_API_TOKEN"))
+	if !strings.Contains(prof, "id: fenzi-secret-digitalocean-api-token\n") || !strings.Contains(prof, "env_vars: [DIGITALOCEAN_API_TOKEN]") || strings.Contains(prof, "endpoints") {
+		t.Errorf("profile:\n%s", prof)
+	}
+	if _, err := SetMCPSecret(context.Background(), openshell.Client{R: f}, "DIGITALOCEAN_API_TOKEN", " "); err == nil {
+		t.Error("an empty value must be refused")
+	}
+}
+
+func hasCall(calls []string, want string) bool {
+	for _, c := range calls {
+		if c == want {
+			return true
+		}
+	}
+	return false
+}
+
+// Setting the key again moves one stored under the old name, bl-claude, to
+// fenzi-claude, and removes the old provider when no sandbox is running.
+func TestSetKeyMovesAKeyFromTheOldName(t *testing.T) {
+	a, err := agents.Get("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &openshell.Fake{Replies: map[string]openshell.Reply{
+		"provider get fenzi-claude": {Exit: 1},
+		"provider get bl-claude":    {},
+		"sandbox list":              {},
+	}}
+	replaced, err := SetKey(context.Background(), openshell.Client{R: f}, a, "sk-test")
+	if err != nil || !replaced {
+		t.Fatalf("replaced %v err %v", replaced, err)
+	}
+	if !hasCall(f.Calls, "provider create --name fenzi-claude --type fenzi-claude-code --from-existing") || !hasCall(f.Calls, "provider delete bl-claude") {
+		t.Errorf("calls %v", f.Calls)
+	}
+
+	f.Replies["sandbox list"] = openshell.Reply{Out: "bl-web-4f2a\n"}
+	f.Calls = nil
+	if _, err := SetKey(context.Background(), openshell.Client{R: f}, a, "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	if hasCall(f.Calls, "provider delete bl-claude") {
+		t.Error("the old provider must stay while a sandbox runs")
 	}
 }

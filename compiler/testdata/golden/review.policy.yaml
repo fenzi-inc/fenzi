@@ -29,6 +29,7 @@ network_policies:
         protocol: rest
         enforcement: enforce
         access: read-only
+        allow_encoded_slash: true
     binaries:
       - path: /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
   internal_example_com_8443:

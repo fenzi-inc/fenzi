@@ -2,7 +2,7 @@
 
 # Raise this for every release. The installer and `fenzi update` read
 # latest.txt, and a release that keeps the old number is never offered.
-VERSION ?= 0.1.25
+VERSION ?= 0.1.26
 
 build:
 	go build -trimpath -o bin/fenzi ./cli
@@ -18,14 +18,17 @@ golden:
 	go test ./compiler -update
 
 # Run the upstream prover on every golden policy against its boundary.
-# Needs openshell-prover; no gateway.
+# Needs openshell-prover; no gateway. Like run, it proves the files without
+# allow_encoded_slash, which prover 0.1.2 cannot read (Policy.ForProver).
 prove:
 	@command -v openshell-prover >/dev/null || { echo "openshell-prover is not installed"; exit 1; }
-	@fail=0; for p in compiler/testdata/golden/*.policy.yaml; do \
+	@tmp=$$(mktemp -d); fail=0; for p in compiler/testdata/golden/*.policy.yaml; do \
 		b=$${p%.policy.yaml}.boundary.yaml; \
+		grep -v 'allow_encoded_slash: true' "$$p" > "$$tmp/policy.yaml"; \
+		grep -v 'allow_encoded_slash: true' "$$b" > "$$tmp/boundary.yaml"; \
 		echo "== $$p"; \
-		openshell-prover check "$$p" --boundary "$$b" --output json || fail=1; \
-	done; exit $$fail
+		openshell-prover check "$$tmp/policy.yaml" --boundary "$$tmp/boundary.yaml" --output json || fail=1; \
+	done; rm -rf "$$tmp"; exit $$fail
 
 # Binaries the install script downloads. Checksums are sha256, two spaces, then the file name.
 dist:

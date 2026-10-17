@@ -30,7 +30,7 @@ func TestSecretsAreNamedBeforeAnythingIsCreated(t *testing.T) {
 	}
 	out := h.out.String()
 	warn := strings.Index(out, "1 file looks like a secret")
-	created := strings.Index(out, "bl-test-0001, created")
+	created := strings.Index(out, "fenzi-test-0001, created")
 	if asked != 1 || warn < 0 || created < 0 || warn > created {
 		t.Fatalf("asked %d times; warning at %d, create at %d:\n%s", asked, warn, created, out)
 	}

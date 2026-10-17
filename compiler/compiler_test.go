@@ -122,6 +122,13 @@ func TestCompileChoices(t *testing.T) {
 	}
 	for key, r := range p.NetworkPolicies {
 		for _, e := range r.Endpoints {
+			if e.AllowEncodedSlash != (e.Access != "" && len(e.Rules) == 0) {
+				t.Errorf("%s: allow_encoded_slash only on a preset endpoint, which allows every path", key)
+			}
+		}
+	}
+	for key, r := range p.ForProver().NetworkPolicies {
+		for _, e := range r.Endpoints {
 			if e.AllowEncodedSlash {
 				t.Errorf("%s: allow_encoded_slash makes prover 0.1.2 return unsupported", key)
 			}

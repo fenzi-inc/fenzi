@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -271,7 +270,7 @@ func cmdRun(e env, args []string) (int, error) {
 	keep := fs.Bool("keep", false, "keep the sandbox when the agent exits (the default)")
 	remove := fs.Bool("rm", false, "delete the sandbox when the agent exits, after the review of its changes")
 	fresh := fs.Bool("new", false, "start a new sandbox even when one for this folder and agent is still running")
-	name := fs.String("name", "", "sandbox name, at most 19 characters (default bl-<folder>-<id>)")
+	name := fs.String("name", "", "sandbox name, at most 19 characters (default fenzi-<folder>-<id>)")
 	policyFile := fs.String("policy", "", "policy file to use instead of ./fenzi.yaml")
 	noUpload := fs.Bool("no-upload", false, "start with an empty working folder")
 	allowSecrets := fs.Bool("allow-secrets", false, "copy files that look like secrets without asking; the warning is still printed")
@@ -1345,9 +1344,10 @@ func proveResolved(e env, resolved run.Resolved, entry agents.Entry, boundary st
 	}
 	if boundary == "" {
 		boundary = c.ProveBoundary
-	} else if raw, err := os.ReadFile(boundary); err == nil && bytes.Contains(raw, []byte("protocol: mcp")) {
-		// The prover cannot read MCP rules; CheckMCP covers them.
-		stripped, err := compiler.StripMCP(raw)
+	} else if raw, err := os.ReadFile(boundary); err == nil && compiler.UnprovableYAML(raw) {
+		// The prover cannot read MCP rules or secret bindings; CheckMCP
+		// covers them.
+		stripped, err := compiler.ForProverYAML(raw)
 		if err != nil {
 			return openshell.Result{}, err
 		}

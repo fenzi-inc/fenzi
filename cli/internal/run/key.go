@@ -12,12 +12,35 @@ import (
 	"fenzi/cli/internal/openshell"
 )
 
-// ProviderName is the OpenShell provider that holds an agent's key.
-func ProviderName(a agents.Entry) string { return "bl-" + a.Name }
+// ProviderName is the OpenShell provider that holds an agent's key:
+// fenzi-<agent>. Keys stored before the rename from Boundlane live under
+// LegacyProviderName and keep working until they are replaced.
+func ProviderName(a agents.Entry) string { return "fenzi-" + a.Name }
+
+// LegacyProviderName is bl-<agent>, the name before the rename. OpenShell
+// cannot rename a provider or read its value back, so Fenzi keeps using one
+// it finds and moves the key to the new name the next time it is set.
+func LegacyProviderName(a agents.Entry) string { return "bl-" + a.Name }
+
+// StoredProvider names the provider that holds the agent's key on this
+// gateway: the new name, else the old one, else "".
+func StoredProvider(ctx context.Context, oc openshell.Client, a agents.Entry) (string, error) {
+	for _, name := range []string{ProviderName(a), LegacyProviderName(a)} {
+		ok, err := oc.ProviderExists(ctx, name)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return name, nil
+		}
+	}
+	return "", nil
+}
 
 // KeyStored reports whether the gateway holds a key for the agent.
 func KeyStored(ctx context.Context, oc openshell.Client, a agents.Entry) (bool, error) {
-	return oc.ProviderExists(ctx, ProviderName(a))
+	name, err := StoredProvider(ctx, oc, a)
+	return name != "", err
 }
 
 // SetKey stores or replaces the agent's key in the gateway on this machine.
@@ -42,11 +65,22 @@ func SetKey(ctx context.Context, oc openshell.Client, a agents.Entry, value stri
 	if err := oc.EnsureProfile(ctx, a.Key.ProfileType, pf); err != nil {
 		return false, err
 	}
-	exists, err := KeyStored(ctx, oc, a)
+	stored, err := StoredProvider(ctx, oc, a)
 	if err != nil {
 		return false, err
 	}
-	return exists, oc.ProviderSetKey(ctx, ProviderName(a), a.Key.ProfileType, a.Key.Env, value, exists)
+	// The key goes under the new name. A key under the old one is replaced:
+	// the old provider is deleted once nothing running uses it.
+	exists := stored == ProviderName(a)
+	if err := oc.ProviderSetKey(ctx, ProviderName(a), a.Key.ProfileType, a.Key.Env, value, exists); err != nil {
+		return false, err
+	}
+	if stored == LegacyProviderName(a) {
+		if running, err := oc.Sandboxes(ctx); err == nil && len(running) == 0 {
+			_ = oc.ProviderDelete(ctx, LegacyProviderName(a))
+		}
+	}
+	return stored != "", nil
 }
 
 // RemoveKey deletes the agent's key from the gateway. It refuses while a
@@ -55,8 +89,8 @@ func SetKey(ctx context.Context, oc openshell.Client, a agents.Entry, value stri
 // running sandboxes come from the gateway; which agent each one runs comes
 // from the state Fenzi kept when it started them.
 func RemoveKey(ctx context.Context, oc openshell.Client, dirs config.Dirs, a agents.Entry) (bool, error) {
-	exists, err := KeyStored(ctx, oc, a)
-	if err != nil || !exists {
+	stored, err := StoredProvider(ctx, oc, a)
+	if err != nil || stored == "" {
 		return false, err
 	}
 	running, err := oc.Sandboxes(ctx)
@@ -66,7 +100,15 @@ func RemoveKey(ctx context.Context, oc openshell.Client, dirs config.Dirs, a age
 	if name := RunningWith(dirs, a, running); name != "" {
 		return false, fmt.Errorf("%s is running with the %s key; stop it first (fenzi stop %s)", name, a.Display, name)
 	}
-	return true, oc.ProviderDelete(ctx, ProviderName(a))
+	// Both names, so a key under the old one does not come back.
+	for _, name := range []string{ProviderName(a), LegacyProviderName(a)} {
+		if ok, err := oc.ProviderExists(ctx, name); err == nil && ok {
+			if err := oc.ProviderDelete(ctx, name); err != nil {
+				return false, err
+			}
+		}
+	}
+	return true, nil
 }
 
 // RunningWith names the first of the running sandboxes that the state says

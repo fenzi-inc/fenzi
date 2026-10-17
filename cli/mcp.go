@@ -4,7 +4,9 @@ package main
 // the mcp section of ./fenzi.yaml, or of ~/.config/fenzi/mcp.yaml for the
 // ones used in every project, or of the team's policy on a signed-in
 // machine. A remote server gets a rule the sandbox checks per tool; its
-// token is stored on this machine and never written to a file.
+// token is stored on this machine and never written to a file. A local
+// server lists the secrets it reads and the hosts it sends them to; each
+// secret is stored the same way, and the sandbox puts it on those hosts only.
 
 import (
 	"encoding/json"
@@ -13,6 +15,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -43,9 +46,10 @@ func cmdMCP(e env, args []string) (int, error) {
 		subHelp(e, "mcp", "The MCP servers every agent gets in this folder, from the mcp section of ./fenzi.yaml and of ~/.config/fenzi/mcp.yaml. The sandbox checks each call to a remote server against the tools listed for it, and a server's token stays outside the sandbox.", [][2]string{
 			{"mcp list", "The servers agents get here, and where each comes from"},
 			{"mcp add <name> <url> --tool <tool>", "Add a remote server and the tools agents may call; --all-tools for every tool"},
-			{"mcp add <name> -- <command>", "Add a local server, which runs inside the sandbox"},
+			{"mcp add <name> -- <command>", "Add a local server, which runs inside the sandbox; --secret <VAR> --host <host> for one that needs a secret"},
 			{"mcp remove <name>", "Remove a server"},
-			{"mcp token <name>", "Store or replace a server's token; it is hidden as you type"},
+			{"mcp token <name>", "Store or replace a server's token, or a local server's secret; it is hidden as you type"},
+			{"mcp token <name> --env <VAR>", "Store the secret a local server reads from VAR; every server that lists VAR shares it"},
 			{"mcp import", "Copy the servers in .mcp.json or .cursor/mcp.json into fenzi.yaml"},
 			{"mcp import --dry-run", "Show the servers an import would add, and write nothing; --json for a program"},
 		}, "--machine on add and remove edits ~/.config/fenzi/mcp.yaml instead of ./fenzi.yaml. A change applies to the next fenzi run: agents read their servers when they start.")
@@ -72,10 +76,23 @@ type jsonMCP struct {
 	Allow   []string `json:"allow"`
 	Deny    []string `json:"deny"`
 	Token   bool     `json:"token"`
+	// TokenHeader is set when the token goes in a header other than
+	// Authorization: Bearer.
+	TokenHeader string `json:"token_header,omitempty"`
 	// TokenStored is nil when the runtime could not be asked.
 	TokenStored *bool `json:"token_stored,omitempty"`
 	// Source is project, machine, project over machine, or team.
 	Source string `json:"source"`
+	// Secrets and Hosts are a local server's; see compiler.MCPServer.
+	Secrets []jsonMCPSecret `json:"secrets,omitempty"`
+	Hosts   []string        `json:"hosts,omitempty"`
+}
+
+// jsonMCPSecret is one secret a local server reads.
+type jsonMCPSecret struct {
+	Variable string `json:"variable"`
+	// Stored is nil when the runtime could not be asked.
+	Stored *bool `json:"stored,omitempty"`
 }
 
 func mcpList(e env, args []string) (int, error) {
@@ -109,7 +126,7 @@ func mcpList(e env, args []string) (int, error) {
 	docs := []jsonMCP{}
 	for _, n := range resolved.Doc.MCPNames() {
 		s := resolved.Doc.MCP[n]
-		d := jsonMCP{Name: n, URL: s.URL, Command: s.Command, Allow: nonNilStrings(s.Tools.Allow), Deny: nonNilStrings(s.Tools.Deny), Token: s.Token}
+		d := jsonMCP{Name: n, URL: s.URL, Command: s.Command, Allow: nonNilStrings(s.Tools.Allow), Deny: nonNilStrings(s.Tools.Deny), Token: s.Token, TokenHeader: s.TokenHeader}
 		_, inMachine := mcpOf(machine)[n]
 		_, inProject := mcpOf(project)[n]
 		switch {
@@ -127,6 +144,14 @@ func mcpList(e env, args []string) (int, error) {
 				d.TokenStored = &ok
 			}
 		}
+		for _, v := range s.Secrets {
+			sec := jsonMCPSecret{Variable: v}
+			if ok, err := oc.ProviderExists(e.ctx, compiler.SecretProvider(v)); err == nil {
+				sec.Stored = &ok
+			}
+			d.Secrets = append(d.Secrets, sec)
+		}
+		d.Hosts = s.Hosts
 		docs = append(docs, d)
 	}
 	if *asJSON {
@@ -157,9 +182,27 @@ func mcpList(e env, args []string) (int, error) {
 				u.Println("    " + u.Deny("no token stored. fenzi mcp token "+d.Name))
 			}
 		}
+		if len(d.Hosts) > 0 {
+			u.Println("    " + u.Dim("calls "+strings.Join(d.Hosts, ", ")))
+		}
+		for _, sec := range d.Secrets {
+			switch {
+			case sec.Stored == nil:
+				u.Println("    " + u.Dim(sec.Variable+": the runtime did not answer"))
+			case *sec.Stored:
+				u.Println("    " + u.Dim(sec.Variable+" stored on this machine; the server sees a placeholder, filled on "+strings.Join(d.Hosts, ", ")+" only"))
+			default:
+				u.Println("    " + u.Deny("no "+sec.Variable+" stored. fenzi mcp token "+d.Name+" --env "+sec.Variable))
+			}
+		}
 	}
 	u.Blank()
-	u.Note("Each remote server's calls are checked per tool by the sandbox, and recorded in fenzi log. Its rules are checked by Fenzi, not by the policy prover.")
+	if remoteMCP(resolved.Doc) > 0 {
+		u.Note("Each remote server's calls are checked per tool by the sandbox, and recorded in fenzi log. Its rules are checked by Fenzi, not by the policy prover.")
+	}
+	if len(resolved.Doc.Secrets()) > 0 {
+		u.Note("A local server's secret is a placeholder inside the sandbox. Any program the agent starts can send it to the hosts listed with it, and nowhere else.")
+	}
 	u.Blank()
 	return 0, nil
 }
@@ -213,7 +256,11 @@ func mcpAdd(e env, args []string) (int, error) {
 	fs.Var(&deny, "deny", "a tool agents may never call; repeat for more")
 	all := fs.Bool("all-tools", false, "allow every tool the server has, except --deny")
 	token := fs.Bool("token", false, "the server needs a token; store it with fenzi mcp token <name>")
+	tokenHeader := fs.String("token-header", "", "the header the server reads its token from, when it is not Authorization: Bearer; implies --token")
 	machine := fs.Bool("machine", false, "add it to ~/.config/fenzi/mcp.yaml, for every project")
+	var secrets, hosts stringList
+	fs.Var(&secrets, "secret", "a variable a local server reads that holds a secret; repeat for more")
+	fs.Var(&hosts, "host", "a host a local server calls, over HTTPS; repeat for more")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return 1, err
@@ -229,15 +276,22 @@ func mcpAdd(e env, args []string) (int, error) {
 		return 1, errors.New("name the server and its URL: fenzi mcp add linear https://mcp.linear.app/mcp --tool list_issues, or a local one: fenzi mcp add files -- npx -y @modelcontextprotocol/server-filesystem /sandbox")
 	}
 	name := pos[0]
-	s := compiler.MCPServer{Token: *token}
+	s := compiler.MCPServer{Token: *token || *tokenHeader != "", TokenHeader: *tokenHeader}
 	if local {
 		s.Command = pos[1:]
 		if len(tools) > 0 || len(deny) > 0 || *all {
 			return 1, errors.New("a local server is not checked per tool; drop --tool, --deny and --all-tools")
 		}
+		if s.Token {
+			return 1, errors.New("--token and --token-header are for a remote server; a local server's secret is --secret <VAR> --host <host>")
+		}
+		s.Secrets, s.Hosts = secrets, hosts
 	} else {
 		if len(pos) != 2 {
 			return 1, errors.New("a remote server takes one URL; put a local server's command after --")
+		}
+		if len(secrets) > 0 || len(hosts) > 0 {
+			return 1, errors.New("--secret and --host are for a local server; a remote server's token is --token")
 		}
 		s.URL = pos[1]
 		if *all {
@@ -271,7 +325,15 @@ func mcpAdd(e env, args []string) (int, error) {
 	if s.Remote() {
 		u.Note("The sandbox lets agents call " + mcpToolsLine(jsonMCP{URL: s.URL, Allow: s.Tools.Allow, Deny: s.Tools.Deny}) + " on " + s.URL + ", and nothing else there.")
 	} else {
-		u.Note("It runs inside the sandbox as a child of the agent, with the agent's limits. Hosts it calls need to be in the policy's hosts.")
+		u.Note("It runs inside the sandbox as a child of the agent, with the agent's limits.")
+		if len(s.Hosts) > 0 {
+			u.Note("The sandbox lets it call " + strings.Join(s.Hosts, ", ") + ". Other hosts it calls need to be in the policy's hosts.")
+		} else {
+			u.Note("Hosts it calls need --host, or the policy's hosts.")
+		}
+		for _, v := range s.Secrets {
+			u.Note("Store " + v + " with fenzi mcp token " + name + " --env " + v + ". The server sees a placeholder; the sandbox puts the value only on requests to " + strings.Join(s.Hosts, ", ") + ".")
+		}
 	}
 	if s.Token {
 		u.Note("Store its token with fenzi mcp token " + name + ". The agent sees a placeholder.")
@@ -315,6 +377,7 @@ func mcpRemove(e env, args []string) (int, error) {
 func mcpToken(e env, args []string) (int, error) {
 	fs := newFlags("mcp token", e.stderr)
 	remove := fs.Bool("remove", false, "forget the token")
+	variable := fs.String("env", "", "the variable a local server reads the secret from")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return 1, err
@@ -325,6 +388,22 @@ func mcpToken(e env, args []string) (int, error) {
 	name := pos[0]
 	if err := (&compiler.Document{Version: 1, MCP: map[string]compiler.MCPServer{name: {Command: []string{"x"}}}}).Validate(); err != nil {
 		return 1, fmt.Errorf("%q is not a server name", name)
+	}
+	here := mcpHere(e)
+	if *variable == "" {
+		if s, ok := here[name]; ok && !s.Remote() {
+			switch len(s.Secrets) {
+			case 0:
+				return 1, fmt.Errorf("%s is a local server and lists no secrets; add the variable it reads: fenzi mcp add %s --secret <VAR> --host <host> -- %s", name, name, strings.Join(s.Command, " "))
+			case 1:
+				*variable = s.Secrets[0]
+			default:
+				return 1, fmt.Errorf("%s reads %s; say which with --env", name, strings.Join(s.Secrets, " and "))
+			}
+		}
+	}
+	if *variable != "" {
+		return mcpSecret(e, here, name, *variable, *remove)
 	}
 	oc := client()
 	u := tui.New(e.stdin, e.stdout)
@@ -374,13 +453,113 @@ func mcpToken(e env, args []string) (int, error) {
 	return 0, nil
 }
 
+// mcpHere is the servers agents get in this folder, or none when the policy
+// here cannot be read.
+func mcpHere(e env) map[string]compiler.MCPServer {
+	repo, err := cwd()
+	if err != nil {
+		return nil
+	}
+	dirs, err := config.Default()
+	if err != nil {
+		return nil
+	}
+	resolved, err := resolvePolicy(e, dirs, repo, "")
+	if err != nil || resolved.Doc == nil {
+		return nil
+	}
+	return resolved.Doc.MCP
+}
+
+// mcpSecret stores, replaces, or removes the value of a local server's
+// secret. It is stored once per variable: every server that lists the
+// variable shares it.
+func mcpSecret(e env, here map[string]compiler.MCPServer, name, variable string, remove bool) (int, error) {
+	if err := compiler.CheckSecretName(variable); err != nil {
+		return 1, err
+	}
+	if s, ok := here[name]; ok && !slices.Contains(s.Secrets, variable) {
+		return 1, fmt.Errorf("%s does not list %s under secrets; add it with fenzi mcp add %s --secret %s --host <host> -- <command>", name, variable, name, variable)
+	}
+	var users, hosts []string
+	for _, n := range sortedMCP(here) {
+		s := here[n]
+		if slices.Contains(s.Secrets, variable) {
+			users = append(users, n)
+			for _, h := range s.Hosts {
+				if !slices.Contains(hosts, h) {
+					hosts = append(hosts, h)
+				}
+			}
+		}
+	}
+	slices.Sort(hosts)
+	oc := client()
+	u := tui.New(e.stdin, e.stdout)
+	if remove {
+		dirs, err := config.Default()
+		if err != nil {
+			return 1, err
+		}
+		removed, err := run.RemoveMCPSecret(e.ctx, oc, dirs, variable)
+		if err != nil {
+			return 1, err
+		}
+		u.Blank()
+		if removed {
+			u.Done("Removed", variable)
+		} else {
+			u.Skip("Nothing to remove", "no "+variable+" was stored")
+		}
+		u.Blank()
+		return 0, nil
+	}
+	var value string
+	var err error
+	if u.Interactive() {
+		u.Blank()
+		value, err = u.Secret("Paste the value of " + variable)
+		if errors.Is(err, tui.ErrCancelled) {
+			return 130, nil
+		}
+	} else {
+		value, err = readLine(e)
+	}
+	if err != nil {
+		return 1, err
+	}
+	replaced, err := run.SetMCPSecret(e.ctx, oc, variable, value)
+	if err != nil {
+		return 1, err
+	}
+	u.Blank()
+	if replaced {
+		u.Done("Replaced", variable)
+	} else {
+		u.Done("Stored", variable+", on this machine")
+	}
+	switch {
+	case len(users) == 0:
+		u.Note("No server here lists " + variable + " yet. A local server that lists it under secrets gets a placeholder, and the sandbox puts the value only on requests to the hosts that server lists.")
+	case len(users) <= 3:
+		u.Note("Used here by " + strings.Join(users, ", ") + ". The server sees a placeholder; the sandbox puts the value only on requests to " + strings.Join(hosts, ", ") + ".")
+	default:
+		u.Note(fmt.Sprintf("Used here by %s and %d other servers. Each sees a placeholder; the sandbox puts the value only on requests to %s.", users[0], len(users)-1, strings.Join(hosts, ", ")))
+	}
+	u.Blank()
+	return 0, nil
+}
+
 // jsonMCPImport is what mcp import --json prints, with or without --dry-run.
 type jsonMCPImport struct {
 	Sources []string          `json:"sources"`
 	Added   []jsonMCPImported `json:"added"`
 	Skipped []jsonMCPSkipped  `json:"skipped"`
-	// Tokens are the servers whose Authorization header was not copied.
+	// Tokens are the servers whose token header was not copied.
 	Tokens []string `json:"tokens"`
+	// Secrets are the variables imported local servers read, whose values
+	// were not copied, with the servers that read each.
+	Secrets []jsonMCPImportSecret `json:"secrets"`
 }
 
 type jsonMCPImported struct {
@@ -389,6 +568,14 @@ type jsonMCPImported struct {
 	Command []string `json:"command,omitempty"`
 	Allow   []string `json:"allow"`
 	Token   bool     `json:"token"`
+	Secrets []string `json:"secrets,omitempty"`
+	Hosts   []string `json:"hosts,omitempty"`
+}
+
+type jsonMCPImportSecret struct {
+	Variable string   `json:"variable"`
+	Servers  []string `json:"servers"`
+	Hosts    []string `json:"hosts"`
 }
 
 type jsonMCPSkipped struct {
@@ -420,7 +607,7 @@ func mcpImport(e env, args []string) (int, error) {
 			}
 		}
 	}
-	res := jsonMCPImport{Sources: nonNilStrings(sources), Added: []jsonMCPImported{}, Skipped: []jsonMCPSkipped{}, Tokens: []string{}}
+	res := jsonMCPImport{Sources: nonNilStrings(sources), Added: []jsonMCPImported{}, Skipped: []jsonMCPSkipped{}, Tokens: []string{}, Secrets: []jsonMCPImportSecret{}}
 	u := tui.New(e.stdin, e.stdout)
 	if len(sources) == 0 {
 		if *asJSON {
@@ -465,10 +652,11 @@ func mcpImport(e env, args []string) (int, error) {
 				continue
 			}
 			from[n] = src
-			res.Added = append(res.Added, jsonMCPImported{Name: n, URL: s.URL, Command: s.Command, Allow: nonNilStrings(s.Tools.Allow), Token: s.Token})
+			res.Added = append(res.Added, jsonMCPImported{Name: n, URL: s.URL, Command: s.Command, Allow: nonNilStrings(s.Tools.Allow), Token: s.Token, Secrets: s.Secrets, Hosts: s.Hosts})
 		}
 		res.Tokens = append(res.Tokens, needsToken...)
 	}
+	res.Secrets = importSecrets(res.Added)
 	if len(res.Added) > 0 {
 		if *dryRun {
 			_, err = f.checkMCP(false)
@@ -508,20 +696,75 @@ func mcpImport(e env, args []string) (int, error) {
 			u.Done(a.Name, where)
 			u.Println("    " + u.Dim(mcpToolsLine(jsonMCP{URL: a.URL, Allow: a.Allow})))
 		}
-		u.Note("fenzi mcp import adds these to fenzi.yaml, with every tool allowed on a remote server. Narrow each one afterwards: fenzi mcp add <name> <url> --tool <tool>.")
+		if remoteAdded(res.Added) {
+			u.Note("fenzi mcp import adds these to fenzi.yaml, with every tool allowed on a remote server. Narrow each one afterwards: fenzi mcp add <name> <url> --tool <tool>.")
+		}
 		for _, n := range res.Tokens {
-			u.Note("The " + n + " entry sends an Authorization header. It would not be copied; store the token with fenzi mcp token " + n + ".")
+			u.Note("The " + n + " entry sends a token in a header. It would not be copied; store the token with fenzi mcp token " + n + ".")
+		}
+		for _, sec := range res.Secrets {
+			u.Note(importSecretNote(sec, "would not be copied"))
 		}
 		u.Blank()
 		return 0, nil
 	}
 	u.Done("Imported", strings.Join(names, ", ")+" into fenzi.yaml")
-	u.Note("Remote servers came in with every tool allowed. Narrow each one to the tools agents need: fenzi mcp add <name> <url> --tool <tool>.")
+	if remoteAdded(res.Added) {
+		u.Note("Remote servers came in with every tool allowed. Narrow each one to the tools agents need: fenzi mcp add <name> <url> --tool <tool>.")
+	}
 	for _, n := range res.Tokens {
-		u.Note("The " + n + " entry sent an Authorization header. It was not copied; store the token with fenzi mcp token " + n + ".")
+		u.Note("The " + n + " entry sent a token in a header. It was not copied; store the token with fenzi mcp token " + n + ".")
+	}
+	for _, sec := range res.Secrets {
+		u.Note(importSecretNote(sec, "was not copied"))
 	}
 	u.Blank()
 	return 0, nil
+}
+
+func remoteAdded(added []jsonMCPImported) bool {
+	for _, a := range added {
+		if a.URL != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// importSecrets groups the imported local servers by the secrets they read.
+func importSecrets(added []jsonMCPImported) []jsonMCPImportSecret {
+	byVar := map[string]*jsonMCPImportSecret{}
+	var order []string
+	for _, a := range added {
+		for _, v := range a.Secrets {
+			s, ok := byVar[v]
+			if !ok {
+				s = &jsonMCPImportSecret{Variable: v, Servers: []string{}, Hosts: []string{}}
+				byVar[v] = s
+				order = append(order, v)
+			}
+			s.Servers = append(s.Servers, a.Name)
+			for _, h := range a.Hosts {
+				if !slices.Contains(s.Hosts, h) {
+					s.Hosts = append(s.Hosts, h)
+				}
+			}
+		}
+	}
+	slices.Sort(order)
+	out := []jsonMCPImportSecret{}
+	for _, v := range order {
+		out = append(out, *byVar[v])
+	}
+	return out
+}
+
+func importSecretNote(s jsonMCPImportSecret, copied string) string {
+	who := s.Servers[0] + " reads"
+	if len(s.Servers) > 1 {
+		who = fmt.Sprintf("%s and %d other servers read", s.Servers[0], len(s.Servers)-1)
+	}
+	return fmt.Sprintf("%s %s. Its value %s; store it once with fenzi mcp token %s --env %s. The sandbox puts it only on %s.", who, s.Variable, copied, s.Servers[0], s.Variable, strings.Join(s.Hosts, ", "))
 }
 
 // parseAgentMCP reads the mcpServers object Claude Code (.mcp.json) and
@@ -550,11 +793,24 @@ func parseAgentMCP(raw []byte) (map[string]compiler.MCPServer, []jsonMCPSkipped,
 		case s.URL != "":
 			m.URL = s.URL
 			m.Tools.Allow = []string{compiler.AllTools}
-			for k := range s.Headers {
-				if strings.EqualFold(k, "authorization") {
-					m.Token = true
-					tokens = append(tokens, n)
+			// A token goes in Authorization, or in another header whose name
+			// or value looks like a secret. One per server.
+			var carry []string
+			for _, k := range sortedKeys(s.Headers) {
+				if strings.EqualFold(k, "authorization") || compiler.SecretEnv(strings.ToUpper(strings.ReplaceAll(k, "-", "_")), s.Headers[k]) {
+					carry = append(carry, k)
 				}
+			}
+			if len(carry) > 1 {
+				skipped = append(skipped, jsonMCPSkipped{Name: n, Reason: "sends a secret in " + strings.Join(carry, " and ") + "; fenzi puts a server's token in one header"})
+				continue
+			}
+			if len(carry) == 1 {
+				m.Token = true
+				if !strings.EqualFold(carry[0], "authorization") {
+					m.TokenHeader = carry[0]
+				}
+				tokens = append(tokens, n)
 			}
 		case s.Command != "":
 			m.Command = append([]string{s.Command}, s.Args...)
@@ -571,8 +827,23 @@ func parseAgentMCP(raw []byte) (map[string]compiler.MCPServer, []jsonMCPSkipped,
 			}
 			if len(secrets) > 0 {
 				sort.Strings(secrets)
-				skipped = append(skipped, jsonMCPSkipped{Name: n, Reason: "Needs " + strings.Join(secrets, ", ") + ", a secret. A local server with a secret is not supported yet, and fenzi.yaml never holds one."})
-				continue
+				var unknown []string
+				for _, v := range secrets {
+					hosts, ok := knownSecretHosts[v]
+					if !ok {
+						unknown = append(unknown, v)
+					}
+					for _, h := range hosts {
+						if !slices.Contains(m.Hosts, h) {
+							m.Hosts = append(m.Hosts, h)
+						}
+					}
+				}
+				if len(unknown) > 0 {
+					skipped = append(skipped, jsonMCPSkipped{Name: n, Reason: "Needs " + strings.Join(unknown, ", ") + ", a secret, and fenzi does not know which hosts the server sends it to. Add it with fenzi mcp add " + n + " --secret " + unknown[0] + " --host <host> -- " + strings.Join(m.Command, " ") + "."})
+					continue
+				}
+				m.Secrets = secrets
 			}
 		default:
 			skipped = append(skipped, jsonMCPSkipped{Name: n, Reason: "has neither a url nor a command"})
@@ -587,6 +858,17 @@ func parseAgentMCP(raw []byte) (map[string]compiler.MCPServer, []jsonMCPSkipped,
 	sort.Strings(tokens)
 	sort.Slice(skipped, func(i, j int) bool { return skipped[i].Name < skipped[j].Name })
 	return out, skipped, tokens, nil
+}
+
+// knownSecretHosts are the hosts an imported server's secret is sent to,
+// for variables whose server was run through the sandbox. The value is
+// never copied; the host list fills the entry's hosts. DigitalOcean's
+// server (@digitalocean/mcp 1.5.1, --services droplets) called only
+// api.digitalocean.com through the sandbox on OpenShell 0.1.2. Its other
+// services may call more hosts; the sandbox refuses those, and fenzi log
+// shows them.
+var knownSecretHosts = map[string][]string{
+	"DIGITALOCEAN_API_TOKEN": {"api.digitalocean.com"},
 }
 
 // importName turns an agent's server name into one fenzi.yaml takes:
@@ -754,4 +1036,13 @@ func (p *projectFile) writeMCP(machine bool) error {
 		return os.WriteFile(p.path, out, 0o600)
 	}
 	return os.WriteFile(p.path, out, p.mode)
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

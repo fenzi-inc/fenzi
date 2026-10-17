@@ -219,10 +219,15 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 	if o.SignIn && !a.CanSignIn() {
 		return res, fmt.Errorf("%s does not sign in itself; it runs with a key (fenzi key set %s)", a.Display, a.Name)
 	}
-	provider := ProviderName(a)
-	stored, err := d.OpenShell.ProviderExists(ctx, provider)
+	// A key stored before the rename sits under bl-<agent>; it is used as
+	// it is until it is set again.
+	provider, err := StoredProvider(ctx, d.OpenShell, a)
 	if err != nil {
 		return res, err
+	}
+	stored := provider != ""
+	if !stored {
+		provider = ProviderName(a)
 	}
 	if o.SignIn {
 		a.SignedIn = true
@@ -280,7 +285,7 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		return res, err
 	}
 	if !o.NoUpload {
-		if found := base.Secrets(); len(found) > 0 {
+		if found := append(base.Secrets(), MCPConfigSecrets(o.Repo, base)...); len(found) > 0 {
 			warnSecrets(say, found)
 			if o.ConfirmSecrets != nil {
 				ok, err := o.ConfirmSecrets(found)
@@ -319,7 +324,11 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		if err := ensureProfile(ctx, d, a, o.Profile, runDir); err != nil {
 			return res, err
 		}
-		say("key", "%s, already stored on this machine", provider)
+		if provider == LegacyProviderName(a) {
+			say("key", "%s, already stored on this machine, under its name from before Fenzi; fenzi key set %s moves it to %s", provider, a.Name, ProviderName(a))
+		} else {
+			say("key", "%s, already stored on this machine", provider)
+		}
 	default:
 		if err := ensureProfile(ctx, d, a, o.Profile, runDir); err != nil {
 			return res, err
@@ -341,6 +350,9 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 			return res, err
 		}
 		say("mcp", "%s", mcpSummary(doc))
+		if len(doc.Secrets()) > 0 {
+			say("secrets", "%s; the agent sees placeholders, bindings checked by Fenzi, not by the prover", secretSummary(doc))
+		}
 	}
 	state, err := d.Dirs.LoadState()
 	if err != nil {
@@ -392,8 +404,8 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 	if err := os.WriteFile(effPath, eff, 0o600); err != nil {
 		return res, err
 	}
-	if bytes.Contains(eff, []byte("protocol: mcp")) {
-		stripped, err := compiler.StripMCP(eff)
+	if compiler.UnprovableYAML(eff) {
+		stripped, err := compiler.ForProverYAML(eff)
 		if err != nil {
 			return res, err
 		}
@@ -637,17 +649,18 @@ func markStopped(dirs config.Dirs, name string) {
 
 var unsafe = regexp.MustCompile(`[^a-z0-9-]+`)
 
-// SandboxName is bl-<folder>-<4 hex>, with the folder shortened to fit
-// openshell.MaxSandboxName.
+// SandboxName is fenzi-<folder>-<4 hex>, with the folder shortened to fit
+// openshell.MaxSandboxName. Sandboxes made before the rename keep their
+// bl- names.
 func SandboxName(repo string) string {
 	base := strings.Trim(unsafe.ReplaceAllString(strings.ToLower(filepath.Base(repo)), "-"), "-")
 	if base == "" {
 		base = "project"
 	}
-	if room := openshell.MaxSandboxName - len("bl--0000"); len(base) > room {
+	if room := openshell.MaxSandboxName - len("fenzi--0000"); len(base) > room {
 		base = strings.TrimRight(base[:room], "-")
 	}
 	b := make([]byte, 2)
 	_, _ = rand.Read(b)
-	return "bl-" + base + "-" + hex.EncodeToString(b)
+	return "fenzi-" + base + "-" + hex.EncodeToString(b)
 }

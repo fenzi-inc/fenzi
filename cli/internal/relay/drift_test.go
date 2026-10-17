@@ -25,7 +25,9 @@ const providerClaude = `
 // live OpenShell 0.1.2 sandbox, as `sandbox get --policy-only` printed it:
 // the compiled policy without its leading comment line and without a
 // trailing newline, with one added _provider_bl_claude entry under
-// network_policies. The rest is compiler/testdata/golden/default.policy.yaml
+// network_policies. allow_encoded_slash on the read-only rules is printed
+// right after access, as OpenShell 0.1.2 printed it on 17 October 2026.
+// The rest is compiler/testdata/golden/default.policy.yaml
 // as written; TestEffectiveFixtureIsTheGoldenPolicy keeps the two together.
 const effectiveDefault = `version: 1
 filesystem_policy:
@@ -57,6 +59,7 @@ network_policies:
         protocol: rest
         enforcement: enforce
         access: read-only
+        allow_encoded_slash: true
     binaries:
       - path: /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
   files_pythonhosted_org:
@@ -67,6 +70,7 @@ network_policies:
         protocol: rest
         enforcement: enforce
         access: read-only
+        allow_encoded_slash: true
     binaries:
       - path: /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
   pypi_org:
@@ -77,6 +81,7 @@ network_policies:
         protocol: rest
         enforcement: enforce
         access: read-only
+        allow_encoded_slash: true
     binaries:
       - path: /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
   registry_npmjs_org:
@@ -87,6 +92,7 @@ network_policies:
         protocol: rest
         enforcement: enforce
         access: read-only
+        allow_encoded_slash: true
     binaries:
       - path: /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe` + providerClaude
 

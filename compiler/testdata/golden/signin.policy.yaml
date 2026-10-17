@@ -29,6 +29,7 @@ network_policies:
         protocol: rest
         enforcement: enforce
         access: read-only
+        allow_encoded_slash: true
     binaries:
       - path: /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
   files_pythonhosted_org:
@@ -39,6 +40,7 @@ network_policies:
         protocol: rest
         enforcement: enforce
         access: read-only
+        allow_encoded_slash: true
     binaries:
       - path: /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
   model_api_anthropic_com:
@@ -59,6 +61,7 @@ network_policies:
         protocol: rest
         enforcement: enforce
         access: read-only
+        allow_encoded_slash: true
     binaries:
       - path: /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
   registry_npmjs_org:
@@ -69,5 +72,6 @@ network_policies:
         protocol: rest
         enforcement: enforce
         access: read-only
+        allow_encoded_slash: true
     binaries:
       - path: /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe

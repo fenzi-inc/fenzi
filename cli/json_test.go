@@ -347,7 +347,7 @@ func TestJSONLogFollow(t *testing.T) {
 }
 
 func TestJSONKeyList(t *testing.T) {
-	fakeRuntime(t, map[string]reply{"provider get bl-codex": {exit: 1}}, "")
+	fakeRuntime(t, map[string]reply{"provider get fenzi-codex": {exit: 1}, "provider get bl-codex": {exit: 1}}, "")
 	var docs []jsonKey
 	if stderr, code := runJSON(t, &docs, "key", "list", "--json"); code != 0 || stderr != "" {
 		t.Fatalf("exit %d stderr %q", code, stderr)

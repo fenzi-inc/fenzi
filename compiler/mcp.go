@@ -22,8 +22,19 @@ type MCPServer struct {
 	Env     map[string]string `yaml:"env,omitempty"`
 	// Token says a token for this server is stored on the machine, with
 	// fenzi mcp token <name>. The value never appears in the document.
-	Token bool     `yaml:"token,omitempty"`
-	Tools MCPTools `yaml:"tools,omitempty"`
+	Token bool `yaml:"token,omitempty"`
+	// TokenHeader is the header a remote server reads its token from, for a
+	// server that does not take Authorization: Bearer. The token goes in as
+	// it is, with no scheme.
+	TokenHeader string   `yaml:"token_header,omitempty"`
+	Tools       MCPTools `yaml:"tools,omitempty"`
+	// Secrets are the variables a local server reads that hold a
+	// credential, such as DIGITALOCEAN_API_TOKEN. Each is stored on the
+	// machine with fenzi mcp token --env; the agent and the server see a
+	// placeholder, and the sandbox puts the value only on requests to Hosts.
+	Secrets []string `yaml:"secrets,omitempty"`
+	// Hosts are the hosts a local server calls, over HTTPS on port 443.
+	Hosts []string `yaml:"hosts,omitempty"`
 }
 
 // MCPTools lists the tools a remote server's tools/call may name. "*" in
@@ -61,6 +72,11 @@ var (
 	secretValue = regexp.MustCompile(`^(dop_v1_|ghp_|gho_|ghs_|ghu_|github_pat_|glpat-|sk-|sk_live_|rk_live_|xox[abprs]-|AKIA|ASIA|AIza|lin_api_|ntn_|secret_|pat-|eyJ)`)
 	toolName    = regexp.MustCompile(`^[A-Za-z0-9_.:/-]{1,128}$`)
 	envName     = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+	headerName  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,63}$`)
+	// reservedEnv are names a secret cannot take: OpenShell keeps v<digits>_
+	// for its revision placeholders (provider profiles page), and FENZI_ and
+	// OPENSHELL_ belong to Fenzi and the sandbox.
+	reservedEnv = regexp.MustCompile(`^(v[0-9]+_|FENZI_|OPENSHELL_)`)
 )
 
 // MCPProvider is the name of the provider that holds a server's token, and
@@ -72,6 +88,14 @@ func MCPProvider(server string) string { return "fenzi-mcp-" + server }
 // sandbox replaces it with the token only on that server's endpoint.
 func MCPTokenEnv(server string) string {
 	return "FENZI_MCP_" + strings.ToUpper(strings.ReplaceAll(server, "-", "_")) + "_TOKEN"
+}
+
+// SecretProvider is the name of the provider that holds a local server's
+// secret, and of its profile. It is named for the variable, not the server,
+// so every server that reads the variable shares one stored value, and the
+// sandbox exposes the placeholder under the variable's own name.
+func SecretProvider(variable string) string {
+	return "fenzi-secret-" + strings.ToLower(strings.ReplaceAll(variable, "_", "-"))
 }
 
 // MCPRuleKey is the network policy key of a remote server's rule.
@@ -159,20 +183,39 @@ func (d *Document) validateMCP(hosts map[string]int) []string {
 				add("%s.env: %q is not a variable name", f, k)
 			}
 			if SecretEnv(k, s.Env[k]) {
-				add("%s.env.%s: looks like a secret. fenzi.yaml is a plain file that the repository and the sandbox can read, so it never holds one; a local server that needs a secret is not supported yet", f, k)
+				add("%s.env.%s: looks like a secret. fenzi.yaml is a plain file that the repository and the sandbox can read, so it never holds one; list %s under secrets and the hosts the server calls under hosts, then store the value with fenzi mcp token %s --env %s", f, k, k, name, k)
 			}
 		}
 		if !s.Remote() {
 			if s.Token {
-				add("%s.token: only for a server with a url", f)
+				add("%s.token: only for a server with a url; a local server lists its variables under secrets", f)
 			}
 			if len(s.Tools.Allow) > 0 || len(s.Tools.Deny) > 0 {
 				add("%s.tools: a local server is not checked per tool; its process is what the sandbox limits", f)
 			}
+			p = append(p, s.validateLocal(f)...)
 			continue
 		}
 		if len(s.Env) > 0 {
 			add("%s.env: only for a server with a command", f)
+		}
+		if len(s.Secrets) > 0 {
+			add("%s.secrets: only for a server with a command; a remote server's token is token: true", f)
+		}
+		if len(s.Hosts) > 0 {
+			add("%s.hosts: only for a server with a command; a remote server is reached at its url", f)
+		}
+		if h := s.TokenHeader; h != "" {
+			switch {
+			case !s.Token:
+				add("%s.token_header: only with token: true", f)
+			case !headerName.MatchString(h):
+				add("%s.token_header: %q is not a header name", f, h)
+			case strings.EqualFold(h, "authorization"):
+				add("%s.token_header: leave it out for Authorization: Bearer, the default", f)
+			case reservedHeaders[strings.ToLower(h)]:
+				add("%s.token_header: %s is set by the agent's MCP client", f, h)
+			}
 		}
 		ep, err := s.Endpoint()
 		if err != nil {
@@ -206,6 +249,85 @@ func (d *Document) validateMCP(hosts map[string]int) []string {
 				add("%s.tools.deny[%d]: %q is not a tool name", f, i, t)
 			}
 		}
+	}
+	if len(p) > 0 {
+		return p
+	}
+	// Local servers' hosts, once every remote server's host is known. A
+	// host is reached by every server that lists it, so it carries one
+	// secret at most: OpenShell binds one provider to an endpoint.
+	carries := map[string]string{}
+	by := map[string]string{}
+	for _, name := range d.MCPNames() {
+		s := d.MCP[name]
+		if s.Remote() {
+			continue
+		}
+		f := "mcp." + name
+		for _, h := range s.Hosts {
+			key := h + ":443"
+			if other, ok := seen[key]; ok {
+				add("%s.hosts: %s is the MCP server mcp.%s; a host and port carries one protocol", f, key, other)
+				continue
+			}
+			for _, v := range s.Secrets {
+				if prev, ok := carries[h]; ok && prev != v {
+					add("%s.hosts: %s would carry %s (mcp.%s) and %s; the sandbox puts one secret on a host", f, h, prev, by[h], v)
+					continue
+				}
+				carries[h], by[h] = v, name
+			}
+		}
+	}
+	return p
+}
+
+// CheckSecretName reports why a variable cannot be a local server's secret.
+func CheckSecretName(v string) error {
+	switch {
+	case !envName.MatchString(v):
+		return fmt.Errorf("%q is not a variable name; use capitals, digits, and underscores", v)
+	case reservedEnv.MatchString(v):
+		return fmt.Errorf("%s starts with a prefix the sandbox keeps for itself", v)
+	}
+	return nil
+}
+
+// reservedHeaders are headers an MCP client sets itself.
+var reservedHeaders = map[string]bool{
+	"host": true, "content-type": true, "content-length": true, "accept": true, "connection": true,
+	"cookie": true, "transfer-encoding": true, "mcp-protocol-version": true, "mcp-session-id": true,
+}
+
+// validateLocal checks a local server's secrets and hosts.
+func (s MCPServer) validateLocal(f string) []string {
+	var p []string
+	add := func(format string, args ...any) { p = append(p, fmt.Sprintf(format, args...)) }
+	seen := map[string]bool{}
+	for i, v := range s.Secrets {
+		if err := CheckSecretName(v); err != nil {
+			add("%s.secrets[%d]: %v", f, i, err)
+		}
+		switch {
+		case seen[v]:
+			add("%s.secrets[%d]: %s is listed twice", f, i, v)
+		}
+		if _, ok := s.Env[v]; ok {
+			add("%s.secrets[%d]: %s is also in env; a secret's value is stored with fenzi mcp token, not written here", f, i, v)
+		}
+		seen[v] = true
+	}
+	hosts := map[string]bool{}
+	for i, h := range s.Hosts {
+		if err := checkHost(h); err != nil {
+			add("%s.hosts[%d]: %v", f, i, err)
+		} else if hosts[h] {
+			add("%s.hosts[%d]: %s is listed twice", f, i, h)
+		}
+		hosts[h] = true
+	}
+	if len(s.Secrets) > 0 && len(s.Hosts) == 0 {
+		add("%s.hosts: list the hosts the server sends its secrets to; the sandbox puts %s on requests to those hosts only", f, strings.Join(s.Secrets, " and "))
 	}
 	return p
 }
@@ -256,6 +378,80 @@ func mcpRules(p *Policy, d *Document, bins []Binary) error {
 	return nil
 }
 
+// localHostRules adds a REST rule for each host a local server calls, for
+// the agent's binaries: the server is the agent's child, and OpenShell
+// matches a request by the program and its ancestors (recorded on
+// OpenShell 0.1.2: the server's node and Go processes matched a rule naming
+// only claude.exe). A host that
+// carries a secret binds that secret's provider with credential_binding, so
+// the proxy puts the value in place of the placeholder on that host only. A
+// host already in the policy keeps its rule and its access, and gets the
+// binding added.
+func localHostRules(p *Policy, d *Document, bins []Binary) {
+	carries := map[string]string{}
+	var hosts []string
+	for _, name := range d.MCPNames() {
+		s := d.MCP[name]
+		if s.Remote() {
+			continue
+		}
+		for _, h := range s.Hosts {
+			if _, ok := carries[h]; !ok {
+				hosts = append(hosts, h)
+				carries[h] = ""
+			}
+			if len(s.Secrets) > 0 {
+				carries[h] = s.Secrets[0]
+			}
+		}
+	}
+	sort.Strings(hosts)
+	for _, h := range hosts {
+		var bind *CredentialBinding
+		if v := carries[h]; v != "" {
+			bind = &CredentialBinding{Provider: SecretProvider(v)}
+		}
+		key := ruleKey(h, 443)
+		if r, ok := p.NetworkPolicies[key]; ok {
+			if bind == nil {
+				continue
+			}
+			eps := append([]Endpoint(nil), r.Endpoints...)
+			for i := range eps {
+				eps[i].CredentialBinding = bind
+			}
+			r.Endpoints = eps
+			p.NetworkPolicies[key] = r
+			continue
+		}
+		p.NetworkPolicies[key] = NetworkRule{
+			Name:      h,
+			Endpoints: []Endpoint{{Host: h, Port: 443, Protocol: "rest", Enforcement: "enforce", Access: AccessReadWrite, AllowEncodedSlash: true, CredentialBinding: bind}},
+			Binaries:  bins,
+		}
+	}
+}
+
+// Secrets returns the secret variables the document's local servers read,
+// sorted, each once.
+func (d *Document) Secrets() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range d.MCP {
+		if s.Remote() {
+			continue
+		}
+		for _, v := range s.Secrets {
+			if !seen[v] {
+				seen[v] = true
+				out = append(out, v)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // HasMCP reports whether the policy has a rule the prover cannot model.
 func (p *Policy) HasMCP() bool {
 	for _, r := range p.NetworkPolicies {
@@ -268,16 +464,44 @@ func (p *Policy) HasMCP() bool {
 	return false
 }
 
-// WithoutMCP is the policy as the prover sees it: openshell-prover 0.1.2
-// returns unsupported for any policy with a protocol: mcp rule, in the
-// candidate or the boundary. MCP rules are checked by CheckMCP instead.
-func (p *Policy) WithoutMCP() *Policy {
+// Unprovable reports whether the policy has something the prover cannot
+// model: an MCP rule, a credential binding on a REST rule, or
+// allow_encoded_slash.
+func (p *Policy) Unprovable() bool {
+	for _, r := range p.NetworkPolicies {
+		for _, e := range r.Endpoints {
+			if e.Protocol == "mcp" || e.CredentialBinding != nil || e.AllowEncodedSlash {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ForProver is the policy as the prover sees it. openshell-prover 0.1.2
+// returns unsupported for any policy with a protocol: mcp rule, and for a
+// REST rule with credential_binding ("uses authority outside the initial
+// model"), in the candidate or the boundary. MCP rules are left
+// out and checked by CheckMCP. A bound REST rule stays, without its binding:
+// the prover still checks its host, methods, and programs. The binding only
+// says where a stored secret may go, and CheckMCP holds a server's secrets
+// to the boundary's. allow_encoded_slash is left out too (unsupported since
+// 0.1.2): Compile sets it only on preset endpoints, which allow every path.
+func (p *Policy) ForProver() *Policy {
 	out := *p
 	out.NetworkPolicies = map[string]NetworkRule{}
 	for k, r := range p.NetworkPolicies {
-		if !hasMCPEndpoint(r.Endpoints) {
-			out.NetworkPolicies[k] = r
+		if hasMCPEndpoint(r.Endpoints) {
+			continue
 		}
+		eps := make([]Endpoint, len(r.Endpoints))
+		for i, e := range r.Endpoints {
+			e.CredentialBinding = nil
+			e.AllowEncodedSlash = false
+			eps[i] = e
+		}
+		r.Endpoints = eps
+		out.NetworkPolicies[k] = r
 	}
 	if len(out.NetworkPolicies) == 0 {
 		out.NetworkPolicies = nil
@@ -294,10 +518,18 @@ func hasMCPEndpoint(eps []Endpoint) bool {
 	return false
 }
 
-// StripMCP removes the network rules with an MCP endpoint from a policy as
-// OpenShell prints it (sandbox get --policy-only), for the prover. Other
-// keys are kept as they are.
-func StripMCP(policyYAML []byte) ([]byte, error) {
+// UnprovableYAML reports whether a policy as OpenShell prints it has a rule
+// ForProverYAML changes.
+func UnprovableYAML(policyYAML []byte) bool {
+	return bytes.Contains(policyYAML, []byte("protocol: mcp")) || bytes.Contains(policyYAML, []byte("credential_binding")) ||
+		bytes.Contains(policyYAML, []byte("allow_encoded_slash"))
+}
+
+// ForProverYAML is ForProver for a policy as OpenShell prints it (sandbox
+// get --policy-only): it removes the network rules with an MCP endpoint, and
+// the credential_binding and allow_encoded_slash of every other endpoint. Other keys are kept as
+// they are.
+func ForProverYAML(policyYAML []byte) ([]byte, error) {
 	var doc map[string]any
 	if err := yaml.Unmarshal(policyYAML, &doc); err != nil {
 		return nil, fmt.Errorf("reading the policy: %w", err)
@@ -310,6 +542,12 @@ func StripMCP(policyYAML []byte) ([]byte, error) {
 				if em, _ := e.(map[string]any); em != nil && em["protocol"] == "mcp" {
 					delete(np, k)
 					break
+				}
+			}
+			for _, e := range eps {
+				if em, _ := e.(map[string]any); em != nil {
+					delete(em, "credential_binding")
+					delete(em, "allow_encoded_slash")
 				}
 			}
 		}
@@ -333,7 +571,8 @@ func StripMCP(policyYAML []byte) ([]byte, error) {
 // check the prover cannot do. A remote server must be one the boundary
 // lists, at the same URL; it may allow only tools the boundary allows and
 // must deny every tool the boundary denies. A local server must be in the
-// boundary with the same command.
+// boundary with the same command, and may list only secrets and hosts the
+// boundary's entry lists.
 func CheckMCP(doc, boundary *Document) error {
 	return checkMCP(doc, boundary, "the team", "team boundary: ")
 }
@@ -357,6 +596,16 @@ func checkMCP(doc, boundary *Document, owner, pre string) error {
 			continue
 		}
 		if !s.Remote() {
+			for _, v := range s.Secrets {
+				if !contains(b.Secrets, v) {
+					p = append(p, fmt.Sprintf("%s.secrets: %s is not a secret "+owner+" gives this server", f, v))
+				}
+			}
+			for _, h := range s.Hosts {
+				if !contains(b.Hosts, h) {
+					p = append(p, fmt.Sprintf("%s.hosts: %s is not a host "+owner+" lets this server call", f, h))
+				}
+			}
 			continue
 		}
 		if s.Tools.AllowsAll() && !b.Tools.AllowsAll() {
@@ -410,9 +659,9 @@ func firstNonEmpty(s ...string) string {
 	return ""
 }
 
-// checkMCPHosts refuses a remote server on a host the agent already reaches:
-// its model endpoint or a host it needs to start. One host and port carries
-// one protocol.
+// checkMCPHosts refuses a server on a host the agent already reaches: its
+// model endpoint or a host it needs to start. One host and port carries one
+// protocol, and a server's secret must not reach the agent's own hosts.
 func checkMCPHosts(d *Document, a Agent) error {
 	taken := map[string]string{}
 	for _, m := range a.Model {
@@ -433,6 +682,11 @@ func checkMCPHosts(d *Document, a Agent) error {
 	for _, name := range d.MCPNames() {
 		s := d.MCP[name]
 		if !s.Remote() {
+			for _, h := range s.Hosts {
+				if what, ok := taken[h+":443"]; ok {
+					p = append(p, fmt.Sprintf("mcp.%s.hosts: %s is %s; a server cannot share it", name, h, what))
+				}
+			}
 			continue
 		}
 		ep, err := s.Endpoint()
@@ -492,8 +746,9 @@ func sameMCP(a, b map[string]MCPServer) bool {
 	}
 	for n, x := range a {
 		y, ok := b[n]
-		if !ok || x.URL != y.URL || x.Token != y.Token || !sameOrder(x.Command, y.Command) ||
-			!sameStrings(x.Tools.Allow, y.Tools.Allow) || !sameStrings(x.Tools.Deny, y.Tools.Deny) || len(x.Env) != len(y.Env) {
+		if !ok || x.URL != y.URL || x.Token != y.Token || x.TokenHeader != y.TokenHeader || !sameOrder(x.Command, y.Command) ||
+			!sameStrings(x.Tools.Allow, y.Tools.Allow) || !sameStrings(x.Tools.Deny, y.Tools.Deny) || len(x.Env) != len(y.Env) ||
+			!sameStrings(x.Secrets, y.Secrets) || !sameStrings(x.Hosts, y.Hosts) {
 			return false
 		}
 		for k, v := range x.Env {

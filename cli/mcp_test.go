@@ -285,14 +285,21 @@ func TestMCPImportNeverWritesASecret(t *testing.T) {
 	if stderr, code := runJSON(t, &preview, "mcp", "import", "--dry-run", "--json"); code != 0 {
 		t.Fatalf("exit %d %s", code, stderr)
 	}
-	if len(preview.Added) != 1 || preview.Added[0].Name != "digitalocean-docs" {
-		t.Errorf("added %+v", preview.Added)
+	if len(preview.Added) != 2 || preview.Added[0].Name != "digitalocean-docs" || preview.Added[1].Name != "digitalocean-genai-inferencerouter" {
+		t.Fatalf("added %+v", preview.Added)
+	}
+	do := preview.Added[1]
+	if strings.Join(do.Secrets, ",") != "DIGITALOCEAN_API_TOKEN" || strings.Join(do.Hosts, ",") != "api.digitalocean.com" {
+		t.Errorf("the secret comes in by name, with the host it goes to: %+v", do)
+	}
+	if len(preview.Secrets) != 1 || preview.Secrets[0].Variable != "DIGITALOCEAN_API_TOKEN" || strings.Join(preview.Secrets[0].Servers, ",") != "digitalocean-genai-inferencerouter" {
+		t.Errorf("secrets %+v", preview.Secrets)
 	}
 	reasons := map[string]string{}
 	for _, s := range preview.Skipped {
 		reasons[s.Name] = s.Reason
 	}
-	if !strings.Contains(reasons["digitalocean-genai-inferencerouter"], "Needs DIGITALOCEAN_API_TOKEN, a secret") || !strings.Contains(reasons["some-tool-v2"], "Needs MODE, a secret") {
+	if !strings.Contains(reasons["some-tool-v2"], "Needs MODE, a secret, and fenzi does not know which hosts") || !strings.Contains(reasons["some-tool-v2"], "fenzi mcp add some-tool-v2 --secret MODE --host <host> -- uvx some-tool") {
 		t.Errorf("skipped %+v", preview.Skipped)
 	}
 	if _, err := os.Stat(filepath.Join(repo, "fenzi.yaml")); err == nil {
@@ -307,8 +314,67 @@ func TestMCPImportNeverWritesASecret(t *testing.T) {
 	if strings.Contains(string(raw), "dop_v1_") || strings.Contains(out, "dop_v1_") {
 		t.Fatalf("the token reached fenzi.yaml or the output:\n%s\n%s", raw, out)
 	}
-	if !strings.Contains(string(raw), "LOG_LEVEL: warn") || !strings.Contains(out, "a secret") {
-		t.Errorf("fenzi.yaml:\n%s\noutput:\n%s", raw, out)
+	written, err := compiler.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "LOG_LEVEL: warn") || strings.Join(written.MCP["digitalocean-genai-inferencerouter"].Secrets, ",") != "DIGITALOCEAN_API_TOKEN" {
+		t.Errorf("fenzi.yaml:\n%s", raw)
+	}
+	out = strings.Join(strings.Fields(out), " ")
+	if strings.Contains(out, "Remote servers came in") {
+		t.Errorf("no remote server was imported:\n%s", out)
+	}
+	if !strings.Contains(out, "fenzi mcp token digitalocean-genai-inferencerouter --env DIGITALOCEAN_API_TOKEN") || !strings.Contains(out, "only on api.digitalocean.com") {
+		t.Errorf("output:\n%s", out)
+	}
+}
+
+// A local server with a secret: add it with --secret and --host, store the
+// value through openshell's environment, and list it as stored.
+func TestMCPLocalServerSecret(t *testing.T) {
+	fakeRuntime(t, map[string]reply{
+		"provider get fenzi-secret-digitalocean-api-token": {exit: 1},
+		"provider get": {exit: 1},
+	}, proverWithin)
+	repo := t.TempDir()
+	t.Chdir(repo)
+	if out, code := runCLI(t, "", "mcp", "add", "droplets", "--secret", "DIGITALOCEAN_API_TOKEN", "--host", "api.digitalocean.com", "--", "npx", "-y", "@digitalocean/mcp", "--services", "droplets"); code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "fenzi mcp token droplets --env DIGITALOCEAN_API_TOKEN") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	raw, _ := os.ReadFile(filepath.Join(repo, "fenzi.yaml"))
+	doc, err := compiler.Parse(raw)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, raw)
+	}
+	if d := doc.MCP["droplets"]; strings.Join(d.Secrets, ",") != "DIGITALOCEAN_API_TOKEN" || strings.Join(d.Hosts, ",") != "api.digitalocean.com" {
+		t.Errorf("droplets %+v", d)
+	}
+	var list []jsonMCP
+	if stderr, code := runJSON(t, &list, "mcp", "list", "--json"); code != 0 {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	if len(list) != 1 || len(list[0].Secrets) != 1 || list[0].Secrets[0].Variable != "DIGITALOCEAN_API_TOKEN" || list[0].Secrets[0].Stored == nil || *list[0].Secrets[0].Stored || strings.Join(list[0].Hosts, ",") != "api.digitalocean.com" {
+		t.Errorf("list %+v", list)
+	}
+
+	// No --env: the server lists one secret, so that is the one stored.
+	out, code := runCLI(t, "dop_v1_not_a_real_value\n", "mcp", "token", "droplets")
+	if code != 0 || !strings.Contains(out, "Stored") || !strings.Contains(strings.Join(strings.Fields(out), " "), "only on requests to api.digitalocean.com") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	calls, _ := os.ReadFile(runtimeLog)
+	if !strings.Contains(string(calls), "provider create --name fenzi-secret-digitalocean-api-token --type fenzi-secret-digitalocean-api-token --from-existing") {
+		t.Errorf("calls:\n%s", calls)
+	}
+	if strings.Contains(string(calls), "dop_v1_") || strings.Contains(out, "dop_v1_") {
+		t.Fatal("the value reached a command line or the output")
+	}
+	if out, code := runCLI(t, "x\n", "mcp", "token", "droplets", "--env", "OTHER_TOKEN"); code == 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "does not list OTHER_TOKEN") {
+		t.Errorf("a variable the server does not read: exit %d\n%s", code, out)
+	}
+	if out, code := runCLI(t, "", "mcp", "add", "linear", "https://mcp.linear.app/mcp", "--all-tools", "--secret", "X_TOKEN"); code == 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), "--secret and --host are for a local server") {
+		t.Errorf("a remote server with --secret: exit %d\n%s", code, out)
 	}
 }
 

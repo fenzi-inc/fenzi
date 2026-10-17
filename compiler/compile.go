@@ -101,14 +101,20 @@ func Compile(doc *Document, t Target) (*Policy, error) {
 		switch h.Access {
 		case AccessReadOnly:
 			ep.Access = AccessReadOnly
+			ep.AllowEncodedSlash = true
 		case AccessReadWrite:
 			for _, line := range h.Allow {
 				m, path, _ := parseAllow(line)
 				ep.Rules = append(ep.Rules, Rule{Allow: Match{Method: m, Path: path}})
 			}
 		}
-		// No allow_encoded_slash: prover 0.1.2 returns unsupported for it, and
-		// the read-only preset already allows npm's @scope%2fname paths.
+		// allow_encoded_slash on the read-only preset only. OpenShell 0.1.2
+		// refuses an encoded slash by default, and npm asks for a scoped
+		// package as /@scope%2fname, so npx could not install one. The
+		// preset allows every path, so the flag reaches no path the rule
+		// would refuse. An endpoint with METHOD /path rules keeps refusing
+		// it. Prover 0.1.2 returns unsupported for the flag, so ForProver
+		// leaves it out.
 		key := ruleKey(h.Host, h.Port)
 		if _, dup := p.NetworkPolicies[key]; dup {
 			return nil, fmt.Errorf("hosts %s:%d: rule name %q collides with another host", h.Host, h.Port, key)
@@ -132,6 +138,7 @@ func Compile(doc *Document, t Target) (*Policy, error) {
 		ep := Endpoint{Host: h.Host, Port: port, Protocol: "rest", Enforcement: "enforce"}
 		if len(h.Allow) == 0 {
 			ep.Access = AccessReadOnly
+			ep.AllowEncodedSlash = true
 		}
 		for _, line := range h.Allow {
 			m, path, _ := parseAllow(line)
@@ -145,6 +152,7 @@ func Compile(doc *Document, t Target) (*Policy, error) {
 	if err := mcpRules(p, d, bins); err != nil {
 		return nil, err
 	}
+	localHostRules(p, d, bins)
 	if len(p.NetworkPolicies) == 0 {
 		p.NetworkPolicies = nil
 	}

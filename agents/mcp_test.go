@@ -141,3 +141,109 @@ func TestEveryAgentTakesMCP(t *testing.T) {
 		}
 	}
 }
+
+func secretDoc(t *testing.T) *compiler.Document {
+	t.Helper()
+	d, err := compiler.Parse([]byte(`version: 1
+mcp:
+  droplets:
+    command: [npx, -y, "@digitalocean/mcp", --services, droplets]
+    env: {LOG_LEVEL: warn}
+    secrets: [DIGITALOCEAN_API_TOKEN]
+    hosts: [api.digitalocean.com]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// A secret reaches a local server under its own name, as a reference the
+// agent fills from its environment, where the sandbox put the placeholder.
+// Claude Code expands ${VAR} in env (seen in a sandbox); Codex passes only
+// the variables env_vars names; OpenCode fills {env:VAR} and Grok ${VAR}
+// (seen in plain Docker).
+func TestWithMCPSecrets(t *testing.T) {
+	d := secretDoc(t)
+	claude, _ := Get("claude")
+	_, files, err := claude.WithMCP(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		MCPServers map[string]struct {
+			Env map[string]string `json:"env"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(files[0].Content), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if env := cfg.MCPServers["droplets"].Env; env["DIGITALOCEAN_API_TOKEN"] != "${DIGITALOCEAN_API_TOKEN}" || env["LOG_LEVEL"] != "warn" {
+		t.Errorf("claude env %v", env)
+	}
+	if d.MCP["droplets"].Env["DIGITALOCEAN_API_TOKEN"] != "" {
+		t.Error("WithMCP changed the document")
+	}
+
+	codex, _ := Get("codex")
+	cx, _, err := codex.WithMCP(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if argv := strings.Join(cx.Argv(nil), "\n"); !strings.Contains(argv, `mcp_servers.droplets.env_vars=["DIGITALOCEAN_API_TOKEN"]`) || strings.Contains(argv, "${DIGITALOCEAN_API_TOKEN}") {
+		t.Errorf("codex argv:\n%s", argv)
+	}
+
+	opencode, _ := Get("opencode")
+	oc, _, err := opencode.WithMCP(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg := oc.Env["OPENCODE_CONFIG_CONTENT"]; !strings.Contains(cfg, `"DIGITALOCEAN_API_TOKEN":"{env:DIGITALOCEAN_API_TOKEN}"`) || !strings.Contains(cfg, `"LOG_LEVEL":"warn"`) {
+		t.Errorf("opencode config %s", cfg)
+	}
+	grok, _ := Get("grok")
+	_, files, err = grok.WithMCP(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(files[0].Content, "[mcp_servers.droplets.env]\nDIGITALOCEAN_API_TOKEN = \"${DIGITALOCEAN_API_TOKEN}\"\nLOG_LEVEL = \"warn\"\n") {
+		t.Errorf("grok config:\n%s", files[0].Content)
+	}
+	if _, _, err := (Entry{Name: "x", Display: "X", MCPFormat: "other"}).WithMCP(d); err == nil || !strings.Contains(err.Error(), "not checked yet") {
+		t.Errorf("a format not checked with secrets must refuse: %v", err)
+	}
+	if _, _, err := (Entry{Name: "x", Display: "X", MCPFormat: MCPClaudeJSON, Key: Key{Env: "DIGITALOCEAN_API_TOKEN"}}).WithMCP(d); err == nil || !strings.Contains(err.Error(), "is the X key") {
+		t.Errorf("a secret named like the agent's key: %v", err)
+	}
+}
+
+// A remote server that reads its token from another header gets the
+// placeholder there, as it is.
+func TestWithMCPTokenHeader(t *testing.T) {
+	d, err := compiler.Parse([]byte("version: 1\nmcp:\n  ctx:\n    url: https://mcp.example.com/mcp\n    token: true\n    token_header: X-API-Key\n    tools: {allow: [\"*\"]}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := compiler.MCPTokenEnv("ctx")
+	claude, _ := Get("claude")
+	_, files, err := claude.WithMCP(d)
+	if err != nil || !strings.Contains(files[0].Content, `"X-API-Key": "${`+v+`}"`) || strings.Contains(files[0].Content, "Bearer") {
+		t.Errorf("claude %v\n%s", err, files[0].Content)
+	}
+	codex, _ := Get("codex")
+	cx, _, _ := codex.WithMCP(d)
+	if argv := strings.Join(cx.Argv(nil), "\n"); !strings.Contains(argv, `mcp_servers.ctx.env_http_headers={"X-API-Key" = "`+v+`"}`) || strings.Contains(argv, "bearer_token_env_var") {
+		t.Errorf("codex argv:\n%s", argv)
+	}
+	opencode, _ := Get("opencode")
+	oc, _, _ := opencode.WithMCP(d)
+	if !strings.Contains(oc.Env["OPENCODE_CONFIG_CONTENT"], `"X-API-Key":"{env:`+v+`}"`) {
+		t.Errorf("opencode %s", oc.Env["OPENCODE_CONFIG_CONTENT"])
+	}
+	grok, _ := Get("grok")
+	_, files, _ = grok.WithMCP(d)
+	if !strings.Contains(files[0].Content, "[mcp_servers.ctx.headers]\nX-API-Key = \"${"+v+"}\"\n") {
+		t.Errorf("grok:\n%s", files[0].Content)
+	}
+}

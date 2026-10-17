@@ -95,7 +95,7 @@ func setup(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.opts = Options{Agent: claude, Profile: profile, Args: []string{"--model", "x"}, Repo: repo, Policy: res, Name: "bl-test-0001"}
+	h.opts = Options{Agent: claude, Profile: profile, Args: []string{"--model", "x"}, Repo: repo, Policy: res, Name: "fenzi-test-0001"}
 	return h
 }
 
@@ -119,19 +119,20 @@ func TestRunSequence(t *testing.T) {
 	want := []string{
 		"status --output json",
 		"settings get --global --json",
+		"provider get fenzi-claude",
 		"provider get bl-claude",
 		"profile import -f ",
-		"provider create --name bl-claude --type fenzi-claude-code --from-existing",
-		"sandbox create --name bl-test-0001 --from fenzi/claude:2.1.288 --policy ",
-		"sandbox get bl-test-0001 --policy-only",
-		"settings set bl-test-0001 --key ocsf_json_enabled --value true",
-		"settings set bl-test-0001 --key agent_policy_proposals_enabled --value true",
-		"sandbox upload bl-test-0001 " + h.opts.Repo,
-		"logs bl-test-0001 --source sandbox -n 1000",
-		"sandbox exec -n bl-test-0001 --tty --workdir " + project + " --env CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 -- claude --permission-mode manual --append-system-prompt " + agents.Guide + " --model x",
-		"logs bl-test-0001 --source sandbox -n 100000",
-		"sandbox download bl-test-0001 " + project + " ",
-		"sandbox delete bl-test-0001",
+		"provider create --name fenzi-claude --type fenzi-claude-code --from-existing",
+		"sandbox create --name fenzi-test-0001 --from fenzi/claude:2.1.288 --policy ",
+		"sandbox get fenzi-test-0001 --policy-only",
+		"settings set fenzi-test-0001 --key ocsf_json_enabled --value true",
+		"settings set fenzi-test-0001 --key agent_policy_proposals_enabled --value true",
+		"sandbox upload fenzi-test-0001 " + h.opts.Repo,
+		"logs fenzi-test-0001 --source sandbox -n 1000",
+		"sandbox exec -n fenzi-test-0001 --tty --workdir " + project + " --env CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 -- claude --permission-mode manual --append-system-prompt " + agents.Guide + " --model x",
+		"logs fenzi-test-0001 --source sandbox -n 100000",
+		"sandbox download fenzi-test-0001 " + project + " ",
+		"sandbox delete fenzi-test-0001",
 	}
 	// The log is polled until it stops growing; count that as one step.
 	var calls []string
@@ -149,8 +150,8 @@ func TestRunSequence(t *testing.T) {
 			t.Errorf("call %d:\n got  %s\n want %s...", i, calls[i], w)
 		}
 	}
-	create := calls[5]
-	for _, frag := range []string{"--provider bl-claude", "--label fenzi=1", "--label policy_rev=local-", "--approval-mode manual", "--no-auto-providers", "--detach"} {
+	create := calls[6]
+	for _, frag := range []string{"--provider fenzi-claude", "--label fenzi=1", "--label policy_rev=local-", "--approval-mode manual", "--no-auto-providers", "--detach"} {
 		if !strings.Contains(create, frag) {
 			t.Errorf("sandbox create is missing %q: %s", frag, create)
 		}
@@ -162,7 +163,7 @@ func TestRunSequence(t *testing.T) {
 	if len(h.prover.Calls) != 2 {
 		t.Errorf("prover ran %d times, want 2 (compiled and effective)", len(h.prover.Calls))
 	}
-	saved, err := LoadResolved(h.deps.Dirs.Run("bl-test-0001"))
+	saved, err := LoadResolved(h.deps.Dirs.Run("fenzi-test-0001"))
 	if err != nil {
 		t.Fatalf("the document the sandbox started with was not saved: %v", err)
 	}
@@ -198,10 +199,10 @@ func TestGatewayWideSettingIsNotSetAgain(t *testing.T) {
 	if _, err := Run(context.Background(), h.deps, h.opts); err != nil {
 		t.Fatalf("%v\n%s", err, h.out)
 	}
-	if h.called("settings set bl-test-0001 --key agent_policy_proposals_enabled") {
+	if h.called("settings set fenzi-test-0001 --key agent_policy_proposals_enabled") {
 		t.Error("the gateway refuses a per-sandbox value for a key it manages globally")
 	}
-	if !h.called("settings set bl-test-0001 --key ocsf_json_enabled") {
+	if !h.called("settings set fenzi-test-0001 --key ocsf_json_enabled") {
 		t.Error("keys the gateway leaves unset are still set per sandbox")
 	}
 }
@@ -297,7 +298,7 @@ func TestMissingCoverageFailsClosed(t *testing.T) {
 
 func TestEffectivePolicyFailureDeletesSandbox(t *testing.T) {
 	h := setup(t)
-	h.os.Replies["sandbox get bl-test-0001 --policy-only"] = openshell.Reply{Out: "version: 1\n"}
+	h.os.Replies["sandbox get fenzi-test-0001 --policy-only"] = openshell.Reply{Out: "version: 1\n"}
 	// Second prover call (effective policy) fails.
 	orig := h.deps.Prover
 	h.deps.Prover = openshell.Prover{R: &switchRunner{first: orig.R, then: &openshell.Fake{Replies: map[string]openshell.Reply{
@@ -308,7 +309,7 @@ func TestEffectivePolicyFailureDeletesSandbox(t *testing.T) {
 	if !errors.As(err, &pe) || pe.Stage != "effective policy with provider rules" {
 		t.Fatalf("want effective-policy PolicyError, got %v", err)
 	}
-	if !h.called("sandbox delete bl-test-0001") {
+	if !h.called("sandbox delete fenzi-test-0001") {
 		t.Error("sandbox must be deleted when its effective policy fails the check")
 	}
 	if h.called("sandbox upload") || h.called("sandbox exec") {
@@ -396,7 +397,7 @@ func TestSignInWithoutKey(t *testing.T) {
 
 	// No provider adds the model API, so the policy holds it, for the
 	// agent's program only.
-	b, err := os.ReadFile(filepath.Join(h.deps.Dirs.Run("bl-test-0001"), "policy.yaml"))
+	b, err := os.ReadFile(filepath.Join(h.deps.Dirs.Run("fenzi-test-0001"), "policy.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,11 +431,11 @@ func TestKeyInEnvironmentIsStillStored(t *testing.T) {
 	if _, err := Run(context.Background(), h.deps, h.opts); err != nil {
 		t.Fatal(err)
 	}
-	if !h.called("provider create --name bl-claude") {
+	if !h.called("provider create --name fenzi-claude") {
 		t.Errorf("want the provider created from the key, got %v", h.os.Calls)
 	}
 	state, _ := h.deps.Dirs.LoadState()
-	if sb, _ := state.Find("bl-test-0001"); sb.SignIn {
+	if sb, _ := state.Find("fenzi-test-0001"); sb.SignIn {
 		t.Error("a sandbox with a key is not a sign-in sandbox")
 	}
 }
@@ -465,7 +466,7 @@ func TestNoUploadCreatesProjectDir(t *testing.T) {
 	if _, err := Run(context.Background(), h.deps, h.opts); err != nil {
 		t.Fatal(err)
 	}
-	if h.called("sandbox upload") || !h.called("sandbox exec -n bl-test-0001 --no-login-shell -- mkdir -p /sandbox/") {
+	if h.called("sandbox upload") || !h.called("sandbox exec -n fenzi-test-0001 --no-login-shell -- mkdir -p /sandbox/") {
 		t.Errorf("calls: %v", h.os.Calls)
 	}
 }
@@ -490,7 +491,7 @@ func TestLogIsSavedOnceSettled(t *testing.T) {
 	if _, err := Run(context.Background(), h.deps, h.opts); err != nil {
 		t.Fatal(err)
 	}
-	b, err := os.ReadFile(filepath.Join(h.deps.Dirs.Run("bl-test-0001"), LogFile))
+	b, err := os.ReadFile(filepath.Join(h.deps.Dirs.Run("fenzi-test-0001"), LogFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -513,7 +514,7 @@ func TestAgentStartsAfterSettingsLoad(t *testing.T) {
 	}
 	execAt, loadedAt := -1, -1
 	for i, c := range h.os.Calls {
-		if strings.HasPrefix(c, "sandbox exec -n bl-test-0001 --tty") {
+		if strings.HasPrefix(c, "sandbox exec -n fenzi-test-0001 --tty") {
 			execAt = i
 		}
 	}
@@ -536,7 +537,7 @@ func TestStopStagesThenDeletes(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, _ := h.deps.Dirs.LoadState()
-	sb, ok := s.Find("bl-test-0001")
+	sb, ok := s.Find("fenzi-test-0001")
 	if !ok || !sb.Running {
 		t.Fatalf("kept sandbox not recorded as running: %+v", s)
 	}
@@ -554,12 +555,12 @@ func TestStopStagesThenDeletes(t *testing.T) {
 			order = append(order, f[0]+" "+f[1])
 		}
 	}
-	want := []string{"logs bl-test-0001", "sandbox download", "sandbox delete"}
+	want := []string{"logs fenzi-test-0001", "sandbox download", "sandbox delete"}
 	if strings.Join(order, ",") != strings.Join(want, ",") {
 		t.Errorf("calls %v, want %v", order, want)
 	}
 	s, _ = h.deps.Dirs.LoadState()
-	if sb, _ := s.Find("bl-test-0001"); sb.Running {
+	if sb, _ := s.Find("fenzi-test-0001"); sb.Running {
 		t.Error("stopped sandbox still marked running")
 	}
 }
@@ -571,7 +572,7 @@ func TestStopKeepsSandboxWhenCopyFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, _ := h.deps.Dirs.LoadState()
-	sb, _ := s.Find("bl-test-0001")
+	sb, _ := s.Find("fenzi-test-0001")
 	h.os.Replies["sandbox download"] = openshell.Reply{Exit: 1}
 	h.os.Calls = nil
 	if _, err := Stop(context.Background(), h.deps, sb); err == nil {
@@ -584,13 +585,14 @@ func TestStopKeepsSandboxWhenCopyFails(t *testing.T) {
 
 func TestSandboxName(t *testing.T) {
 	n := SandboxName("/Users/dana/code/My Web_App")
-	if !strings.HasPrefix(n, "bl-my-web-app-") || len(n) != len("bl-my-web-app-")+4 {
+	if !strings.HasPrefix(n, "fenzi-my-web-a-") || len(n) != openshell.MaxSandboxName {
 		t.Errorf("SandboxName = %q", n)
 	}
 	cases := map[string]string{
-		"/Users/dana/mouse-keeper":             "bl-mouse-keepe-",
-		"/Users/dana/a-very-long-project-name": "bl-a-very-long-",
-		"/Users/dana/abcdefghij-k":             "bl-abcdefghij-",
+		"/Users/dana/mouse-keeper":             "fenzi-mouse-ke-",
+		"/Users/dana/a-very-long-project-name": "fenzi-a-very-l-",
+		"/Users/dana/abcdefghij-k":             "fenzi-abcdefgh-",
+		"/Users/dana/rs-brain":                 "fenzi-rs-brain-",
 	}
 	for repo, prefix := range cases {
 		n := SandboxName(repo)
@@ -633,7 +635,7 @@ func TestWriteGuide(t *testing.T) {
 func TestOnExitKeepsTheSandbox(t *testing.T) {
 	h := setup(t)
 	h.opts.OnExit = func(name string) (bool, error) {
-		if name != "bl-test-0001" {
+		if name != "fenzi-test-0001" {
 			t.Fatalf("asked about %s", name)
 		}
 		return true, nil
@@ -645,7 +647,7 @@ func TestOnExitKeepsTheSandbox(t *testing.T) {
 	if !res.Kept || h.called("sandbox delete") {
 		t.Fatalf("kept %v, calls %v", res.Kept, h.os.Calls)
 	}
-	if !strings.Contains(h.out.String(), "bl-test-0001, kept") {
+	if !strings.Contains(h.out.String(), "fenzi-test-0001, kept") {
 		t.Fatalf("output:\n%s", h.out)
 	}
 }
@@ -656,7 +658,7 @@ func TestOnExitCanStillDelete(t *testing.T) {
 	if _, err := Run(context.Background(), h.deps, h.opts); err != nil {
 		t.Fatal(err)
 	}
-	if !h.called("sandbox delete bl-test-0001") {
+	if !h.called("sandbox delete fenzi-test-0001") {
 		t.Fatal("choosing delete must remove the sandbox")
 	}
 }
@@ -715,7 +717,7 @@ func TestRunWithMCP(t *testing.T) {
 			wrote = true
 		}
 	}
-	if !strings.Contains(create, "--provider bl-claude --provider fenzi-mcp-linear") {
+	if !strings.Contains(create, "--provider fenzi-claude --provider fenzi-mcp-linear") {
 		t.Errorf("create: %q", create)
 	}
 	if !wrote {
@@ -749,5 +751,131 @@ func TestRunWithMCPNeedsTheToken(t *testing.T) {
 	}
 	if h.called("sandbox create") {
 		t.Error("nothing may be created without the token")
+	}
+}
+
+func withSecrets(t *testing.T, h *harness) {
+	t.Helper()
+	project, err := compiler.Parse([]byte("version: 1\nmcp:\n  droplets:\n    command: [npx, -y, \"@digitalocean/mcp\", --services, droplets]\n    secrets: [DIGITALOCEAN_API_TOKEN]\n    hosts: [api.digitalocean.com]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := compiler.Merge(h.opts.Policy.Doc, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.opts.Policy.Doc = doc
+}
+
+// A run with a local server's secret: its provider is attached, the policy
+// binds it on the server's host, the prover gets every file without the
+// binding (0.1.2 returns unsupported for it), and the agent's config
+// passes the variable to the server.
+func TestRunWithMCPSecret(t *testing.T) {
+	h := setup(t)
+	withSecrets(t, h)
+	h.os.Replies["provider get fenzi-secret-digitalocean-api-token"] = openshell.Reply{}
+	res, err := Run(context.Background(), h.deps, h.opts)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, h.out)
+	}
+	var create string
+	wrote := false
+	for _, c := range h.os.Calls {
+		switch {
+		case strings.HasPrefix(c, "sandbox create"):
+			create = c
+		case strings.HasPrefix(c, "sandbox exec") && strings.Contains(c, "python3") && strings.Contains(c, "/sandbox/.fenzi/mcp.json"):
+			wrote = true
+		}
+	}
+	if !strings.Contains(create, "--provider fenzi-claude --provider fenzi-secret-digitalocean-api-token") {
+		t.Errorf("create: %q", create)
+	}
+	if !wrote {
+		t.Errorf("the MCP config was not written: %v", h.os.Calls)
+	}
+	dir := h.deps.Dirs.Run(res.Sandbox)
+	pol, err := os.ReadFile(filepath.Join(dir, "policy.yaml"))
+	if err != nil || !strings.Contains(string(pol), "provider: fenzi-secret-digitalocean-api-token") || !strings.Contains(string(pol), "host: api.digitalocean.com") {
+		t.Errorf("the loaded policy binds the secret: %v\n%s", err, pol)
+	}
+	for _, c := range h.prover.Calls {
+		if !strings.Contains(c, "prove.") {
+			t.Errorf("the prover read a file with a binding: %s", c)
+		}
+	}
+	prove, err := os.ReadFile(filepath.Join(dir, "prove.policy.yaml"))
+	if err != nil || strings.Contains(string(prove), "credential_binding") || !strings.Contains(string(prove), "host: api.digitalocean.com") {
+		t.Errorf("the prover's copy keeps the host without the binding: %v\n%s", err, prove)
+	}
+	out := h.out.String()
+	if !strings.Contains(out, "DIGITALOCEAN_API_TOKEN on api.digitalocean.com") || !strings.Contains(out, "droplets (local)") {
+		t.Errorf("output:\n%s", out)
+	}
+}
+
+func TestRunWithMCPSecretNeedsTheValue(t *testing.T) {
+	h := setup(t)
+	withSecrets(t, h)
+	_, err := Run(context.Background(), h.deps, h.opts)
+	var missing *ErrNoMCPSecret
+	if !errors.As(err, &missing) || missing.Server != "droplets" || missing.Variable != "DIGITALOCEAN_API_TOKEN" {
+		t.Fatalf("want ErrNoMCPSecret, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "fenzi mcp token droplets --env DIGITALOCEAN_API_TOKEN") {
+		t.Errorf("message %q", err)
+	}
+	if h.called("sandbox create") {
+		t.Error("nothing may be created without the secret")
+	}
+}
+
+// An agent's own MCP config that holds a token in plain text is copied with
+// the project, so run names it with the other files that look like secrets.
+// A reference to a variable is not a secret.
+func TestMCPConfigSecrets(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, ".cursor"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		".cursor/mcp.json": `{"mcpServers":{"do":{"command":"npx","env":{"DIGITALOCEAN_API_TOKEN":"dop_v1_abc","LOG_LEVEL":"warn"}},"ctx":{"url":"https://x","headers":{"X-API-Key":"ctx7sk-123","Authorization":"Bearer ${TOKEN}"}}}}`,
+		".mcp.json":        `{"mcpServers":{"gh":{"command":"gh-mcp","env":{"GITHUB_TOKEN":"${GITHUB_TOKEN}"}}}}`,
+	}
+	m := workspace.Manifest{}
+	for rel, body := range files {
+		if err := os.WriteFile(filepath.Join(repo, filepath.FromSlash(rel)), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		m[rel] = "x"
+	}
+	got := MCPConfigSecrets(repo, m)
+	if len(got) != 1 || got[0] != ".cursor/mcp.json (holds DIGITALOCEAN_API_TOKEN, X-API-Key)" {
+		t.Errorf("got %v", got)
+	}
+	if got := MCPConfigSecrets(repo, workspace.Manifest{}); len(got) != 0 {
+		t.Errorf("a file .gitignore leaves out is not copied, so not listed: %v", got)
+	}
+}
+
+// A key stored before the rename, under bl-claude, is still used as it is.
+func TestRunUsesAKeyStoredUnderTheOldName(t *testing.T) {
+	h := setup(t)
+	h.os.Replies["provider get bl-claude"] = openshell.Reply{}
+	h.deps.Getenv = func(string) string { return "" }
+	if _, err := Run(context.Background(), h.deps, h.opts); err != nil {
+		t.Fatalf("%v\n%s", err, h.out)
+	}
+	if h.called("provider create") || !h.called("sandbox create --name fenzi-test-0001") {
+		t.Errorf("calls %v", h.os.Calls)
+	}
+	if !strings.Contains(h.out.String(), "fenzi key set claude moves it to fenzi-claude") {
+		t.Errorf("output:\n%s", h.out)
+	}
+	for _, c := range h.os.Calls {
+		if strings.HasPrefix(c, "sandbox create") && !strings.Contains(c, "--provider bl-claude ") {
+			t.Errorf("create: %s", c)
+		}
 	}
 }

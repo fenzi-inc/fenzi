@@ -107,6 +107,8 @@ func (s MCPServer) clone() MCPServer {
 	s.Command = append([]string(nil), s.Command...)
 	s.Tools.Allow = append([]string(nil), s.Tools.Allow...)
 	s.Tools.Deny = append([]string(nil), s.Tools.Deny...)
+	s.Secrets = append([]string(nil), s.Secrets...)
+	s.Hosts = append([]string(nil), s.Hosts...)
 	if s.Env != nil {
 		env := make(map[string]string, len(s.Env))
 		for k, v := range s.Env {
