@@ -340,7 +340,9 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		if a, mcpFiles, err = a.WithMCP(doc); err != nil {
 			return res, err
 		}
-		say("mcp", "%s", mcpSummary(doc))
+		if line := mcpSummary(doc, a.Name); line != "" {
+			say("mcp", "%s", line)
+		}
 		if len(doc.Secrets()) > 0 {
 			say("secrets", "%s; the agent sees placeholders, bindings checked by Fenzi, not by the prover", secretSummary(doc))
 		}

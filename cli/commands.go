@@ -645,6 +645,9 @@ func deniedNote(reason string) string { return "The agent sees: " + reason }
 
 // errMCPApproval is approve's answer to an MCP request.
 func errMCPApproval(p openshell.Proposal, sandbox string) error {
+	if p.Connectors() {
+		return fmt.Errorf("This request is for Claude's account connectors, which Fenzi allows per tool and not as a host. Add the tools the agent needs (fenzi mcp add claude-ai --claude-account --tool <tool>) and start a new run, or deny the request: fenzi deny %s --sandbox %s --reason \"...\"", shortID(p.Chunk), sandbox)
+	}
 	return fmt.Errorf("%s. Add the tool the agent needs to the server's entry (fenzi mcp add <name> <url> --tool <tool>) and start a new run, or deny the request: fenzi deny %s --sandbox %s --reason \"...\"", openshell.MCPApprovalRefused, shortID(p.Chunk), sandbox)
 }
 

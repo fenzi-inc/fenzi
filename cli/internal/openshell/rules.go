@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"fenzi/compiler"
 )
 
 // Proposal is one chunk from `openshell rule get`. 0.1.2 prints text only,
@@ -30,8 +32,16 @@ type Proposal struct {
 }
 
 // MCP reports whether the request is for an MCP server. `rule get` prints
-// such an endpoint as [mcp, allow initialize *, ...] (0.1.2).
-func (p Proposal) MCP() bool { return strings.Contains(p.Endpoints, "[mcp") }
+// such an endpoint as [mcp, allow initialize *, ...] (0.1.2). A request of
+// any kind for the host of Claude's account connectors counts: a REST rule
+// there would let every connector's every tool through, unchecked.
+func (p Proposal) MCP() bool { return strings.Contains(p.Endpoints, "[mcp") || p.Connectors() }
+
+// Connectors reports whether the request is for the host of Claude's
+// account connectors.
+func (p Proposal) Connectors() bool {
+	return strings.Contains(p.Endpoints, compiler.ClaudeConnectorsHost+":")
+}
 
 // MCPApprovalRefused is why Fenzi does not pass an MCP request to `rule
 // approve`: OpenShell 0.1.2 stores it without the tool it named, which

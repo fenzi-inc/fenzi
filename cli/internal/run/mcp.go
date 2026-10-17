@@ -263,11 +263,17 @@ func findSecrets(v any, parent string, names *[]string) {
 }
 
 // mcpSummary is the run line for the servers the agent gets.
-func mcpSummary(d *compiler.Document) string {
+func mcpSummary(d *compiler.Document, agent string) string {
 	var parts []string
 	for _, n := range d.MCPNames() {
 		s := d.MCP[n]
 		switch {
+		case !s.For(agent):
+			continue
+		case s.Connectors() && s.Tools.AllowsAll():
+			parts = append(parts, n+" (account connectors, all tools)")
+		case s.Connectors():
+			parts = append(parts, fmt.Sprintf("%s (account connectors, %s)", n, plural(len(s.Tools.Allow), "tool")))
 		case !s.Remote():
 			parts = append(parts, n+" (local)")
 		case s.Tools.AllowsAll():

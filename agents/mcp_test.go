@@ -247,3 +247,54 @@ func TestWithMCPTokenHeader(t *testing.T) {
 		t.Errorf("grok:\n%s", files[0].Content)
 	}
 }
+
+// Account connectors are not in any agent's config: Claude Code finds them
+// itself. With them, Claude Code starts without --strict-mcp-config, under
+// which 2.1.288 loads no account connectors; the other servers stay in the
+// file it is given.
+func TestWithMCPAccountConnectors(t *testing.T) {
+	only, err := compiler.Parse([]byte("version: 1\nmcp:\n  claude-ai:\n    account: claude\n    tools: {allow: [list_teams]}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claude, _ := Get("claude")
+	c, files, err := claude.WithMCP(only)
+	if err != nil || len(files) != 0 || strings.Join(c.Argv(nil), " ") != strings.Join(claude.Argv(nil), " ") {
+		t.Errorf("connectors alone change nothing in Claude's config: %v %v %v", err, files, c.Argv(nil))
+	}
+
+	both, err := compiler.Parse([]byte("version: 1\nmcp:\n  claude-ai:\n    account: claude\n    tools: {allow: [list_teams]}\n  deepwiki:\n    url: https://mcp.deepwiki.com/mcp\n    tools: {allow: [\"*\"]}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, files, err = claude.WithMCP(both)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("%v %v", err, files)
+	}
+	line := strings.Join(c.CommandLine(nil), " ")
+	if !strings.Contains(line, "--mcp-config /sandbox/.fenzi/mcp.json") || strings.Contains(line, "--strict-mcp-config") {
+		t.Errorf("claude line %q", line)
+	}
+	if strings.Contains(files[0].Content, "claude-ai") || !strings.Contains(files[0].Content, "deepwiki") {
+		t.Errorf("config:\n%s", files[0].Content)
+	}
+
+	for _, name := range []string{"codex", "opencode", "grok"} {
+		a, _ := Get(name)
+		_, _, err := a.WithMCP(only)
+		if err != nil {
+			t.Errorf("%s with Claude's connectors only: %v", name, err)
+		}
+		got, files, err := a.WithMCP(both)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		all := strings.Join(got.Argv(nil), " ") + got.Env["OPENCODE_CONFIG_CONTENT"]
+		for _, f := range files {
+			all += f.Content
+		}
+		if strings.Contains(all, "claude-ai") || !strings.Contains(all, "deepwiki") {
+			t.Errorf("%s config: %s", name, all)
+		}
+	}
+}

@@ -46,6 +46,7 @@ func cmdMCP(e env, args []string) (int, error) {
 		subHelp(e, "mcp", "The MCP servers every agent gets in this folder, from the mcp section of ./fenzi.yaml and of ~/.config/fenzi/mcp.yaml. The sandbox checks each call to a remote server against the tools listed for it, and a server's token stays outside the sandbox.", [][2]string{
 			{"mcp list", "The servers agents get here, and where each comes from"},
 			{"mcp add <name> <url> --tool <tool>", "Add a remote server and the tools agents may call; --all-tools for every tool"},
+			{"mcp add <name> --claude-account --tool <tool>", "Let Claude Code use the connectors of the Claude account it is signed in with, and the tools it may call there"},
 			{"mcp add <name> -- <command>", "Add a local server, which runs inside the sandbox; --secret <VAR> --host <host> for one that needs a secret"},
 			{"mcp remove <name>", "Remove a server"},
 			{"mcp token <name>", "Store or replace a server's token, or a local server's secret; it is hidden as you type"},
@@ -70,8 +71,10 @@ func cmdMCP(e env, args []string) (int, error) {
 
 // jsonMCP is one server in fenzi mcp list --json.
 type jsonMCP struct {
-	Name    string   `json:"name"`
-	URL     string   `json:"url,omitempty"`
+	Name string `json:"name"`
+	URL  string `json:"url,omitempty"`
+	// Account is "claude" for Claude's account connectors.
+	Account string   `json:"account,omitempty"`
 	Command []string `json:"command,omitempty"`
 	Allow   []string `json:"allow"`
 	Deny    []string `json:"deny"`
@@ -126,7 +129,7 @@ func mcpList(e env, args []string) (int, error) {
 	docs := []jsonMCP{}
 	for _, n := range resolved.Doc.MCPNames() {
 		s := resolved.Doc.MCP[n]
-		d := jsonMCP{Name: n, URL: s.URL, Command: s.Command, Allow: nonNilStrings(s.Tools.Allow), Deny: nonNilStrings(s.Tools.Deny), Token: s.Token, TokenHeader: s.TokenHeader}
+		d := jsonMCP{Name: n, URL: s.URL, Account: s.Account, Command: s.Command, Allow: nonNilStrings(s.Tools.Allow), Deny: nonNilStrings(s.Tools.Deny), Token: s.Token, TokenHeader: s.TokenHeader}
 		_, inMachine := mcpOf(machine)[n]
 		_, inProject := mcpOf(project)[n]
 		switch {
@@ -167,7 +170,10 @@ func mcpList(e env, args []string) (int, error) {
 	}
 	for _, d := range docs {
 		where := d.URL
-		if where == "" {
+		switch {
+		case d.Account != "":
+			where = "the connectors of Claude's account, for Claude Code"
+		case where == "":
 			where = strings.Join(d.Command, " ")
 		}
 		u.Done(d.Name, where)
@@ -208,7 +214,7 @@ func mcpList(e env, args []string) (int, error) {
 }
 
 func mcpToolsLine(d jsonMCP) string {
-	if d.URL == "" {
+	if d.URL == "" && d.Account == "" {
 		return "runs inside the sandbox; not checked per tool"
 	}
 	allow := "tools: " + strings.Join(d.Allow, ", ")
@@ -258,6 +264,7 @@ func mcpAdd(e env, args []string) (int, error) {
 	token := fs.Bool("token", false, "the server needs a token; store it with fenzi mcp token <name>")
 	tokenHeader := fs.String("token-header", "", "the header the server reads its token from, when it is not Authorization: Bearer; implies --token")
 	machine := fs.Bool("machine", false, "add it to ~/.config/fenzi/mcp.yaml, for every project")
+	account := fs.Bool("claude-account", false, "the connectors of the Claude account Claude Code is signed in with")
 	var secrets, hosts stringList
 	fs.Var(&secrets, "secret", "a variable a local server reads that holds a secret; repeat for more")
 	fs.Var(&hosts, "host", "a host a local server calls, over HTTPS; repeat for more")
@@ -271,6 +278,9 @@ func mcpAdd(e env, args []string) (int, error) {
 			local = true
 			break
 		}
+	}
+	if *account {
+		return mcpAddAccount(e, pos, local, *all, tools, deny, *token || *tokenHeader != "" || len(secrets) > 0 || len(hosts) > 0, *machine)
 	}
 	if len(pos) < 2 {
 		return 1, errors.New("name the server and its URL: fenzi mcp add linear https://mcp.linear.app/mcp --tool list_issues, or a local one: fenzi mcp add files -- npx -y @modelcontextprotocol/server-filesystem /sandbox")
@@ -343,6 +353,51 @@ func mcpAdd(e env, args []string) (int, error) {
 	return 0, nil
 }
 
+// mcpAddAccount adds Claude's account connectors with the tools Claude Code
+// may call there.
+func mcpAddAccount(e env, pos []string, local, all bool, tools, deny []string, extra, machine bool) (int, error) {
+	if len(pos) != 1 || local {
+		return 1, errors.New("name the entry and nothing else: fenzi mcp add claude-ai --claude-account --tool list_issues. Claude Code finds the connectors itself")
+	}
+	if extra {
+		return 1, errors.New("--claude-account takes --tool, --deny and --all-tools only; Claude Code sends its own sign-in to its connectors")
+	}
+	s := compiler.MCPServer{Account: compiler.AccountClaude}
+	if all {
+		s.Tools.Allow = []string{compiler.AllTools}
+	}
+	s.Tools.Allow = append(s.Tools.Allow, tools...)
+	s.Tools.Deny = deny
+	if len(s.Tools.Allow) == 0 {
+		return 1, errors.New("say which tools Claude Code may call on its connectors: --tool <name> for each, as the connector names it (list_issues, not mcp__claude_ai_Linear__list_issues), or --all-tools")
+	}
+	name := pos[0]
+	file, label := mcpFile(machine)
+	if file == "" {
+		return 1, errors.New("no config folder on this machine")
+	}
+	f, err := loadMCPFile(file)
+	if err != nil {
+		return 1, err
+	}
+	replaced := f.put(name, s)
+	if err := f.writeMCP(machine); err != nil {
+		return 1, err
+	}
+	u := tui.New(e.stdin, e.stdout)
+	u.Blank()
+	verb := "Added"
+	if replaced {
+		verb = "Replaced"
+	}
+	u.Done(verb, name+" in "+label)
+	u.Note("On the connectors of its Claude account, the sandbox lets Claude Code call " + mcpToolsLine(jsonMCP{Account: s.Account, Allow: s.Tools.Allow, Deny: s.Tools.Deny}) + ". Each call is recorded in fenzi log. Other agents get nothing from it.")
+	u.Note("Connectors come with a Claude subscription sign-in (fenzi run --sign-in claude); with an API key Claude Code has none.")
+	u.Note("The next fenzi run gives them to Claude Code.")
+	u.Blank()
+	return 0, nil
+}
+
 func mcpRemove(e env, args []string) (int, error) {
 	fs := newFlags("mcp remove", e.stderr)
 	machine := fs.Bool("machine", false, "remove it from ~/.config/fenzi/mcp.yaml")
@@ -390,6 +445,9 @@ func mcpToken(e env, args []string) (int, error) {
 		return 1, fmt.Errorf("%q is not a server name", name)
 	}
 	here := mcpHere(e)
+	if s, ok := here[name]; ok && s.Connectors() {
+		return 1, fmt.Errorf("%s is Claude's account connectors; Claude Code sends its own sign-in there, so there is no token to store", name)
+	}
 	if *variable == "" {
 		if s, ok := here[name]; ok && !s.Remote() {
 			switch len(s.Secrets) {

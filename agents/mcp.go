@@ -16,6 +16,9 @@ import (
 const (
 	// MCPClaudeJSON is a file passed with --mcp-config and
 	// --strict-mcp-config, so Claude Code loads these servers and no others.
+	// With an account: claude entry the flag is left out: Claude Code 2.1.288
+	// loads no account connectors under it ("MCP servers are restricted to
+	// explicitly passed config").
 	MCPClaudeJSON = "claude-json"
 	// MCPCodexConfig is -c mcp_servers.<name>.<key>=<TOML value> flags.
 	MCPCodexConfig = "codex-config"
@@ -42,11 +45,23 @@ const (
 // placeholder variable, which the sandbox fills only on that server. A local
 // server's secrets are passed to it under their own names; the values are
 // placeholders, which the sandbox fills only on the hosts the server lists.
+// Account connectors are not in the config: the agent finds them itself.
 func (e Entry) WithMCP(d *compiler.Document) (Entry, []File, error) {
 	if d == nil || len(d.MCP) == 0 {
 		return e, nil, nil
 	}
-	names := d.MCPNames()
+	var names []string
+	connectors := false
+	for _, n := range d.MCPNames() {
+		if d.MCP[n].Connectors() {
+			connectors = connectors || d.MCP[n].For(e.Name)
+			continue
+		}
+		names = append(names, n)
+	}
+	if len(names) == 0 {
+		return e, nil, nil
+	}
 	if err := e.checkSecrets(d); err != nil {
 		return e, nil, err
 	}
@@ -75,7 +90,10 @@ func (e Entry) WithMCP(d *compiler.Document) (Entry, []File, error) {
 		if err != nil {
 			return e, nil, err
 		}
-		e.Args = append(append([]string(nil), e.Args...), "--mcp-config", claudeMCPFile, "--strict-mcp-config")
+		e.Args = append(append([]string(nil), e.Args...), "--mcp-config", claudeMCPFile)
+		if !connectors {
+			e.Args = append(e.Args, "--strict-mcp-config")
+		}
 		return e, []File{{Path: claudeMCPFile, Content: string(b) + "\n"}}, nil
 
 	case MCPCodexConfig:

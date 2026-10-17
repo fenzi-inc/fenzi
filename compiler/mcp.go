@@ -13,11 +13,17 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// MCPServer is one entry of a document's mcp section. A server has either a
-// URL, for a remote server the sandbox checks per tool, or a command, for a
-// local server that runs inside the sandbox as a child of the agent.
+// MCPServer is one entry of a document's mcp section. A server has a URL,
+// for a remote server the sandbox checks per tool; a command, for a local
+// server that runs inside the sandbox as a child of the agent; or an
+// account, for the connectors an agent's vendor account brings.
 type MCPServer struct {
-	URL     string            `yaml:"url,omitempty"`
+	URL string `yaml:"url,omitempty"`
+	// Account is "claude" for the connectors of the Claude account Claude
+	// Code is signed in with (Linear, Apollo.io and the like, added on
+	// claude.ai). Claude Code finds them itself and reaches them all through
+	// one host; the sandbox checks each call per tool there, as for a URL.
+	Account string            `yaml:"account,omitempty"`
 	Command []string          `yaml:"command,omitempty"`
 	Env     map[string]string `yaml:"env,omitempty"`
 	// Token says a token for this server is stored on the machine, with
@@ -46,6 +52,18 @@ type MCPTools struct {
 
 // AllTools is the Allow entry that allows every tool.
 const AllTools = "*"
+
+// AccountClaude is the account entry for Claude's account connectors.
+const AccountClaude = "claude"
+
+// ClaudeConnectorsHost is where Claude Code reaches every connector of its
+// account, one path per connector: /v1/mcp/<connector id> (Claude Code
+// 2.1.288, MCP_PROXY_URL and MCP_PROXY_PATH). It sends its own sign-in token
+// there, so the rule binds no provider. Claude Code lists the connectors
+// from api.anthropic.com, its model host. Seen on OpenShell 0.1.2: initialize,
+// tools/list and tools/call for three connectors passed an MCP rule on this
+// host with the usual revisions, and the log named each tool.
+const ClaudeConnectorsHost = "mcp-proxy.anthropic.com"
 
 // MCPVersions are the protocol revisions every remote server rule accepts.
 // Codex sends 2025-06-18; Claude Code, OpenCode and Grok send 2025-11-25.
@@ -101,8 +119,18 @@ func SecretProvider(variable string) string {
 // MCPRuleKey is the network policy key of a remote server's rule.
 func MCPRuleKey(server string) string { return "mcp_" + strings.ReplaceAll(server, "-", "_") }
 
-// Remote reports whether the server is reached over the network.
-func (s MCPServer) Remote() bool { return s.URL != "" }
+// Remote reports whether the server is reached over the network, at its URL
+// or through its account's host.
+func (s MCPServer) Remote() bool { return s.URL != "" || s.Account != "" }
+
+// Connectors reports whether the entry is an account's connectors. The agent
+// finds those itself, so its MCP config does not list them.
+func (s MCPServer) Connectors() bool { return s.Account != "" }
+
+// For reports whether the entry gives the named agent anything. Account
+// connectors are only the account's agent's: another agent gets no rule for
+// them.
+func (s MCPServer) For(agent string) bool { return s.Account == "" || s.Account == agent }
 
 // AllowsAll reports whether every tool not denied is allowed.
 func (t MCPTools) AllowsAll() bool {
@@ -121,8 +149,16 @@ type MCPEndpoint struct {
 	Path string
 }
 
-// Endpoint parses the URL of a remote server.
+// Endpoint parses the URL of a remote server. Account connectors are the
+// whole of their host: OpenShell 0.1.2 handles every path on an MCP host and
+// port with one rule, and each connector is a path there.
 func (s MCPServer) Endpoint() (MCPEndpoint, error) {
+	if s.Account == AccountClaude {
+		return MCPEndpoint{Host: ClaudeConnectorsHost, Port: 443}, nil
+	}
+	if s.Account != "" {
+		return MCPEndpoint{}, fmt.Errorf("account: %q is not an account Fenzi knows; the only one is %s, for Claude's account connectors", s.Account, AccountClaude)
+	}
 	u, err := url.Parse(s.URL)
 	if err != nil {
 		return MCPEndpoint{}, fmt.Errorf("url %q: %v", s.URL, err)
@@ -173,7 +209,9 @@ func (d *Document) validateMCP(hosts map[string]int) []string {
 			add("%s: a server name is lowercase letters, digits, and dashes, starting with a letter, at most 63 characters", f)
 		}
 		switch {
-		case s.Remote() && len(s.Command) > 0:
+		case s.Account != "" && (s.URL != "" || len(s.Command) > 0):
+			add("%s: account entries take no url or command; Claude Code finds its connectors itself", f)
+		case s.URL != "" && len(s.Command) > 0:
 			add("%s: set url or command, not both", f)
 		case !s.Remote() && len(s.Command) == 0:
 			add("%s: set url for a remote server or command for a local one", f)
@@ -195,6 +233,9 @@ func (d *Document) validateMCP(hosts map[string]int) []string {
 			}
 			p = append(p, s.validateLocal(f)...)
 			continue
+		}
+		if s.Connectors() && s.Token {
+			add("%s.token: Claude Code sends its own sign-in to its connectors; leave token out", f)
 		}
 		if len(s.Env) > 0 {
 			add("%s.env: only for a server with a command", f)
@@ -230,10 +271,18 @@ func (d *Document) validateMCP(hosts map[string]int) []string {
 		}
 		key := fmt.Sprintf("%s:%d", ep.Host, ep.Port)
 		if i, ok := hosts[key]; ok {
-			add("%s.url: %s is also in hosts[%d]; a host and port is either an MCP server or a host rule", f, key, i)
+			at := f + ".url"
+			if s.Connectors() {
+				at = f
+			}
+			add("%s: %s is also in hosts[%d]; a host and port is either an MCP server or a host rule", at, key, i)
 		}
 		if other, ok := seen[key]; ok {
-			add("%s.url: %s is also mcp.%s; one MCP server per host and port", f, key, other)
+			if s.Connectors() || d.MCP[other].Connectors() {
+				add("%s: %s is also mcp.%s; one entry covers every connector of the account", f, key, other)
+			} else {
+				add("%s.url: %s is also mcp.%s; one MCP server per host and port", f, key, other)
+			}
 		}
 		seen[key] = name
 		if len(s.Tools.Allow) == 0 {
@@ -334,11 +383,12 @@ func (s MCPServer) validateLocal(f string) []string {
 
 // mcpRules adds a rule per remote server: the discovery methods, the allowed
 // tools, the denied ones, the accepted revisions, and the token binding. The
-// agent's binaries are the only programs that reach it.
-func mcpRules(p *Policy, d *Document, bins []Binary) error {
+// agent's binaries are the only programs that reach it. Account connectors
+// get a rule only for their account's agent.
+func mcpRules(p *Policy, d *Document, agent string, bins []Binary) error {
 	for _, name := range d.MCPNames() {
 		s := d.MCP[name]
-		if !s.Remote() {
+		if !s.Remote() || !s.For(agent) {
 			continue
 		}
 		ep, err := s.Endpoint()
@@ -588,6 +638,9 @@ func checkMCP(doc, boundary *Document, owner, pre string) error {
 		case !ok:
 			p = append(p, fmt.Sprintf("%s: not an MCP server "+owner+" allows", f))
 			continue
+		case s.Account != b.Account:
+			p = append(p, fmt.Sprintf("%s: "+owner+" allows %s", f, firstNonEmpty(accountLabel(b.Account), b.URL, "a local command")))
+			continue
 		case s.URL != b.URL:
 			p = append(p, fmt.Sprintf("%s.url: "+owner+" allows %s", f, firstNonEmpty(b.URL, "a local command")))
 			continue
@@ -627,6 +680,13 @@ func checkMCP(doc, boundary *Document, owner, pre string) error {
 		return nil
 	}
 	return &ValidationError{Problems: prefix(pre, p)}
+}
+
+func accountLabel(a string) string {
+	if a == "" {
+		return ""
+	}
+	return "the " + a + " account's connectors"
 }
 
 func contains(list []string, s string) bool {
@@ -681,6 +741,9 @@ func checkMCPHosts(d *Document, a Agent) error {
 	var p []string
 	for _, name := range d.MCPNames() {
 		s := d.MCP[name]
+		if !s.For(a.Name) {
+			continue
+		}
 		if !s.Remote() {
 			for _, h := range s.Hosts {
 				if what, ok := taken[h+":443"]; ok {
@@ -746,7 +809,7 @@ func sameMCP(a, b map[string]MCPServer) bool {
 	}
 	for n, x := range a {
 		y, ok := b[n]
-		if !ok || x.URL != y.URL || x.Token != y.Token || x.TokenHeader != y.TokenHeader || !sameOrder(x.Command, y.Command) ||
+		if !ok || x.URL != y.URL || x.Account != y.Account || x.Token != y.Token || x.TokenHeader != y.TokenHeader || !sameOrder(x.Command, y.Command) ||
 			!sameStrings(x.Tools.Allow, y.Tools.Allow) || !sameStrings(x.Tools.Deny, y.Tools.Deny) || len(x.Env) != len(y.Env) ||
 			!sameStrings(x.Secrets, y.Secrets) || !sameStrings(x.Hosts, y.Hosts) {
 			return false

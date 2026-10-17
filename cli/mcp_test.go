@@ -388,3 +388,66 @@ func TestMCPValidationRefusesASecretInEnv(t *testing.T) {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
 }
+
+func TestMCPAddClaudeAccount(t *testing.T) {
+	repo := mcpFixture(t)
+	out, code := runCLI(t, "", "mcp", "add", "claude-ai", "--claude-account", "--tool", "list_teams", "--tool", "list_issues", "--deny", "delete_issue")
+	if code != 0 || !strings.Contains(out, "Other agents get nothing") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	raw, _ := os.ReadFile(filepath.Join(repo, "fenzi.yaml"))
+	doc, err := compiler.Parse(raw)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, raw)
+	}
+	c := doc.MCP["claude-ai"]
+	if c.Account != "claude" || c.URL != "" || strings.Join(c.Tools.Allow, ",") != "list_teams,list_issues" || strings.Join(c.Tools.Deny, ",") != "delete_issue" {
+		t.Errorf("entry %+v\n%s", c, raw)
+	}
+	var list []jsonMCP
+	if stderr, code := runJSON(t, &list, "mcp", "list", "--json"); code != 0 || stderr != "" {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	if len(list) != 1 || list[0].Account != "claude" || list[0].Token {
+		t.Errorf("list %+v", list)
+	}
+	if out, _ := runCLI(t, "", "mcp", "list"); !strings.Contains(out, "connectors of Claude's account") || !strings.Contains(out, "tools: list_teams, list_issues; denied: delete_issue") {
+		t.Errorf("list:\n%s", out)
+	}
+	if out, code := runCLI(t, "", "mcp", "token", "claude-ai"); code == 0 || !strings.Contains(out, "no token to store") {
+		t.Errorf("token for connectors: exit %d\n%s", code, out)
+	}
+	for name, args := range map[string][]string{
+		"no tools":  {"mcp", "add", "c", "--claude-account"},
+		"a url":     {"mcp", "add", "c", "https://mcp-proxy.anthropic.com/", "--claude-account", "--tool", "a"},
+		"a token":   {"mcp", "add", "c", "--claude-account", "--tool", "a", "--token"},
+		"a command": {"mcp", "add", "c", "--claude-account", "--tool", "a", "--", "npx", "x"},
+		"twice":     {"mcp", "add", "other", "--claude-account", "--tool", "a"},
+	} {
+		if out, code := runCLI(t, "", args...); code == 0 {
+			t.Errorf("%s: accepted\n%s", name, out)
+		}
+	}
+}
+
+// A request for the connectors' host, of any kind, would let every tool of
+// every connector through. Approve refuses it and names the per-tool entry.
+func TestApproveRefusesTheConnectorsHost(t *testing.T) {
+	pending := strings.NewReplacer("mcp_proposal", "allow_mcp_proxy", "mcp.example.org:443 [mcp, allow initialize *, allow tools/list *, allow tools/call *]", "mcp-proxy.anthropic.com:443 [L7 rest, access=read-write]").Replace(mcpPending)
+	fakeRuntime(t, map[string]reply{
+		"sandbox list": {out: "fenzi-web-1a2b\n"},
+		"rule get":     {out: pending},
+	}, proverWithin)
+	repo := t.TempDir()
+	t.Chdir(repo)
+	seedState(t, config.Sandbox{Name: "fenzi-web-1a2b", Agent: "claude", Repo: repo, Created: time.Now(), Running: true})
+	out, code := runCLI(t, "", "approve", "3c58ba8c", "--sandbox", "fenzi-web-1a2b")
+	if code == 0 || !strings.Contains(out, "--claude-account") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	for _, c := range runtimeCalls(t) {
+		if strings.HasPrefix(c, "rule approve") {
+			t.Fatalf("approved: %s", c)
+		}
+	}
+}

@@ -149,7 +149,7 @@ func Compile(doc *Document, t Target) (*Policy, error) {
 	if err := checkMCPHosts(d, t.Agent); err != nil {
 		return nil, err
 	}
-	if err := mcpRules(p, d, bins); err != nil {
+	if err := mcpRules(p, d, t.Agent.Name, bins); err != nil {
 		return nil, err
 	}
 	localHostRules(p, d, bins)

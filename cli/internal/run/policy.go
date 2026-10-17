@@ -239,7 +239,7 @@ func WriteCompiled(r Resolved, agent agents.Entry, dir string) (Compiled, error)
 			return Compiled{}, err
 		}
 		for _, n := range r.Doc.MCPNames() {
-			if r.Doc.MCP[n].Remote() {
+			if m := r.Doc.MCP[n]; m.Remote() && m.For(agent.Name) {
 				c.MCP++
 			}
 		}

@@ -370,3 +370,109 @@ func TestSecretNaming(t *testing.T) {
 		t.Error("the name changed; it is stored on machines")
 	}
 }
+
+const connectorsDoc = `version: 1
+mcp:
+  claude-ai:
+    account: claude
+    tools:
+      allow: [list_teams, list_issues]
+      deny: [delete_issue]
+  deepwiki:
+    url: https://mcp.deepwiki.com/mcp
+    tools: {allow: ["*"]}
+`
+
+// Claude's account connectors are one MCP rule on the host Claude Code
+// reaches them all through, every path, for Claude's programs, with no token
+// binding: Claude Code sends its own sign-in. This is the rule that passed
+// initialize, tools/list and tools/call for three connectors on OpenShell
+// 0.1.2, narrowed to the listed tools.
+func TestAccountConnectorsRule(t *testing.T) {
+	p, err := Compile(mcpDocument(t, connectorsDoc), Target{Agent: claude})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, ok := p.NetworkPolicies["mcp_claude_ai"]
+	if !ok {
+		t.Fatalf("no connectors rule: %v", p.NetworkPolicies)
+	}
+	e := r.Endpoints[0]
+	if r.Name != ClaudeConnectorsHost || e.Host != ClaudeConnectorsHost || e.Port != 443 || e.Path != "" || e.Protocol != "mcp" || e.CredentialBinding != nil {
+		t.Errorf("endpoint %+v", e)
+	}
+	if len(r.Binaries) != len(claude.Binaries) || r.Binaries[0].Path != claude.Binaries[0] {
+		t.Errorf("binaries %+v", r.Binaries)
+	}
+	var tools []string
+	for _, rule := range e.Rules {
+		if rule.Allow.Method == "tools/call" {
+			tools = append(tools, rule.Allow.Tool)
+		}
+	}
+	if strings.Join(tools, ",") != "list_teams,list_issues" || len(e.DenyRules) != 1 || e.DenyRules[0].Tool != "delete_issue" {
+		t.Errorf("tools %v, deny %+v", tools, e.DenyRules)
+	}
+	if _, ok := p.NetworkPolicies["mcp_deepwiki"]; !ok {
+		t.Error("the other server keeps its rule")
+	}
+
+	codex := Agent{Name: "codex", Binaries: []string{"/usr/local/bin/codex"}}
+	p, err = Compile(mcpDocument(t, connectorsDoc), Target{Agent: codex})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := p.NetworkPolicies["mcp_claude_ai"]; ok {
+		t.Error("another agent gets no rule for Claude's connectors")
+	}
+	if _, ok := p.NetworkPolicies["mcp_deepwiki"]; !ok {
+		t.Error("another agent keeps the other servers")
+	}
+}
+
+func TestAccountConnectorsValidation(t *testing.T) {
+	for name, body := range map[string]string{
+		"no tools":      "mcp:\n  c:\n    account: claude\n",
+		"other account": "mcp:\n  c:\n    account: openai\n    tools: {allow: [a]}\n",
+		"with url":      "mcp:\n  c:\n    account: claude\n    url: https://mcp.example.com/mcp\n    tools: {allow: [a]}\n",
+		"with command":  "mcp:\n  c:\n    account: claude\n    command: [a]\n    tools: {allow: [a]}\n",
+		"with token":    "mcp:\n  c:\n    account: claude\n    token: true\n    tools: {allow: [a]}\n",
+		"twice":         "mcp:\n  c:\n    account: claude\n    tools: {allow: [a]}\n  d:\n    account: claude\n    tools: {allow: [b]}\n",
+		"url on host":   "mcp:\n  c:\n    account: claude\n    tools: {allow: [a]}\n  d:\n    url: https://mcp-proxy.anthropic.com/v1/mcp/x\n    tools: {allow: [b]}\n",
+		"host rule":     "hosts:\n  - host: mcp-proxy.anthropic.com\n    access: read-only\nmcp:\n  c:\n    account: claude\n    tools: {allow: [a]}\n",
+	} {
+		if err := mcpDocument(t, "version: 1\n"+body).Validate(); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if err := mcpDocument(t, connectorsDoc).Validate(); err != nil {
+		t.Errorf("the example is valid: %v", err)
+	}
+}
+
+// A team boundary holds account connectors like any server: the same entry,
+// and only the tools it allows. A project narrows them and cannot widen them.
+func TestAccountConnectorsBoundary(t *testing.T) {
+	team := mcpDocument(t, connectorsDoc)
+	narrow := mcpDocument(t, "version: 1\nmcp:\n  claude-ai:\n    account: claude\n    tools: {allow: [list_teams], deny: [delete_issue]}\n")
+	if err := CheckMCP(narrow, team); err != nil {
+		t.Errorf("narrower: %v", err)
+	}
+	for name, body := range map[string]string{
+		"extra tool": "mcp:\n  claude-ai:\n    account: claude\n    tools: {allow: [save_issue], deny: [delete_issue]}\n",
+		"as a url":   "mcp:\n  claude-ai:\n    url: https://mcp-proxy.anthropic.com/\n    tools: {allow: [list_teams]}\n",
+		"from local": "mcp:\n  claude-ai:\n    command: [x]\n",
+	} {
+		if err := CheckMCP(mcpDocument(t, "version: 1\n"+body), team); err == nil {
+			t.Errorf("%s: passed the boundary", name)
+		}
+	}
+	local := mcpDocument(t, "version: 1\nmcp:\n  claude-ai:\n    command: [x]\n")
+	if err := CheckMCP(mcpDocument(t, "version: 1\nmcp:\n  claude-ai:\n    account: claude\n    tools: {allow: [a]}\n"), local); err == nil {
+		t.Error("an account entry where the boundary has a local server")
+	}
+	wide := mcpDocument(t, "version: 1\nmcp:\n  claude-ai:\n    account: claude\n    tools: {allow: [\"*\"]}\n")
+	if _, err := Merge(team, wide); err == nil || !strings.Contains(err.Error(), "only narrow") {
+		t.Errorf("widening the connectors: %v", err)
+	}
+}
