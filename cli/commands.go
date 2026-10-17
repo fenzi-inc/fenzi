@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -153,6 +154,7 @@ func cmdDoctor(e env, args []string) (int, error) {
 			}
 		}
 		line("ok", "Bad policy", failureMode())
+		doctorDNS(e, oc, line)
 	}
 	if openshell.Installed("openshell-prover") {
 		line("ok", "Policy check", "installed")
@@ -1480,13 +1482,21 @@ func cmdPs(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	names, err := client().Sandboxes(e.ctx)
+	listed, err := client().List(e.ctx)
 	if err != nil {
 		return 1, err
 	}
-	live := map[string]bool{}
-	for _, n := range names {
-		live[n] = true
+	// A sandbox in phase Error is listed but not running: its container
+	// stopped, as when the container runtime restarts.
+	live, lost := map[string]bool{}, map[string]bool{}
+	var names []string
+	for _, l := range listed {
+		names = append(names, l.Name)
+		if l.Phase == openshell.PhaseError {
+			lost[l.Name] = true
+		} else {
+			live[l.Name] = true
+		}
 	}
 	s, err := dirs.LoadState()
 	if err != nil {
@@ -1506,7 +1516,7 @@ func cmdPs(e env, args []string) (int, error) {
 	}
 	for _, n := range names {
 		if !known[n] {
-			s.Put(config.Sandbox{Name: n, Running: true})
+			s.Put(config.Sandbox{Name: n, Running: live[n]})
 			changed = true
 		}
 	}
@@ -1521,8 +1531,10 @@ func cmdPs(e env, args []string) (int, error) {
 	if *asJSON {
 		docs := []jsonSandbox{}
 		for _, sb := range list {
-			if sb.Running || *all {
-				docs = append(docs, sandboxJSON(sb))
+			if sb.Running || lost[sb.Name] || *all {
+				d := sandboxJSON(sb)
+				d.Lost = lost[sb.Name]
+				docs = append(docs, d)
 			}
 		}
 		return 0, writeJSON(e.stdout, docs)
@@ -1531,18 +1543,25 @@ func cmdPs(e env, args []string) (int, error) {
 	home := homeDir()
 	rows := [][]screen.Cell{{{Text: "sandbox"}, {Text: "agent"}, {Text: "folder"}, {Text: "started"}, {Text: "state"}}}
 	running, finished := 0, 0
+	stopped := 0
 	for _, sb := range list {
-		if sb.Running {
+		switch {
+		case sb.Running:
 			running++
-		} else {
+		case lost[sb.Name]:
+			stopped++
+		default:
 			finished++
 			if !*all {
 				continue
 			}
 		}
 		state := screen.Cell{Text: "finished", Tone: "dim"}
-		if sb.Running {
+		switch {
+		case sb.Running:
 			state = screen.Cell{Text: "running", Tone: "accent"}
+		case lost[sb.Name]:
+			state = screen.Cell{Text: "stopped", Tone: "deny"}
 		}
 		rows = append(rows, []screen.Cell{{Text: sb.Name}, {Text: dash(sb.Agent)}, {Text: dash(tilde(sb.Repo, home))}, {Text: started(sb)}, state})
 	}
@@ -1558,6 +1577,9 @@ func cmdPs(e env, args []string) (int, error) {
 		return 0, nil
 	}
 	title := plural(running, "sandbox running", "sandboxes running")
+	if stopped > 0 {
+		title += ", " + plural(stopped, "stopped", "stopped")
+	}
 	if *all {
 		title += ", " + plural(finished, "finished", "finished")
 	}
@@ -1567,6 +1589,9 @@ func cmdPs(e env, args []string) (int, error) {
 	var hints [][2]string
 	if running > 0 {
 		hints = append(hints, [2]string{"fenzi connect [sandbox]", "open its agent again"}, [2]string{"fenzi stop [sandbox]", "end it and review the changes"})
+	}
+	if stopped > 0 {
+		hints = append(hints, [2]string{"fenzi stop <sandbox>", "start a stopped one again to bring its changes back, or delete it"})
 	}
 	if !*all && finished > 0 {
 		hints = append(hints, [2]string{"fenzi ps --all", "include the finished ones"})
@@ -1592,6 +1617,15 @@ func cmdStop(e env, args []string) (int, error) {
 		name = pos[0]
 	}
 	u := tui.New(e.stdin, e.stdout)
+	if name != "" {
+		lost, err := client().Lost(e.ctx)
+		if err != nil {
+			return 1, err
+		}
+		if slices.Contains(lost, name) {
+			return stopLost(e, u, dirs, name, *yes)
+		}
+	}
 	sb, err := chooseRunning(e, u, dirs, name, "Stop which sandbox?")
 	if err != nil {
 		return 1, err
@@ -1630,6 +1664,77 @@ func cmdStop(e env, args []string) (int, error) {
 		}
 	}
 	return 0, nil
+}
+
+// stopLost stops a sandbox in phase Error. OpenShell starts it again when
+// it can, and the stop goes on as usual. When it cannot, which is the case
+// after the container runtime restarted, its files cannot be copied out, and
+// it is deleted only when the person agrees.
+func stopLost(e env, u *tui.UI, dirs config.Dirs, name string, yes bool) (int, error) {
+	oc := client()
+	u.Blank()
+	u.Println(fmt.Sprintf("  %s %s", u.Accent("■"), u.Bold(name+" is not running")))
+	u.Note("Its container stopped, as it does when the container runtime restarts. Fenzi asks OpenShell to start it again, so its changes can come back.")
+	u.Blank()
+	startErr := oc.Start(e.ctx, name)
+	if startErr == nil {
+		for i := 0; i < 30; i++ {
+			running, err := oc.Sandboxes(e.ctx)
+			if err != nil {
+				return 1, err
+			}
+			if slices.Contains(running, name) {
+				u.Done("Started", name)
+				return cmdStop(e, append([]string{name}, yesFlag(yes)...))
+			}
+			time.Sleep(startPoll)
+		}
+		startErr = errors.New("it did not come back within a minute")
+	}
+	sb := config.Sandbox{Name: name}
+	if s, err := dirs.LoadState(); err == nil {
+		if found, ok := s.Find(name); ok {
+			sb = found
+		}
+	}
+	u.Problem("Not started", openshell.ErrorMessage(startErr))
+	u.Note("OpenShell cannot start " + name + " again, so the files the agent changed in it cannot be copied out. Deleting it removes them for good.")
+	u.Blank()
+	ok := yes
+	if !yes {
+		var err error
+		if u.Interactive() {
+			ok, err = u.Confirm("Delete it?", "Delete it", "Keep it")
+			if errors.Is(err, tui.ErrCancelled) {
+				ok, err = false, nil
+			}
+		} else {
+			a, _ := u.Input("Delete it? [y/N]", "")
+			a = strings.ToLower(strings.TrimSpace(a))
+			ok = a == "y" || a == "yes"
+		}
+		if err != nil {
+			return 1, err
+		}
+	}
+	if !ok {
+		u.Skip("Kept", name+"; fenzi rm "+name+" deletes it")
+		return 0, nil
+	}
+	if err := run.Discard(e.ctx, run.Deps{OpenShell: oc, Dirs: dirs, Out: e.stdout}, sb); err != nil {
+		return 1, err
+	}
+	return 0, nil
+}
+
+// startPoll is how often stopLost looks for a started sandbox, 30 times.
+var startPoll = 2 * time.Second
+
+func yesFlag(yes bool) []string {
+	if yes {
+		return []string{"--yes"}
+	}
+	return nil
 }
 
 func cmdKey(e env, args []string) (int, error) {

@@ -13,12 +13,14 @@ import (
 )
 
 // TestMain keeps every test in this package away from the machine's own
-// config, which now includes ~/.config/fenzi/mcp.yaml.
+// config, which now includes ~/.config/fenzi/mcp.yaml, and from its colima.
 func TestMain(m *testing.M) {
 	cfg, _ := os.MkdirTemp("", "fenzi-test-config-")
 	cache, _ := os.MkdirTemp("", "fenzi-test-cache-")
 	os.Setenv("XDG_CONFIG_HOME", cfg)
 	os.Setenv("XDG_CACHE_HOME", cache)
+	// The DNS check asks colima only where a test says the runtime is colima.
+	onColima = func() bool { return false }
 	code := m.Run()
 	os.RemoveAll(cfg)
 	os.RemoveAll(cache)

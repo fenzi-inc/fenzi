@@ -78,3 +78,26 @@ func dropEmptyStaging(dirs config.Dirs, name string) {
 		_ = os.RemoveAll(dir)
 	}
 }
+
+// Discard deletes a sandbox whose files cannot be copied out: one in phase
+// Error that OpenShell would not start again. The log is saved first, so
+// fenzi log still shows what it did.
+func Discard(ctx context.Context, d Deps, sb config.Sandbox) error {
+	scr := screen.New(d.Out)
+	if out, err := settledLog(ctx, d, sb.Name); err == nil {
+		runDir := d.Dirs.Run(sb.Name)
+		_ = os.MkdirAll(runDir, 0o700)
+		_ = os.WriteFile(filepath.Join(runDir, LogFile), out, 0o600)
+		scr.Label("log", "saved, fenzi log")
+	} else {
+		scr.Label("log", fmt.Sprintf("could not be saved: %v", err))
+	}
+	scr.Label("changes", "not copied; the sandbox stopped and cannot give back its files")
+	if err := d.OpenShell.Delete(ctx, sb.Name); err != nil {
+		return err
+	}
+	markStopped(d.Dirs, sb.Name)
+	dropEmptyStaging(d.Dirs, sb.Name)
+	scr.Label("sandbox", sb.Name+", deleted")
+	return nil
+}

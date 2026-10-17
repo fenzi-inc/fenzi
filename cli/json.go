@@ -71,6 +71,10 @@ type jsonSandbox struct {
 	// Fenzi did not start.
 	Created string `json:"created"`
 	Running bool   `json:"running"`
+	// Lost is a sandbox whose container stopped (phase Error), as when the
+	// container runtime restarts. It is not running; fenzi stop starts it
+	// again when OpenShell can, or deletes it.
+	Lost bool `json:"lost,omitempty"`
 }
 
 func sandboxJSON(sb config.Sandbox) jsonSandbox {

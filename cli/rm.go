@@ -3,16 +3,20 @@ package main
 // fenzi rm: forget finished sandboxes. A finished sandbox is already gone
 // from the gateway; what is left on this machine is its record in the state,
 // the changes staged when it ended, and the log saved then. rm removes those
-// three, in that order. A running sandbox is refused: fenzi stop ends it.
+// three, in that order. A running sandbox is refused: fenzi stop ends it. A
+// sandbox whose container stopped (phase Error) is deleted from the gateway
+// too: it cannot run again or give back its files.
 
 import (
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/openshell"
 	"fenzi/cli/internal/run"
 	"fenzi/cli/internal/tui"
 )
@@ -23,6 +27,9 @@ type jsonRemoved struct {
 	Name          string `json:"name"`
 	StagedChanges bool   `json:"staged_changes"`
 	SavedLog      bool   `json:"saved_log"`
+	// Lost is a sandbox whose container stopped (phase Error), deleted from
+	// the runtime too.
+	Lost bool `json:"lost,omitempty"`
 }
 
 // jsonRefused is a sandbox rm left alone, with the reason it printed.
@@ -55,13 +62,19 @@ func cmdRm(e env, args []string) (int, error) {
 		return 1, err
 	}
 	// The gateway says what is running; the state says what Fenzi started.
-	live, err := client().Sandboxes(e.ctx)
+	// A sandbox in phase Error is not running and cannot run again, so rm
+	// deletes it from the runtime too.
+	listed, err := client().List(e.ctx)
 	if err != nil {
 		return 1, err
 	}
-	running := map[string]bool{}
-	for _, n := range live {
-		running[n] = true
+	running, lost := map[string]bool{}, map[string]bool{}
+	for _, l := range listed {
+		if l.Phase == openshell.PhaseError {
+			lost[l.Name] = true
+		} else {
+			running[l.Name] = true
+		}
 	}
 	s, err := dirs.LoadState()
 	if err != nil {
@@ -78,10 +91,16 @@ func cmdRm(e env, args []string) (int, error) {
 				names = append(names, sb.Name)
 			}
 		}
+		for n := range lost {
+			if _, ok := s.Find(n); !ok {
+				names = append(names, n)
+			}
+		}
+		sort.Strings(names)
 	} else {
 		seen := map[string]bool{}
 		for _, n := range pos {
-			if _, ok := s.Find(n); !ok && !running[n] {
+			if _, ok := s.Find(n); !ok && !running[n] && !lost[n] {
 				return 1, fmt.Errorf("%s is not a sandbox on this machine; fenzi ps --all lists them", n)
 			}
 			if !seen[n] {
@@ -97,10 +116,16 @@ func cmdRm(e env, args []string) (int, error) {
 			doc.Refused = append(doc.Refused, jsonRefused{Name: n, Reason: fmt.Sprintf("%s is running; fenzi stop %s ends it first", n, n)})
 			continue
 		}
+		if lost[n] {
+			if err := client().Delete(e.ctx, n); err != nil {
+				return 1, err
+			}
+		}
 		r, err := removeSandbox(dirs, s, n)
 		if err != nil {
 			return 1, err
 		}
+		r.Lost = lost[n]
 		doc.Removed = append(doc.Removed, r)
 	}
 
@@ -127,6 +152,9 @@ func cmdRm(e env, args []string) (int, error) {
 	}
 	for _, r := range doc.Removed {
 		what := "record"
+		if r.Lost {
+			what = "sandbox, its files, record"
+		}
 		if r.StagedChanges {
 			what += ", staged changes"
 		}

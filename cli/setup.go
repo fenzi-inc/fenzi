@@ -359,6 +359,10 @@ gateway:
 		return quietExit(3)
 	}
 
+	if err := setupDNS(e, u, oc); err != nil {
+		return err
+	}
+
 	mode, err := oc.GlobalSetting(e.ctx, "proposal_approval_mode")
 	switch {
 	case err != nil:

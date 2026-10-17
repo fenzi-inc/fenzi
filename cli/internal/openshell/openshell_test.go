@@ -2,6 +2,7 @@ package openshell
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -122,11 +123,44 @@ func TestCreateArgsWithMCPProviders(t *testing.T) {
 // Sandboxes created before the rename from Boundlane carry boundlane=1.
 func TestSandboxesListsBothLabels(t *testing.T) {
 	f := &Fake{Replies: map[string]Reply{
-		"sandbox list --names --selector fenzi=1":     {Out: "fenzi-new-1a2b\n"},
-		"sandbox list --names --selector boundlane=1": {Out: "fenzi-old-3c4d\nfenzi-new-1a2b\n"},
+		"sandbox list --selector fenzi=1":     {Out: "fenzi-new-1a2b\n"},
+		"sandbox list --selector boundlane=1": {Out: "fenzi-old-3c4d\nfenzi-new-1a2b\n"},
 	}}
 	got, err := Client{R: f}.Sandboxes(context.Background())
 	if err != nil || strings.Join(got, " ") != "fenzi-new-1a2b fenzi-old-3c4d" {
 		t.Fatalf("%q %v", got, err)
+	}
+}
+
+// Recorded from OpenShell 0.1.2 on 17 October 2026, after the container
+// runtime restarted under a running sandbox: the list is a table with the
+// phase last, and a label with no sandbox prints one line.
+func TestListPhases(t *testing.T) {
+	f := &Fake{Replies: map[string]Reply{
+		"sandbox list --selector fenzi=1":     {Out: "NAME                 CREATED              PHASE\nfenzi-rs-brain-8a52  2026-10-17 19:20:02  Error\nfenzi-web-1a2b       2026-10-17 19:32:52  Ready\n"},
+		"sandbox list --selector boundlane=1": {Out: "No sandboxes found.\n"},
+	}}
+	c := Client{R: f}
+	list, err := c.List(context.Background())
+	if err != nil || len(list) != 2 || list[0] != (Listed{"fenzi-rs-brain-8a52", PhaseError}) || list[1].Phase != "Ready" {
+		t.Fatalf("%+v %v", list, err)
+	}
+	running, _ := c.Sandboxes(context.Background())
+	lost, _ := c.Lost(context.Background())
+	if strings.Join(running, " ") != "fenzi-web-1a2b" || strings.Join(lost, " ") != "fenzi-rs-brain-8a52" {
+		t.Errorf("running %v, lost %v", running, lost)
+	}
+}
+
+// The error as the runner returns it: the command, then OpenShell's framed
+// message on stderr (0.1.2, `sandbox start` on a sandbox lost in a runtime
+// restart).
+func TestErrorMessage(t *testing.T) {
+	err := errors.New("openshell sandbox start fenzi-rs-brain-8a52: Error:   × code: 'The system is not in a state required for the operation's\n  │ execution', message: \"sandbox must be Stopped, Completed, or a failed\n  │ main-process Error to start (current phase: Error)\"\n")
+	if got := ErrorMessage(err); got != "sandbox must be Stopped, Completed, or a failed main-process Error to start (current phase: Error)" {
+		t.Errorf("%q", got)
+	}
+	if got := ErrorMessage(errors.New("exit status 1")); got != "exit status 1" {
+		t.Errorf("%q", got)
 	}
 }

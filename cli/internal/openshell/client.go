@@ -330,26 +330,106 @@ func (c Client) ExecOutput(ctx context.Context, name string, cmd ...string) ([]b
 	return c.R.Output(ctx, args...)
 }
 
-// Sandboxes: `openshell sandbox list --names --selector fenzi=1`, one name
-// per line (0.1.2 help text). Every sandbox run creates carries that label.
-// Sandboxes created before the rename from Boundlane carry boundlane=1
-// instead, so both are listed.
-func (c Client) Sandboxes(ctx context.Context) ([]string, error) {
-	var names []string
+// Listed is a sandbox and its phase, as `sandbox list` prints them.
+type Listed struct {
+	Name string
+	// Phase is Ready, Error, and the like; empty when the list gave names
+	// only.
+	Phase string
+}
+
+// PhaseError is the phase of a sandbox whose container stopped. When the
+// container runtime restarted, OpenShell 0.1.2 cannot start it again
+// ("sandbox must be Stopped, Completed, or a failed main-process Error to
+// start"), and exec and download refuse it ("sandbox is not ready").
+const PhaseError = "Error"
+
+// List: `openshell sandbox list --selector fenzi=1`, a table recorded from
+// 0.1.2:
+//
+//	NAME                 CREATED              PHASE
+//	fenzi-rs-brain-8a52  2026-10-17 19:20:02  Error
+//
+// or "No sandboxes found." when none match. Every sandbox run creates
+// carries that label. Sandboxes created before the rename from Boundlane
+// carry boundlane=1 instead, so both are listed.
+func (c Client) List(ctx context.Context) ([]Listed, error) {
+	var list []Listed
 	seen := map[string]bool{}
 	for _, label := range []string{"fenzi=1", "boundlane=1"} {
-		out, err := c.R.Output(ctx, "sandbox", "list", "--names", "--selector", label)
+		out, err := c.R.Output(ctx, "sandbox", "list", "--selector", label)
 		if err != nil {
 			return nil, err
 		}
-		for _, n := range strings.Fields(string(out)) {
-			if !seen[n] {
-				seen[n] = true
-				names = append(names, n)
+		for _, l := range parseList(out) {
+			if !seen[l.Name] {
+				seen[l.Name] = true
+				list = append(list, l)
 			}
 		}
 	}
+	return list, nil
+}
+
+// parseList reads the table, or a list of names with no header.
+func parseList(out []byte) []Listed {
+	var list []Listed
+	table := false
+	for i, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		switch {
+		case len(f) == 0:
+			continue
+		case i == 0 && f[0] == "NAME":
+			table = true
+			continue
+		case strings.HasPrefix(line, "No sandboxes"):
+			continue
+		}
+		l := Listed{Name: f[0]}
+		if table && len(f) > 1 {
+			l.Phase = f[len(f)-1]
+		}
+		list = append(list, l)
+	}
+	return list
+}
+
+// Sandboxes are the sandboxes that run, by name: every listed one except
+// those in phase Error, which can neither run an agent nor give back files.
+func (c Client) Sandboxes(ctx context.Context) ([]string, error) {
+	list, err := c.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, l := range list {
+		if l.Phase != PhaseError {
+			names = append(names, l.Name)
+		}
+	}
 	return names, nil
+}
+
+// Lost are the sandboxes in phase Error, by name.
+func (c Client) Lost(ctx context.Context) ([]string, error) {
+	list, err := c.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, l := range list {
+		if l.Phase == PhaseError {
+			names = append(names, l.Name)
+		}
+	}
+	return names, nil
+}
+
+// Start: `openshell sandbox start <name>`, for a stopped sandbox.
+func (c Client) Start(ctx context.Context, name string) error {
+	_, err := c.R.Output(ctx, "sandbox", "start", name)
+	return err
 }
 
 // Delete: `openshell sandbox delete <name>`. Deletes the sandbox's logs too.
@@ -425,4 +505,36 @@ func (v VersionRange) Contains(s string) (string, bool) {
 	major, _ := strconv.Atoi(m[1])
 	minor, _ := strconv.Atoi(m[2])
 	return m[0], major == v.Major && minor == v.Minor
+}
+
+// ErrorMessage is the message of an OpenShell error, without the frame
+// 0.1.2 draws around it. Recorded from `sandbox start` on a sandbox lost in
+// a runtime restart:
+//
+//	Error:   × code: 'The system is not in a state required for the operation's
+//	  │ execution', message: "sandbox must be Stopped, Completed, or a failed
+//	  │ main-process Error to start (current phase: Error)"
+//
+// Another error is returned as it is, on one line.
+func ErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, line := range strings.Split(err.Error(), "\n") {
+		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "│"))
+		if b.Len() > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(line)
+	}
+	all := strings.Join(strings.Fields(b.String()), " ")
+	if i := strings.Index(all, `message: "`); i >= 0 {
+		m := all[i+len(`message: "`):]
+		if j := strings.LastIndex(m, `"`); j >= 0 {
+			m = m[:j]
+		}
+		return m
+	}
+	return all
 }
