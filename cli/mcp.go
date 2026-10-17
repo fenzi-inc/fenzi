@@ -96,6 +96,10 @@ func mcpList(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
+	// The same check run does, so a problem shows here and not first at run.
+	if err := resolved.Doc.WithDefaults().Validate(); err != nil {
+		return 1, err
+	}
 	_, enrolledErr := team.Load(dirs)
 	onTeam := enrolledErr == nil
 	machine, _ := run.LoadMachineMCP()
@@ -437,10 +441,11 @@ func mcpImport(e env, args []string) (int, error) {
 		if err != nil {
 			return 1, err
 		}
-		servers, needsToken, err := parseAgentMCP(raw)
+		servers, refused, needsToken, err := parseAgentMCP(raw)
 		if err != nil {
 			return 1, fmt.Errorf("%s: %w", src, err)
 		}
+		res.Skipped = append(res.Skipped, refused...)
 		for _, n := range sortedMCP(servers) {
 			if f.has(n) {
 				reason := "already in fenzi.yaml; left as it is"
@@ -452,6 +457,13 @@ func mcpImport(e env, args []string) (int, error) {
 			}
 			s := servers[n]
 			f.put(n, s)
+			// Each server is checked on its own, so one the policy refuses
+			// is left out with the reason and the rest still come in.
+			if _, err := f.checkMCP(false); err != nil {
+				f.remove(n)
+				res.Skipped = append(res.Skipped, jsonMCPSkipped{Name: n, Reason: importProblem(n, err)})
+				continue
+			}
 			from[n] = src
 			res.Added = append(res.Added, jsonMCPImported{Name: n, URL: s.URL, Command: s.Command, Allow: nonNilStrings(s.Tools.Allow), Token: s.Token})
 		}
@@ -476,15 +488,10 @@ func mcpImport(e env, args []string) (int, error) {
 		u.Blank()
 	}
 	for _, s := range res.Skipped {
-		if *dryRun {
-			u.Skip(s.Name, s.Reason)
-		} else {
-			// The text a plain import has always printed.
-			u.Skip(s.Name, "already in fenzi.yaml; left as it is")
-		}
+		u.Skip(s.Name, s.Reason)
 	}
 	if len(res.Added) == 0 {
-		u.Skip("Nothing new", "every server is already in fenzi.yaml")
+		u.Skip("Nothing new", "no server here can be added to fenzi.yaml")
 		u.Blank()
 		return 0, nil
 	}
@@ -519,7 +526,7 @@ func mcpImport(e env, args []string) (int, error) {
 
 // parseAgentMCP reads the mcpServers object Claude Code (.mcp.json) and
 // Cursor (.cursor/mcp.json) use.
-func parseAgentMCP(raw []byte) (map[string]compiler.MCPServer, []string, error) {
+func parseAgentMCP(raw []byte) (map[string]compiler.MCPServer, []jsonMCPSkipped, []string, error) {
 	var doc struct {
 		MCPServers map[string]struct {
 			Type    string            `json:"type"`
@@ -531,12 +538,13 @@ func parseAgentMCP(raw []byte) (map[string]compiler.MCPServer, []string, error) 
 		} `json:"mcpServers"`
 	}
 	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	out := map[string]compiler.MCPServer{}
+	var skipped []jsonMCPSkipped
 	var tokens []string
 	for name, s := range doc.MCPServers {
-		n := strings.ToLower(strings.ReplaceAll(name, "_", "-"))
+		n := importName(name)
 		var m compiler.MCPServer
 		switch {
 		case s.URL != "":
@@ -550,14 +558,57 @@ func parseAgentMCP(raw []byte) (map[string]compiler.MCPServer, []string, error) 
 			}
 		case s.Command != "":
 			m.Command = append([]string{s.Command}, s.Args...)
-			m.Env = s.Env
+			var secrets []string
+			for k, v := range s.Env {
+				if compiler.SecretEnv(k, v) {
+					secrets = append(secrets, k)
+					continue
+				}
+				if m.Env == nil {
+					m.Env = map[string]string{}
+				}
+				m.Env[k] = v
+			}
+			if len(secrets) > 0 {
+				sort.Strings(secrets)
+				skipped = append(skipped, jsonMCPSkipped{Name: n, Reason: "Needs " + strings.Join(secrets, ", ") + ", a secret. A local server with a secret is not supported yet, and fenzi.yaml never holds one."})
+				continue
+			}
 		default:
+			skipped = append(skipped, jsonMCPSkipped{Name: n, Reason: "has neither a url nor a command"})
+			continue
+		}
+		if _, dup := out[n]; dup {
+			skipped = append(skipped, jsonMCPSkipped{Name: n, Reason: "another entry in the same file has this name"})
 			continue
 		}
 		out[n] = m
 	}
 	sort.Strings(tokens)
-	return out, tokens, nil
+	sort.Slice(skipped, func(i, j int) bool { return skipped[i].Name < skipped[j].Name })
+	return out, skipped, tokens, nil
+}
+
+// importName turns an agent's server name into one fenzi.yaml takes:
+// lowercase, with underscores, spaces, and dots as dashes.
+func importName(name string) string {
+	n := strings.ToLower(strings.TrimSpace(name))
+	n = strings.NewReplacer("_", "-", " ", "-", ".", "-").Replace(n)
+	return strings.Trim(n, "-")
+}
+
+// importProblem is the first reason the policy gives for refusing a server,
+// without the field path in front.
+func importProblem(name string, err error) string {
+	var ve *compiler.ValidationError
+	if !errors.As(err, &ve) || len(ve.Problems) == 0 {
+		return err.Error()
+	}
+	p := strings.TrimPrefix(ve.Problems[0], "project file: ")
+	if i := strings.Index(p, ": "); i >= 0 && strings.HasPrefix(p, "mcp."+name) {
+		p = p[i+2:]
+	}
+	return p
 }
 
 func sortedMCP(m map[string]compiler.MCPServer) []string {

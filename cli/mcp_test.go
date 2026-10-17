@@ -264,3 +264,61 @@ func TestApproveRefusesAnMCPRequest(t *testing.T) {
 		}
 	}
 }
+
+// A .cursor/mcp.json like the DigitalOcean one: long server names and an API
+// token in env. The token must never reach fenzi.yaml; a server that needs
+// one is skipped with the reason, and the rest come in.
+func TestMCPImportNeverWritesASecret(t *testing.T) {
+	repo := mcpFixture(t)
+	if err := os.MkdirAll(filepath.Join(repo, ".cursor"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const token = "dop_v1_0123456789abcdef0123456789abcdef0123456789abcdef0123456789ab"
+	if err := os.WriteFile(filepath.Join(repo, ".cursor", "mcp.json"), []byte(`{"mcpServers":{
+  "digitalocean-genai-inferencerouter": {"command":"npx","args":["-y","@digitalocean/mcp","--services","genai-inferencerouter"],"env":{"DIGITALOCEAN_API_TOKEN":"`+token+`"}},
+  "digitalocean-docs": {"command":"npx","args":["-y","@digitalocean/mcp","--services","docs"],"env":{"LOG_LEVEL":"warn"}},
+  "Some_Tool.v2": {"command":"uvx","args":["some-tool"],"env":{"MODE":"`+token+`"}}
+}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var preview jsonMCPImport
+	if stderr, code := runJSON(t, &preview, "mcp", "import", "--dry-run", "--json"); code != 0 {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	if len(preview.Added) != 1 || preview.Added[0].Name != "digitalocean-docs" {
+		t.Errorf("added %+v", preview.Added)
+	}
+	reasons := map[string]string{}
+	for _, s := range preview.Skipped {
+		reasons[s.Name] = s.Reason
+	}
+	if !strings.Contains(reasons["digitalocean-genai-inferencerouter"], "Needs DIGITALOCEAN_API_TOKEN, a secret") || !strings.Contains(reasons["some-tool-v2"], "Needs MODE, a secret") {
+		t.Errorf("skipped %+v", preview.Skipped)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "fenzi.yaml")); err == nil {
+		t.Fatal("a dry run wrote fenzi.yaml")
+	}
+
+	out, code := runCLI(t, "", "mcp", "import")
+	if code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	raw, _ := os.ReadFile(filepath.Join(repo, "fenzi.yaml"))
+	if strings.Contains(string(raw), "dop_v1_") || strings.Contains(out, "dop_v1_") {
+		t.Fatalf("the token reached fenzi.yaml or the output:\n%s\n%s", raw, out)
+	}
+	if !strings.Contains(string(raw), "LOG_LEVEL: warn") || !strings.Contains(out, "a secret") {
+		t.Errorf("fenzi.yaml:\n%s\noutput:\n%s", raw, out)
+	}
+}
+
+func TestMCPValidationRefusesASecretInEnv(t *testing.T) {
+	mcpFixture(t)
+	if err := os.WriteFile("fenzi.yaml", []byte("version: 1\nmcp:\n  do:\n    command: [npx, x]\n    env: {DIGITALOCEAN_API_TOKEN: dop_v1_abc}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, code := runCLI(t, "", "policy", "compile")
+	if code == 0 || !strings.Contains(out, "looks like a secret") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+}

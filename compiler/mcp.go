@@ -54,9 +54,13 @@ var MCPDiscovery = []string{
 }
 
 var (
-	mcpName  = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
-	toolName = regexp.MustCompile(`^[A-Za-z0-9_.:/-]{1,128}$`)
-	envName  = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+	mcpName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
+	// secretName and secretValue spot a variable that holds a credential:
+	// by its name, or by the prefix of a well-known token format.
+	secretName  = regexp.MustCompile(`(?i)(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|CREDENTIAL|AUTH)`)
+	secretValue = regexp.MustCompile(`^(dop_v1_|ghp_|gho_|ghs_|ghu_|github_pat_|glpat-|sk-|sk_live_|rk_live_|xox[abprs]-|AKIA|ASIA|AIza|lin_api_|ntn_|secret_|pat-|eyJ)`)
+	toolName    = regexp.MustCompile(`^[A-Za-z0-9_.:/-]{1,128}$`)
+	envName     = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 )
 
 // MCPProvider is the name of the provider that holds a server's token, and
@@ -142,7 +146,7 @@ func (d *Document) validateMCP(hosts map[string]int) []string {
 		s := d.MCP[name]
 		f := "mcp." + name
 		if !mcpName.MatchString(name) {
-			add("%s: a server name is lowercase letters, digits, and dashes, starting with a letter, at most 31 characters", f)
+			add("%s: a server name is lowercase letters, digits, and dashes, starting with a letter, at most 63 characters", f)
 		}
 		switch {
 		case s.Remote() && len(s.Command) > 0:
@@ -150,9 +154,12 @@ func (d *Document) validateMCP(hosts map[string]int) []string {
 		case !s.Remote() && len(s.Command) == 0:
 			add("%s: set url for a remote server or command for a local one", f)
 		}
-		for k := range s.Env {
+		for _, k := range sortedEnv(s.Env) {
 			if !envName.MatchString(k) {
 				add("%s.env: %q is not a variable name", f, k)
+			}
+			if SecretEnv(k, s.Env[k]) {
+				add("%s.env.%s: looks like a secret. fenzi.yaml is a plain file that the repository and the sandbox can read, so it never holds one; a local server that needs a secret is not supported yet", f, k)
 			}
 		}
 		if !s.Remote() {
@@ -496,4 +503,23 @@ func sameMCP(a, b map[string]MCPServer) bool {
 		}
 	}
 	return true
+}
+
+// SecretEnv reports whether a variable of a local server looks like it holds
+// a credential, by its name or its value. Such a variable is never written
+// to a policy file.
+func SecretEnv(key, value string) bool {
+	if value == "" {
+		return false
+	}
+	return secretName.MatchString(key) || secretValue.MatchString(value)
+}
+
+func sortedEnv(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
