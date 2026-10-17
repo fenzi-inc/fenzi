@@ -150,6 +150,86 @@ func TestMCPImport(t *testing.T) {
 	}
 }
 
+// The preview reads the same files, writes nothing, and lists what a real
+// import then adds.
+func TestMCPImportDryRun(t *testing.T) {
+	repo := mcpFixture(t)
+	if out, code := runCLI(t, "", "mcp", "add", "files", "--", "npx", "-y", "server-filesystem"); code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	before, _ := os.ReadFile(filepath.Join(repo, "fenzi.yaml"))
+	if err := os.WriteFile(filepath.Join(repo, ".mcp.json"), []byte(`{"mcpServers":{
+  "Linear_App": {"type":"http","url":"https://mcp.linear.app/mcp","headers":{"Authorization":"Bearer lin_api_secret"}},
+  "files": {"command":"npx","args":["-y","server-filesystem"]},
+  "notes": {"command":"node","args":["notes.js"]}
+}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, code := runCLI(t, "", "mcp", "import", "--dry-run")
+	if code != 0 || !strings.Contains(out, "Import preview") || !strings.Contains(out, "nothing is written") || !strings.Contains(out, "linear-app") || strings.Contains(out, "lin_api_secret") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	var doc jsonMCPImport
+	if stderr, code := runJSON(t, &doc, "mcp", "import", "--dry-run", "--json"); code != 0 || stderr != "" {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	if strings.Join(doc.Sources, ",") != ".mcp.json" || strings.Join(doc.Tokens, ",") != "linear-app" {
+		t.Errorf("sources %v tokens %v", doc.Sources, doc.Tokens)
+	}
+	if len(doc.Added) != 2 || doc.Added[0].Name != "linear-app" || doc.Added[0].URL != "https://mcp.linear.app/mcp" || !doc.Added[0].Token || strings.Join(doc.Added[0].Allow, ",") != compiler.AllTools ||
+		doc.Added[1].Name != "notes" || strings.Join(doc.Added[1].Command, " ") != "node notes.js" || doc.Added[1].Allow == nil {
+		t.Errorf("added %+v", doc.Added)
+	}
+	if len(doc.Skipped) != 1 || doc.Skipped[0].Name != "files" || !strings.Contains(doc.Skipped[0].Reason, "already in fenzi.yaml") {
+		t.Errorf("skipped %+v", doc.Skipped)
+	}
+	if after, _ := os.ReadFile(filepath.Join(repo, "fenzi.yaml")); string(after) != string(before) {
+		t.Fatalf("the preview wrote fenzi.yaml:\n%s", after)
+	}
+
+	var done jsonMCPImport
+	if stderr, code := runJSON(t, &done, "mcp", "import", "--json"); code != 0 || stderr != "" {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	if len(done.Added) != len(doc.Added) || len(done.Skipped) != 1 {
+		t.Errorf("import %+v, preview %+v", done, doc)
+	}
+	raw, _ := os.ReadFile(filepath.Join(repo, "fenzi.yaml"))
+	written, err := compiler.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range doc.Added {
+		if _, ok := written.MCP[a.Name]; !ok {
+			t.Errorf("%s was previewed but not imported:\n%s", a.Name, raw)
+		}
+	}
+
+	var again jsonMCPImport
+	if _, code := runJSON(t, &again, "mcp", "import", "--dry-run", "--json"); code != 0 || again.Added == nil || len(again.Added) != 0 || len(again.Skipped) != 3 {
+		t.Errorf("after the import %+v", again)
+	}
+}
+
+// With no file to read, the preview is empty lists, not nulls, and no
+// fenzi.yaml.
+func TestMCPImportDryRunNothing(t *testing.T) {
+	repo := mcpFixture(t)
+	var doc map[string]any
+	if stderr, code := runJSON(t, &doc, "mcp", "import", "--dry-run", "--json"); code != 0 || stderr != "" {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	for _, k := range []string{"sources", "added", "skipped", "tokens"} {
+		if l, ok := doc[k].([]any); !ok || len(l) != 0 {
+			t.Errorf("%s = %v", k, doc[k])
+		}
+	}
+	if _, err := os.Stat(filepath.Join(repo, "fenzi.yaml")); err == nil {
+		t.Error("fenzi.yaml was written")
+	}
+}
+
 // Recorded from OpenShell 0.1.2: a proposal for an MCP server, which `rule
 // approve` would store as every tool (NVIDIA/OpenShell#4679).
 const mcpPending = `Network Rules:  (version 1, 1 chunk)

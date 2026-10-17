@@ -47,6 +47,7 @@ func cmdMCP(e env, args []string) (int, error) {
 			{"mcp remove <name>", "Remove a server"},
 			{"mcp token <name>", "Store or replace a server's token; it is hidden as you type"},
 			{"mcp import", "Copy the servers in .mcp.json or .cursor/mcp.json into fenzi.yaml"},
+			{"mcp import --dry-run", "Show the servers an import would add, and write nothing; --json for a program"},
 		}, "--machine on add and remove edits ~/.config/fenzi/mcp.yaml instead of ./fenzi.yaml. A change applies to the next fenzi run: agents read their servers when they start.")
 		return 0, nil
 	case "list":
@@ -369,11 +370,36 @@ func mcpToken(e env, args []string) (int, error) {
 	return 0, nil
 }
 
+// jsonMCPImport is what mcp import --json prints, with or without --dry-run.
+type jsonMCPImport struct {
+	Sources []string          `json:"sources"`
+	Added   []jsonMCPImported `json:"added"`
+	Skipped []jsonMCPSkipped  `json:"skipped"`
+	// Tokens are the servers whose Authorization header was not copied.
+	Tokens []string `json:"tokens"`
+}
+
+type jsonMCPImported struct {
+	Name    string   `json:"name"`
+	URL     string   `json:"url,omitempty"`
+	Command []string `json:"command,omitempty"`
+	Allow   []string `json:"allow"`
+	Token   bool     `json:"token"`
+}
+
+type jsonMCPSkipped struct {
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+}
+
 // mcpImport copies servers from the agents' own project files into
 // fenzi.yaml. A remote server comes in with every tool allowed and a note to
-// narrow it; a header that looks like a token is not copied.
+// narrow it; a header that looks like a token is not copied. --dry-run works
+// out the same result and writes nothing.
 func mcpImport(e env, args []string) (int, error) {
 	fs := newFlags("mcp import", e.stderr)
+	dryRun := fs.Bool("dry-run", false, "show the servers an import would add; write nothing")
+	asJSON := jsonFlag(fs)
 	pos, err := parse(fs, args)
 	if err != nil {
 		return 1, err
@@ -390,9 +416,13 @@ func mcpImport(e env, args []string) (int, error) {
 			}
 		}
 	}
+	res := jsonMCPImport{Sources: nonNilStrings(sources), Added: []jsonMCPImported{}, Skipped: []jsonMCPSkipped{}, Tokens: []string{}}
 	u := tui.New(e.stdin, e.stdout)
-	u.Blank()
 	if len(sources) == 0 {
+		if *asJSON {
+			return 0, writeJSON(e.stdout, res)
+		}
+		u.Blank()
 		u.Skip("Nothing to import", "no .mcp.json or .cursor/mcp.json here")
 		u.Blank()
 		return 0, nil
@@ -401,7 +431,7 @@ func mcpImport(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	var added, tokens []string
+	from := map[string]string{}
 	for _, src := range sources {
 		raw, err := os.ReadFile(filepath.Join(repo, src))
 		if err != nil {
@@ -413,25 +443,74 @@ func mcpImport(e env, args []string) (int, error) {
 		}
 		for _, n := range sortedMCP(servers) {
 			if f.has(n) {
-				u.Skip(n, "already in fenzi.yaml; left as it is")
+				reason := "already in fenzi.yaml; left as it is"
+				if first, ok := from[n]; ok {
+					reason = "also in " + first + "; the entry from there is kept"
+				}
+				res.Skipped = append(res.Skipped, jsonMCPSkipped{Name: n, Reason: reason})
 				continue
 			}
-			f.put(n, servers[n])
-			added = append(added, n)
+			s := servers[n]
+			f.put(n, s)
+			from[n] = src
+			res.Added = append(res.Added, jsonMCPImported{Name: n, URL: s.URL, Command: s.Command, Allow: nonNilStrings(s.Tools.Allow), Token: s.Token})
 		}
-		tokens = append(tokens, needsToken...)
+		res.Tokens = append(res.Tokens, needsToken...)
 	}
-	if len(added) == 0 {
+	if len(res.Added) > 0 {
+		if *dryRun {
+			_, err = f.checkMCP(false)
+		} else {
+			err = f.writeMCP(false)
+		}
+		if err != nil {
+			return 1, err
+		}
+	}
+	if *asJSON {
+		return 0, writeJSON(e.stdout, res)
+	}
+	if *dryRun {
+		u.Title("Import preview", "from "+strings.Join(sources, ", ")+"; nothing is written")
+	} else {
+		u.Blank()
+	}
+	for _, s := range res.Skipped {
+		if *dryRun {
+			u.Skip(s.Name, s.Reason)
+		} else {
+			// The text a plain import has always printed.
+			u.Skip(s.Name, "already in fenzi.yaml; left as it is")
+		}
+	}
+	if len(res.Added) == 0 {
 		u.Skip("Nothing new", "every server is already in fenzi.yaml")
 		u.Blank()
 		return 0, nil
 	}
-	if err := f.writeMCP(false); err != nil {
-		return 1, err
+	names := make([]string, len(res.Added))
+	for i, a := range res.Added {
+		names[i] = a.Name
 	}
-	u.Done("Imported", strings.Join(added, ", ")+" into fenzi.yaml")
+	if *dryRun {
+		for _, a := range res.Added {
+			where := a.URL
+			if where == "" {
+				where = strings.Join(a.Command, " ")
+			}
+			u.Done(a.Name, where)
+			u.Println("    " + u.Dim(mcpToolsLine(jsonMCP{URL: a.URL, Allow: a.Allow})))
+		}
+		u.Note("fenzi mcp import adds these to fenzi.yaml, with every tool allowed on a remote server. Narrow each one afterwards: fenzi mcp add <name> <url> --tool <tool>.")
+		for _, n := range res.Tokens {
+			u.Note("The " + n + " entry sends an Authorization header. It would not be copied; store the token with fenzi mcp token " + n + ".")
+		}
+		u.Blank()
+		return 0, nil
+	}
+	u.Done("Imported", strings.Join(names, ", ")+" into fenzi.yaml")
 	u.Note("Remote servers came in with every tool allowed. Narrow each one to the tools agents need: fenzi mcp add <name> <url> --tool <tool>.")
-	for _, n := range tokens {
+	for _, n := range res.Tokens {
 		u.Note("The " + n + " entry sent an Authorization header. It was not copied; store the token with fenzi mcp token " + n + ".")
 	}
 	u.Blank()
@@ -576,45 +655,52 @@ func remoteMCP(d *compiler.Document) int {
 	return n
 }
 
-// writeMCP checks the edited file the way run will read it, then writes it:
-// a project file over developer-default and the machine's servers.
-func (p *projectFile) writeMCP(machine bool) error {
-	if !machine {
-		out, err := p.bytes()
-		if err != nil {
-			return err
-		}
-		doc, err := compiler.Parse(out)
-		if err != nil {
-			return err
-		}
-		base := policies.DeveloperDefault()
-		if m, err := run.LoadMachineMCP(); err != nil {
-			return err
-		} else if m != nil {
-			if base, err = compiler.Merge(base, m); err != nil {
-				return err
-			}
-		}
-		merged, err := compiler.Merge(base, doc)
-		if err != nil {
-			return err
-		}
-		if err := merged.WithDefaults().Validate(); err != nil {
-			return err
-		}
-		return p.write()
-	}
+// checkMCP checks the edited file the way run will read it and returns its
+// bytes: a project file over developer-default and the machine's servers.
+func (p *projectFile) checkMCP(machine bool) ([]byte, error) {
 	out, err := p.bytes()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	doc, err := compiler.Parse(out)
 	if err != nil {
+		return nil, err
+	}
+	if machine {
+		if err := doc.WithDefaults().Validate(); err != nil {
+			return nil, err
+		}
+		return out, nil
+	}
+	base := policies.DeveloperDefault()
+	if m, err := run.LoadMachineMCP(); err != nil {
+		return nil, err
+	} else if m != nil {
+		if base, err = compiler.Merge(base, m); err != nil {
+			return nil, err
+		}
+	}
+	merged, err := compiler.Merge(base, doc)
+	if err != nil {
+		return nil, err
+	}
+	if err := merged.WithDefaults().Validate(); err != nil {
+		return nil, err
+	}
+	if err := checkProject(out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// writeMCP checks the edited file with checkMCP, then writes it.
+func (p *projectFile) writeMCP(machine bool) error {
+	out, err := p.checkMCP(machine)
+	if err != nil {
 		return err
 	}
-	if err := doc.WithDefaults().Validate(); err != nil {
-		return err
+	if machine {
+		return os.WriteFile(p.path, out, 0o600)
 	}
-	return os.WriteFile(p.path, out, 0o600)
+	return os.WriteFile(p.path, out, p.mode)
 }
