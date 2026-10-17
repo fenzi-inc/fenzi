@@ -47,3 +47,18 @@ func TestRunRefusesTheHomeFolder(t *testing.T) {
 		t.Errorf("the runtime was called from the home folder:\n%s", b)
 	}
 }
+
+func TestRunSignInOnlyForAnAgentThatSignsIn(t *testing.T) {
+	calls := recordingRuntime(t)
+	t.Chdir(t.TempDir())
+	out, code := runCLI(t, "", "run", "--sign-in", "codex")
+	if code != 1 || !strings.Contains(out, "Codex does not sign in itself") {
+		t.Errorf("exit %d:\n%s", code, out)
+	}
+	if b, err := os.ReadFile(calls); err == nil && len(b) > 0 {
+		t.Errorf("the runtime was called:\n%s", b)
+	}
+	if out, _ := runCLI(t, "", "run", "--help"); !strings.Contains(out, "--sign-in") {
+		t.Errorf("run --help does not list --sign-in:\n%s", out)
+	}
+}

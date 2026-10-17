@@ -52,13 +52,13 @@ default_flags:
 # Claude asks whether to use the API key it finds in the environment, with No
 # marked as recommended. The value is the sandbox placeholder; No leaves Claude
 # without a key, which is what a subscription user wants before /login.
-start_note: "Claude may ask whether to use the API key it found. Choose Yes for the key you stored: Claude sees a placeholder, not your key. To use your Claude subscription instead, choose No, then type /login."
+start_note: "Claude may ask whether to use the API key it found. Choose Yes for the key you stored: Claude sees a placeholder, not your key. To use your Claude subscription instead, choose No, then type /login, or start with fenzi run --sign-in claude."
 # With no key stored, run starts Claude Code without a provider and the model
 # API rule is compiled into the sandbox's policy, in the same form. Claude
 # then asks how to sign in; a subscription sign-in posts its code to
 # platform.claude.com (hosts above). The token is kept in ~/.claude inside the
 # sandbox, outside the project copy, and goes when the sandbox is deleted.
-sign_in_note: "No key is stored, so Claude asks you to sign in. Choose your Claude subscription and paste back the code your browser shows. To use a key instead, stop and run fenzi key set claude."
+sign_in_note: "Claude asks you to sign in. Choose your Claude subscription and paste back the code your browser shows. To use a key instead, run fenzi key set claude, then fenzi run without --sign-in."
 key:
   env: ANTHROPIC_API_KEY
   profile_type: fenzi-claude-code

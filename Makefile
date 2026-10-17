@@ -2,7 +2,7 @@
 
 # Raise this for every release. The installer and `fenzi update` read
 # latest.txt, and a release that keeps the old number is never offered.
-VERSION ?= 0.1.21
+VERSION ?= 0.1.22
 
 build:
 	go build -trimpath -o bin/fenzi ./cli

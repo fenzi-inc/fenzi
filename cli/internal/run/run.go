@@ -83,6 +83,9 @@ type Options struct {
 	Name     string
 	Keep     bool
 	NoUpload bool
+	// SignIn starts the agent without the stored key, so it signs in
+	// itself. Only for an agent that can (Entry.CanSignIn).
+	SignIn bool
 	// OnExit runs after the log is saved and the changes are staged, when
 	// Keep is false. Returning true leaves the sandbox running. Nil deletes
 	// it, which is what a script does.
@@ -213,12 +216,18 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 	if len(o.Profile) == 0 {
 		return res, fmt.Errorf("%s: %w", a.Name, agents.ErrNoProfile)
 	}
+	if o.SignIn && !a.CanSignIn() {
+		return res, fmt.Errorf("%s does not sign in itself; it runs with a key (fenzi key set %s)", a.Display, a.Name)
+	}
 	provider := ProviderName(a)
 	stored, err := d.OpenShell.ProviderExists(ctx, provider)
 	if err != nil {
 		return res, err
 	}
-	if !stored && d.Getenv(a.Key.Env) == "" {
+	if o.SignIn {
+		a.SignedIn = true
+		provider = ""
+	} else if !stored && d.Getenv(a.Key.Env) == "" {
 		if !a.CanSignIn() {
 			return res, fmt.Errorf("no key stored for %s; run fenzi key set %s, or export %s for this run. The key stays on this machine", a.Name, a.Name, a.Key.Env)
 		}
@@ -299,6 +308,8 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 	// openshell from this process's environment, once. A sandbox started
 	// without a key needs neither.
 	switch {
+	case a.SignedIn && stored:
+		say("key", "not used (--sign-in); %s signs in inside the sandbox", a.Display)
 	case a.SignedIn:
 		say("key", "none stored; %s signs in inside the sandbox", a.Display)
 	case stored:

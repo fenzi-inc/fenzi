@@ -274,6 +274,7 @@ func cmdRun(e env, args []string) (int, error) {
 	policyFile := fs.String("policy", "", "policy file to use instead of ./fenzi.yaml")
 	noUpload := fs.Bool("no-upload", false, "start with an empty working folder")
 	allowSecrets := fs.Bool("allow-secrets", false, "copy files that look like secrets without asking; the warning is still printed")
+	signIn := fs.Bool("sign-in", false, "start without the stored key, so the agent signs in itself: Claude Code with your Claude subscription")
 	if err := fs.Parse(args); err != nil {
 		return 1, err
 	}
@@ -290,6 +291,9 @@ func cmdRun(e env, args []string) (int, error) {
 	entry, err := agents.Get(rest[0])
 	if err != nil {
 		return 1, err
+	}
+	if *signIn && !entry.CanSignIn() {
+		return 1, fmt.Errorf("%s does not sign in itself; it runs with a key. Drop --sign-in", entry.Display)
 	}
 	profile, err := entry.Profile()
 	if err != nil {
@@ -314,7 +318,8 @@ func cmdRun(e env, args []string) (int, error) {
 	// A sandbox already running for this folder and agent holds the agent's
 	// session; going back to it keeps the conversation.
 	if !*fresh && *name == "" && *policyFile == "" && u.Interactive() {
-		if sb, ok := runningFor(e, dirs, repo, entry.Name); ok {
+		// With --sign-in, only a sandbox that was started without the key.
+		if sb, ok := runningFor(e, dirs, repo, entry.Name); ok && (!*signIn || sb.SignIn) {
 			u.Title(sb.Name+" is still running", tilde(repo, homeDir()))
 			i, err := u.Select("Go back to it?", []tui.Option{
 				{Label: "Resume " + sb.Name, Hint: entry.Display + " continues its last session there, with the files as it left them"},
@@ -373,7 +378,7 @@ func cmdRun(e env, args []string) (int, error) {
 		Filter:    workspace.GitFilter,
 	}, run.Options{
 		Agent: entry, Profile: profile, Args: rest[1:], Repo: repo, Policy: resolved,
-		Name: *name, Keep: *keep, NoUpload: *noUpload, ConfirmSecrets: confirmSecrets,
+		Name: *name, Keep: *keep, NoUpload: *noUpload, SignIn: *signIn, ConfirmSecrets: confirmSecrets,
 		OnExit: func(sandbox string) (bool, error) {
 			// The agent has exited: send its last decisions and requests before
 			// the questions, while the sandbox still exists.

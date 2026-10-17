@@ -327,6 +327,49 @@ func TestMissingKey(t *testing.T) {
 	}
 }
 
+// --sign-in starts without the key even when one is stored, for a person
+// who wants their subscription; the key stays stored for other runs.
+func TestSignInWithAStoredKey(t *testing.T) {
+	h := setup(t)
+	h.os.Replies["provider get"] = openshell.Reply{}
+	h.opts.SignIn = true
+	res, err := Run(context.Background(), h.deps, h.opts)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, h.out)
+	}
+	if h.called("profile import") || h.called("provider create") || h.called("provider delete") {
+		t.Errorf("--sign-in must neither use nor touch the stored key, got %v", h.os.Calls)
+	}
+	for _, c := range h.os.Calls {
+		if strings.HasPrefix(c, "sandbox create") && strings.Contains(c, "--provider") {
+			t.Errorf("created with a provider: %q", c)
+		}
+	}
+	b, err := os.ReadFile(filepath.Join(h.deps.Dirs.Run(res.Sandbox), "policy.yaml"))
+	if err != nil || !strings.Contains(string(b), "model_api_anthropic_com:") {
+		t.Errorf("policy.yaml must hold the model API rule: %v\n%s", err, b)
+	}
+	if out := h.out.String(); !strings.Contains(out, "not used (--sign-in)") || !strings.Contains(out, h.opts.Agent.SignInNote) {
+		t.Errorf("output:\n%s", out)
+	}
+	state, _ := h.deps.Dirs.LoadState()
+	if sb, ok := state.Find(res.Sandbox); !ok || !sb.SignIn {
+		t.Errorf("state %+v", sb)
+	}
+}
+
+func TestSignInRefusedForAnAgentThatCannot(t *testing.T) {
+	h := setup(t)
+	h.opts.SignIn = true
+	h.opts.Agent.SignInNote = ""
+	if _, err := Run(context.Background(), h.deps, h.opts); err == nil || !strings.Contains(err.Error(), "does not sign in itself") {
+		t.Fatalf("got %v", err)
+	}
+	if h.called("sandbox create") {
+		t.Errorf("nothing may be created, got %v", h.os.Calls)
+	}
+}
+
 func TestSignInWithoutKey(t *testing.T) {
 	h := setup(t)
 	h.deps.Getenv = func(string) string { return "" }
