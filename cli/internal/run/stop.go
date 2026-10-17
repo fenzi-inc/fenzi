@@ -14,11 +14,28 @@ import (
 )
 
 // Stop ends a sandbox the way an agent exit does: save the log, copy the
-// project out to staging, then delete. If the copy fails the sandbox is kept.
+// project out to staging, then delete. If the copy fails the sandbox is kept,
+// and so is any copy staged before it.
 func Stop(ctx context.Context, d Deps, sb config.Sandbox) ([]workspace.Change, error) {
 	scr := screen.New(d.Out)
 	say := func(label, format string, args ...any) {
 		scr.Label(label, fmt.Sprintf(format, args...))
+	}
+	// A fenzi run still attached to this sandbox copies it out when its
+	// agent exits; wait for it rather than copy at the same time.
+	unlock, err := lockCopyOut(ctx, d.Dirs, sb.Name)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	if stoppedElsewhere(d.Dirs, sb.Name) {
+		changes, err := stagedChanges(d, sb.Name, sb.Repo)
+		if err != nil {
+			return nil, err
+		}
+		say("sandbox", "%s, already stopped by the fenzi run attached to it", sb.Name)
+		sayStaged(say, changes)
+		return changes, nil
 	}
 	runDir := d.Dirs.Run(sb.Name)
 	if out, err := settledLog(ctx, d, sb.Name); err == nil {
@@ -40,11 +57,8 @@ func Stop(ctx context.Context, d Deps, sb config.Sandbox) ([]workspace.Change, e
 	case err != nil:
 		return nil, err
 	default:
-		files := filepath.Join(staging, "files")
-		if err := os.RemoveAll(files); err != nil {
-			return nil, err
-		}
-		if err := d.OpenShell.Download(ctx, sb.Name, ProjectDir(sb.Repo), files); err != nil {
+		files, err := stageCopy(ctx, d, sb.Name, ProjectDir(sb.Repo), staging)
+		if err != nil {
 			return nil, fmt.Errorf("copying changes out of %s: %w; the sandbox is kept so the agent's work is not lost", sb.Name, err)
 		}
 		filter := workspace.All
@@ -54,11 +68,7 @@ func Stop(ctx context.Context, d Deps, sb config.Sandbox) ([]workspace.Change, e
 		if changes, err = workspace.Changes(base, files, filter); err != nil {
 			return nil, err
 		}
-		if len(changes) == 0 {
-			say("changes", "none")
-		} else {
-			say("changes", "%d %s staged, not applied", len(changes), files1(len(changes)))
-		}
+		sayStaged(say, changes)
 	}
 
 	if err := d.OpenShell.Delete(ctx, sb.Name); err != nil {
@@ -70,11 +80,41 @@ func Stop(ctx context.Context, d Deps, sb config.Sandbox) ([]workspace.Change, e
 	return changes, nil
 }
 
+// stagedChanges compares the copy staged for a sandbox with its snapshot.
+// Nil when nothing is staged.
+func stagedChanges(d Deps, name, repo string) ([]workspace.Change, error) {
+	staging := d.Dirs.Staging(name)
+	files := filepath.Join(staging, StagedFiles)
+	if _, err := os.Stat(files); errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	base, err := workspace.Load(filepath.Join(staging, "base.json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	filter := workspace.All
+	if d.Filter != nil && repo != "" {
+		filter = d.Filter(repo)
+	}
+	return workspace.Changes(base, files, filter)
+}
+
+func sayStaged(say func(label, format string, args ...any), changes []workspace.Change) {
+	if len(changes) == 0 {
+		say("changes", "none")
+	} else {
+		say("changes", "%d %s staged, not applied", len(changes), files1(len(changes)))
+	}
+}
+
 // dropEmptyStaging removes a deleted sandbox's staging folder when no copy
 // is left in it to apply.
 func dropEmptyStaging(dirs config.Dirs, name string) {
 	dir := dirs.Staging(name)
-	if _, err := os.Stat(filepath.Join(dir, "files")); errors.Is(err, fs.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(dir, StagedFiles)); errors.Is(err, fs.ErrNotExist) {
 		_ = os.RemoveAll(dir)
 	}
 }
@@ -84,6 +124,11 @@ func dropEmptyStaging(dirs config.Dirs, name string) {
 // fenzi log still shows what it did.
 func Discard(ctx context.Context, d Deps, sb config.Sandbox) error {
 	scr := screen.New(d.Out)
+	unlock, err := lockCopyOut(ctx, d.Dirs, sb.Name)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if out, err := settledLog(ctx, d, sb.Name); err == nil {
 		runDir := d.Dirs.Run(sb.Name)
 		_ = os.MkdirAll(runDir, 0o700)

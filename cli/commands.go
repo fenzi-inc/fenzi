@@ -410,6 +410,16 @@ func cmdRun(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
+	if res.StoppedElsewhere {
+		// The window that stopped it shows the changes; this one points at them.
+		if len(res.Changes) > 0 {
+			u.Note("The changes came back before the sandbox was deleted. From " + tilde(repo, homeDir()) + ":")
+			flag := sandboxFlag(res.Sandbox)
+			u.Commands([2]string{"fenzi diff" + flag, "see them"}, [2]string{"fenzi apply" + flag, "apply them"})
+			u.Blank()
+		}
+		return 0, nil
+	}
 	if res.Kept {
 		u.Note("The sandbox keeps " + entry.Display + "'s session, its files and the approvals from this run. fenzi run --rm deletes it when the agent exits.")
 		u.Commands(
@@ -1179,7 +1189,10 @@ func staged(e env, name string) (config.Sandbox, workspace.Manifest, string, []w
 		if sb.Running {
 			return sb, nil, "", nil, fmt.Errorf("nothing staged for %s; fenzi stop %s brings back what the agent changed", sb.Name, sb.Name)
 		}
-		return sb, nil, "", nil, fmt.Errorf("nothing staged for %s; its changes were applied", sb.Name)
+		if _, err := os.Stat(filepath.Join(dir, run.AppliedMark)); err == nil {
+			return sb, nil, "", nil, fmt.Errorf("nothing staged for %s; its changes were applied", sb.Name)
+		}
+		return sb, nil, "", nil, fmt.Errorf("nothing staged for %s; the copy of its files is missing and no apply was recorded, so %s was not changed", sb.Name, tilde(sb.Repo, homeDir()))
 	}
 	changes, err := workspace.Changes(base, files, workspace.GitFilter(sb.Repo))
 	return sb, base, files, changes, err

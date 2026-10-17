@@ -9,8 +9,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/run"
 	"fenzi/cli/internal/tui"
 	"fenzi/cli/internal/workspace"
 )
@@ -230,6 +232,7 @@ func (r review) apply(u *tui.UI) (int, error) {
 	if err := next.Save(filepath.Join(filepath.Dir(r.files), "base.json")); err != nil {
 		return 1, err
 	}
+	_ = run.MarkApplied(filepath.Dir(r.files), time.Now())
 	_ = os.RemoveAll(r.files)
 	u.Blank()
 	u.Done("Applied", plural(len(r.changes), "file", "files")+" in "+r.folder())

@@ -109,6 +109,10 @@ type Result struct {
 	Changes  []workspace.Change
 	Staging  string
 	Kept     bool
+	// StoppedElsewhere means another command, fenzi stop or the Mac app,
+	// stopped the sandbox while this run was attached to it. That command
+	// copied the changes out; Changes lists what it staged.
+	StoppedElsewhere bool
 }
 
 // Settings turned on for every sandbox Fenzi creates.
@@ -472,14 +476,36 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		say("note", "%s", note)
 	}
 	execErr := d.OpenShell.Exec(ctx, name, project, a.Env, a.Argv(o.Args)...)
+
+	// 12. Save the log, stage the changes, delete the sandbox. A fenzi stop
+	// run elsewhere does the same, and ending the sandbox is what closed
+	// the agent's terminal here, so take turns with it and leave the copy
+	// to it when it got there first.
+	unlock, err := lockCopyOut(context.WithoutCancel(ctx), d.Dirs, name)
+	if err != nil {
+		o.Keep = true
+		return res, err
+	}
+	locked := true
+	defer func() {
+		if locked {
+			unlock()
+		}
+	}()
+	if stoppedElsewhere(d.Dirs, name) {
+		deleted = true
+		return stoppedByOther(d, o, res, say)
+	}
 	if code := openshell.ExitCode(execErr); code >= 0 {
 		res.ExitCode = code
 	} else if execErr != nil {
-		return res, execErr
+		// The connection to the agent failed without an exit code. The
+		// sandbox may still hold the agent's work, so it stays.
+		o.Keep = true
+		return res, fmt.Errorf("%w; the sandbox %s is kept, fenzi stop %s brings its changes back", execErr, name, name)
 	}
 	say("agent", "exited")
 
-	// 12. Save the log, stage the changes, delete the sandbox.
 	if out, lerr := settledLog(ctx, d, name); lerr == nil {
 		_ = os.WriteFile(filepath.Join(runDir, LogFile), out, 0o600)
 		say("log", "saved, fenzi log")
@@ -487,11 +513,8 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		say("log", "could not be saved: %v", lerr)
 	}
 
-	files := filepath.Join(res.Staging, "files")
-	if err := os.RemoveAll(files); err != nil {
-		return res, err
-	}
-	if derr := d.OpenShell.Download(ctx, name, project, files); derr != nil {
+	files, derr := stageCopy(ctx, d, name, project, res.Staging)
+	if derr != nil {
 		o.Keep = true
 		return res, fmt.Errorf("copying changes out of %s: %w; the sandbox is kept so the agent's work is not lost", name, derr)
 	}
@@ -499,11 +522,11 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 	if err != nil {
 		return res, err
 	}
-	if len(res.Changes) == 0 {
-		say("changes", "none")
-	} else {
-		say("changes", "%d %s staged, not applied", len(res.Changes), files1(len(res.Changes)))
-	}
+	sayStaged(say, res.Changes)
+	// The question below can wait on the person for as long as they like;
+	// a stop from elsewhere must not wait on it.
+	unlock()
+	locked = false
 
 	if !o.Keep && o.OnExit != nil {
 		keep, err := o.OnExit(name)
@@ -517,6 +540,15 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 			return res, err
 		}
 	}
+	if unlock, err = lockCopyOut(context.WithoutCancel(ctx), d.Dirs, name); err != nil {
+		o.Keep = true
+		return res, err
+	}
+	locked = true
+	if stoppedElsewhere(d.Dirs, name) {
+		deleted = true
+		return stoppedByOther(d, o, res, say)
+	}
 	if o.Keep {
 		res.Kept = true
 		say("sandbox", "%s, kept", name)
@@ -528,6 +560,24 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		markStopped(d.Dirs, name)
 		dropEmptyStaging(d.Dirs, name)
 		say("sandbox", "%s, deleted", name)
+	}
+	return res, nil
+}
+
+// stoppedByOther ends a run whose sandbox another command stopped. That
+// command saved the log and staged the changes, and its window shows them,
+// so this one only says where they are.
+func stoppedByOther(d Deps, o Options, res Result, say func(label, format string, args ...any)) (Result, error) {
+	res.StoppedElsewhere = true
+	res.ExitCode = 0
+	say("sandbox", "%s, stopped by fenzi stop outside this window", res.Sandbox)
+	changes, err := stagedChanges(d, res.Sandbox, o.Repo)
+	if err != nil {
+		return res, err
+	}
+	res.Changes = changes
+	if _, err := os.Stat(filepath.Join(res.Staging, StagedFiles)); err == nil {
+		sayStaged(say, changes)
 	}
 	return res, nil
 }

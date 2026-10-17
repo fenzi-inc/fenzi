@@ -162,3 +162,22 @@ func TestApplyRefusesOverwritingEdits(t *testing.T) {
 		t.Error("your edit was overwritten")
 	}
 }
+
+// A staged copy that is missing without an apply on record is not reported
+// as applied: that is how the work lost on 18 October 2026 looked.
+func TestMissingCopyIsNotCalledApplied(t *testing.T) {
+	repo := stagedFixture(t)
+	dirs, _ := config.Default()
+	if err := os.RemoveAll(filepath.Join(dirs.Staging(sandboxName), "files")); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"diff"}, {"apply", "--yes"}} {
+		out, code := runCLI(t, "", append(args, "--sandbox", sandboxName)...)
+		if code != 1 || strings.Contains(out, "were applied") || !strings.Contains(out, "the copy of its files is missing and no apply was recorded") {
+			t.Errorf("%s: exit %d:\n%s", args[0], code, out)
+		}
+	}
+	if b, _ := os.ReadFile(filepath.Join(repo, "app.py")); strings.Contains(string(b), "import sys") {
+		t.Error("the project changed")
+	}
+}
