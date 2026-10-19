@@ -23,9 +23,11 @@ var forwardLastWait = 20 * time.Second
 // a separate fenzi forward. It starts only on a machine signed in to a team,
 // for a sandbox started from the team's policy; on Free it does nothing.
 //
-// Passes take turns with any other forwarder through relay.lock: when one is
-// already running (the Mac app's, or fenzi forward), this one skips that
-// pass rather than queue behind it. Nothing is written to the agent's terminal.
+// One forwarder repeats at a time, through forwarder.lock: while another one
+// runs (the background service, the Mac app's, or fenzi forward), this one
+// makes no passes of its own, and takes over if that one stops. Single passes
+// still take turns through relay.lock: a pass that finds it held is skipped
+// rather than queued. Nothing is written to the agent's terminal.
 //
 // The returned stop ends the loop and makes one last pass, so what the session
 // logged at the end reaches the console too. It reports whether the console
@@ -57,11 +59,19 @@ func forwardWhile(e env, teamRevision int) (stop func() (reached bool)) {
 			mu.Unlock()
 		}
 	}
+	var release func()
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for {
-			pass(ctx, 0)
+			if release == nil {
+				if r, ok, err := tryForwarder(dirs, holderRun); err == nil && ok {
+					release = r
+				}
+			}
+			if release != nil {
+				pass(ctx, 0)
+			}
 			timer := time.NewTimer(forwardEvery)
 			select {
 			case <-ctx.Done():
@@ -74,6 +84,11 @@ func forwardWhile(e env, teamRevision int) (stop func() (reached bool)) {
 	return func() bool {
 		cancel()
 		wg.Wait()
+		if release != nil {
+			release()
+		}
+		// The last pass runs whoever forwards: what the session logged at
+		// the end reaches the console now, not on the other's next pass.
 		last, done := context.WithTimeout(e.ctx, forwardLastWait)
 		defer done()
 		pass(last, forwardLastWait)

@@ -5,7 +5,7 @@ If the task needs a host the policy refuses, ask for access through the local po
 - GET /v1/denials?last=10 lists recent refusals, newest first. Each line names the program and the host and port.
 - GET /v1/policy/current returns the current policy as YAML.
 - POST /v1/proposals with a JSON body submits a request. The response lists the IDs of accepted proposals and the reasons for any that were refused.
-- GET /v1/proposals/{id}/wait?timeout=60 waits up to 60 seconds for a person to approve or reject it. Repeat it while the status is still pending.
+- GET /v1/proposals/{id}/wait?timeout=60 waits up to 60 seconds for a person to approve or reject it. Repeat it while the status is still pending. An approval can reset the sandbox's connections, so a wait running at that moment may return late or empty; retry the wait once before giving up.
 
 Ask for the narrowest rule the task needs: one host and port, the program that connects (its full path from the denial line), and for HTTP APIs one method and path. For example:
 

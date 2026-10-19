@@ -2,7 +2,7 @@
 
 # Raise this for every release. The installer and `fenzi update` read
 # latest.txt, and a release that keeps the old number is never offered.
-VERSION ?= 0.1.30
+VERSION ?= 0.1.33
 
 build:
 	go build -trimpath -o bin/fenzi ./cli
@@ -19,7 +19,7 @@ golden:
 
 # Run the upstream prover on every golden policy against its boundary.
 # Needs openshell-prover; no gateway. Like run, it proves the files without
-# allow_encoded_slash, which prover 0.1.2 cannot read (Policy.ForProver).
+# allow_encoded_slash, which prover 0.1.2 and 0.1.4 cannot read (Policy.ForProver).
 prove:
 	@command -v openshell-prover >/dev/null || { echo "openshell-prover is not installed"; exit 1; }
 	@tmp=$$(mktemp -d); fail=0; for p in compiler/testdata/golden/*.policy.yaml; do \
@@ -41,8 +41,4 @@ dist:
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags "-X main.Version=$(VERSION)" -o $$out ./cli; \
 	done
 	cd dist && shasum -a 256 fenzi-$(VERSION)-* | awk '{ print $$1 "  " $$2 }' > fenzi-$(VERSION)-sha256.txt
-	# CLIs from before the rename to Fenzi update themselves by the old file
-	# names, so each binary is also published as boundlane-<version>-<os>-<arch>.
-	@for f in dist/fenzi-$(VERSION)-*-*; do cp "$$f" "dist/boundlane-$${f#dist/fenzi-}"; done
-	cd dist && shasum -a 256 boundlane-$(VERSION)-*-* | awk '{ print $$1 "  " $$2 }' > boundlane-$(VERSION)-sha256.txt
 	echo $(VERSION) > dist/latest.txt

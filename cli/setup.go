@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -31,8 +32,12 @@ const setupSteps = 5
 
 func cmdSetup(e env, args []string) (int, error) {
 	fs := newFlags("setup", e.stderr)
+	runtimeOnly := fs.Bool("runtime", false, "install OpenShell "+openshell.InstallVersion+" if it is missing, or upgrade an older patch when no sandbox is running, and wait for its gateway, with no questions, for a CI runner")
 	if _, err := parse(fs, args); err != nil {
 		return 1, err
+	}
+	if *runtimeOnly {
+		return setupRuntime(e)
 	}
 	u := tui.New(e.stdin, e.stdout)
 	dirs, err := config.Default()
@@ -190,7 +195,7 @@ func setupMachine(e env, u *tui.UI) error {
 		u.Blank()
 		u.Println("  " + u.Dim("Running the OpenShell installer. It may ask for your password."))
 		u.Blank()
-		if err := openshell.Install(e.ctx, os.Stdin, e.stdout, e.stderr); err != nil {
+		if err := installOpenShell(e.ctx, os.Stdin, e.stdout, e.stderr); err != nil {
 			u.Blank()
 			u.Problem("Runtime", err.Error())
 			retry, err := u.Confirm("Try again?", "Try again", "Quit setup")
@@ -205,19 +210,8 @@ func setupMachine(e env, u *tui.UI) error {
 		u.Blank()
 	}
 
-	if _, err := u.Spin("Runtime", "checking the version", func() (string, error) {
-		out, err := oc.Version(e.ctx)
-		if err != nil {
-			return "", err
-		}
-		v, ok := openshell.Pinned.Contains(out)
-		if !ok {
-			return "", fmt.Errorf("%q is outside %s", strings.TrimSpace(out), openshell.Pinned)
-		}
-		return "OpenShell " + v, nil
-	}); err != nil {
-		u.Note("Fenzi " + Version + " is built for OpenShell " + openshell.Pinned.String() + ". Install " + openshell.InstallVersion + ", then run fenzi setup again.")
-		return quietExit(3)
+	if err := setupUpgrade(e, u, oc); err != nil {
+		return err
 	}
 
 gateway:
@@ -432,6 +426,120 @@ gateway:
 	} else {
 		u.Done("Image builds", b.Bin)
 	}
+	return nil
+}
+
+// installOpenShell, gatewayService and restartGateway are what the upgrade
+// runs on the machine; tests replace them.
+var (
+	installOpenShell = openshell.Install
+	gatewayService   = openshell.Service
+	restartGateway   = func(ctx context.Context) error { return openshell.RunService(ctx, "restart") }
+)
+
+// runtimeVersion checks the installed release is on Pinned and returns
+// what `openshell --version` printed.
+func runtimeVersion(e env, u *tui.UI, oc openshell.Client) (string, error) {
+	var out string
+	_, err := u.Spin("Runtime", "checking the version", func() (string, error) {
+		o, err := oc.Version(e.ctx)
+		if err != nil {
+			return "", err
+		}
+		out = o
+		v, ok := openshell.Pinned.Contains(o)
+		if !ok {
+			return "", fmt.Errorf("%q is outside %s", strings.TrimSpace(o), openshell.Pinned)
+		}
+		return "OpenShell " + v, nil
+	})
+	if err != nil {
+		u.Note("Fenzi " + Version + " is built for OpenShell " + openshell.Pinned.String() + ". Install " + openshell.InstallVersion + ", then run fenzi setup again.")
+		return "", quietExit(3)
+	}
+	return out, nil
+}
+
+// restartWarning says what a gateway restart interrupts, naming the
+// sandboxes fenzi ps lists as running. When the gateway does not answer it
+// says what a restart does in general.
+func restartWarning(ctx context.Context, oc openshell.Client) string {
+	names, err := oc.Sandboxes(ctx)
+	switch {
+	case err != nil:
+		return "The upgrade restarts the gateway, which ends the sessions in running sandboxes."
+	case len(names) == 0:
+		return "The upgrade restarts the gateway. No sandbox is running, so nothing is interrupted."
+	case len(names) == 1:
+		return "The upgrade restarts the gateway. This sandbox keeps its files but its open session ends: " + names[0] + ". Resume it afterwards with fenzi connect."
+	}
+	return "The upgrade restarts the gateway. These sandboxes keep their files but their open sessions end: " + strings.Join(names, ", ") + ". Resume them afterwards with fenzi connect."
+}
+
+// setupUpgrade checks the installed release and offers InstallVersion when it
+// is an older patch of Pinned: upstream fixes only the newest patch of each
+// supported minor line. It uses the same pinned, checksummed installer as a
+// fresh install and asks first. Saying no keeps the installed release, which
+// Fenzi still reads.
+func setupUpgrade(e env, u *tui.UI, oc openshell.Client) error {
+	out, err := runtimeVersion(e, u, oc)
+	if err != nil {
+		return err
+	}
+	have, behind := openshell.Behind(out)
+	if !behind {
+		return nil
+	}
+	for {
+		u.Note("OpenShell " + have + " is installed. Upstream fixes only the newest patch of each release line, so setup can upgrade it to " + openshell.InstallVersion + " with the upstream installer:")
+		u.Command(openshell.InstallCommand(), "")
+		u.Note(restartWarning(e.ctx, oc))
+		u.Blank()
+		ok, err := u.Confirm("Upgrade OpenShell to "+openshell.InstallVersion+" now?", "Yes, upgrade it", "Not now, keep "+have)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			u.Blank()
+			u.Note("Setup goes on with OpenShell " + have + ". To upgrade later, run fenzi setup again.")
+			return nil
+		}
+		u.Blank()
+		u.Println("  " + u.Dim("Running the OpenShell installer. It may ask for your password."))
+		u.Blank()
+		if err := installOpenShell(e.ctx, os.Stdin, e.stdout, e.stderr); err != nil {
+			u.Blank()
+			u.Problem("Runtime", err.Error())
+			retry, err := u.Confirm("Try again?", "Try again", "Go on with "+have)
+			if err != nil {
+				return err
+			}
+			if !retry {
+				return nil
+			}
+			continue
+		}
+		u.Blank()
+		break
+	}
+	out, err = runtimeVersion(e, u, oc)
+	if err != nil {
+		return err
+	}
+	if now, behind := openshell.Behind(out); behind {
+		u.Problem("Runtime", "still "+now+" after the installer ran. Setup goes on with it.")
+	}
+	// On macOS the installer restarted the gateway itself (0.1.2 to 0.1.4,
+	// recorded); on Linux that was not recorded. Restart it here so a gateway
+	// started from the old release does not keep running. The gateway step
+	// after this checks it accepts connections.
+	if gatewayService("restart") == nil {
+		u.Note("Setup does not know how the gateway was installed here, so it cannot restart it. Restart it the way you installed it so it runs " + openshell.InstallVersion + ".")
+		return nil
+	}
+	u.Spin("Gateway", "restarting the service", func() (string, error) {
+		return "service restarted", restartGateway(e.ctx)
+	})
 	return nil
 }
 
@@ -855,4 +963,108 @@ func setupNeeded(e env) bool {
 	}
 	_, done := dirs.LoadSetup()
 	return !done
+}
+
+// runtimeUpgrade is setupUpgrade for a machine nobody sits at: an older
+// patch of Pinned is upgraded to InstallVersion only when no sandbox is
+// running, since the upgrade restarts the gateway and nobody is there to
+// agree to interrupting another job's sandbox. Otherwise, or when the
+// sandboxes cannot be listed, the installed release stays and setup says
+// why. It reports the version now installed and whether it changed.
+func runtimeUpgrade(e env, u *tui.UI, oc openshell.Client, out string) (string, bool) {
+	have, behind := openshell.Behind(out)
+	if !behind {
+		return "", false
+	}
+	names, err := oc.Sandboxes(e.ctx)
+	switch {
+	case err != nil:
+		u.Note("OpenShell " + have + " is older than " + openshell.InstallVersion + ". Setup keeps it: the sandboxes an upgrade would interrupt could not be listed.")
+		return "", false
+	case len(names) > 0:
+		u.Note("OpenShell " + have + " is older than " + openshell.InstallVersion + ". Setup keeps it, because the upgrade restarts the gateway and these sandboxes are running: " + strings.Join(names, ", ") + ".")
+		return "", false
+	}
+	u.Note("Upgrading OpenShell " + have + " to " + openshell.InstallVersion + " with the upstream installer. No sandbox is running, so nothing is interrupted:")
+	u.Command(openshell.InstallCommand(), "")
+	u.Blank()
+	if err := installOpenShell(e.ctx, strings.NewReader(""), e.stdout, e.stderr); err != nil {
+		u.Problem("Runtime", "the upgrade failed: "+err.Error()+". Setup goes on with OpenShell "+have+".")
+		return "", false
+	}
+	u.Blank()
+	if gatewayService("restart") != nil {
+		if err := restartGateway(e.ctx); err != nil {
+			u.Problem("Gateway", "the restart after the upgrade failed: "+err.Error())
+		}
+	}
+	now, err := oc.Version(e.ctx)
+	if err != nil {
+		return "", false
+	}
+	v, ok := openshell.Pinned.Contains(now)
+	if !ok {
+		return "", false
+	}
+	if still, behind := openshell.Behind(now); behind {
+		u.Problem("Runtime", "still "+still+" after the installer ran. Setup goes on with it.")
+	}
+	return v, true
+}
+
+// runtimeWait bounds how long setup --runtime waits for the gateway the
+// installer started.
+var runtimeWait = 60 * time.Second
+
+// setupRuntime is fenzi setup --runtime: the first step of setup with no
+// questions, for a machine nobody sits at. It installs OpenShell at
+// InstallVersion with the upstream installer, checked by its sha256, when
+// no openshell is installed, checks the version is inside the pinned line,
+// upgrades an older patch when no sandbox is running (runtimeUpgrade), and
+// waits for the gateway. On Ubuntu with Docker the installer starts and
+// registers the gateway itself, as recorded on a GitHub-hosted runner with
+// OpenShell 0.1.4. A Mac that needs Homebrew first is refused: that
+// installer asks for a password.
+func setupRuntime(e env) (int, error) {
+	u := tui.ForOutput(e.stdout)
+	u.Title("Sandbox runtime", "")
+	if !openshell.Installed("openshell") && openshell.FindInstalled() == "" {
+		if openshell.NeedsHomebrew() {
+			return 3, errors.New("OpenShell needs Homebrew on a Mac, and its installer asks for a password. Install Homebrew from https://brew.sh first")
+		}
+		u.Note("Installing OpenShell " + openshell.InstallVersion + " with the upstream installer:")
+		u.Command(openshell.InstallCommand(), "")
+		u.Blank()
+		if err := openshell.Install(e.ctx, strings.NewReader(""), e.stdout, e.stderr); err != nil {
+			return 3, err
+		}
+		u.Blank()
+	}
+	oc := client()
+	out, err := oc.Version(e.ctx)
+	if err != nil {
+		return 3, err
+	}
+	v, ok := openshell.Pinned.Contains(out)
+	if !ok {
+		return 3, fmt.Errorf("OpenShell %q is outside %s, which Fenzi %s is built for", strings.TrimSpace(out), openshell.Pinned, Version)
+	}
+	if now, upgraded := runtimeUpgrade(e, u, oc, out); upgraded {
+		v = now
+	}
+	u.Done("Runtime", "OpenShell "+v)
+	deadline := time.Now().Add(runtimeWait)
+	for {
+		err := oc.Ready(e.ctx)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			return 3, fmt.Errorf("the gateway is not ready after %s: %v. fenzi doctor says what is missing", runtimeWait, err)
+		}
+		time.Sleep(2 * time.Second)
+	}
+	u.Done("Gateway", "connected")
+	u.Blank()
+	return 0, nil
 }

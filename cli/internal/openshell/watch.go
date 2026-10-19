@@ -25,8 +25,9 @@ import (
 
 // The gateway's WatchSandbox stream is the one behind `openshell logs`. It is
 // read with the generated client of the upstream Go SDK at the v0.1.2 commit;
-// the SDK's own Watch helper does not pass a resume cursor. Checked against
-// OpenShell 0.1.2:
+// the SDK's own Watch helper does not pass a resume cursor. That client reads
+// a 0.1.4 gateway unchanged. Checked against OpenShell 0.1.2, and again
+// against 0.1.4 on 19 October 2026:
 //
 //   - The CLI's mTLS files for the gateway named "openshell" are in
 //     ~/.config/openshell/gateways/openshell/mtls/ (ca.crt, tls.crt, tls.key).
@@ -36,12 +37,15 @@ import (
 //     documents keeps the highest. Resuming after the highest cursor replays
 //     nothing; after an earlier one, exactly the later events.
 //   - A cursor from another cursor space ends the stream with OUT_OF_RANGE,
-//     "Restart the watch with an empty resume_after_cursor"; a malformed one
-//     with INVALID_ARGUMENT.
+//     "Restart the watch with an empty resume_after_cursor", after the
+//     sandbox snapshot the stream sends first with no cursor (recorded from
+//     0.1.4; a gateway restart starts a new space, the upstream source
+//     says). A malformed cursor is refused with INVALID_ARGUMENT before
+//     anything is sent.
 //   - OCSF lines arrive with level "OCSF" and the shorthand text without its
 //     time and source prefix.
 //
-// What a gateway restart does to cursors was not tried.
+// A gateway restart with a stored cursor was not tried.
 
 // StreamLine is one log event from the stream.
 type StreamLine struct {
@@ -172,14 +176,18 @@ func (w *Watch) read(ctx context.Context, sandbox, after string, tail int) (Stre
 			return read, ctx.Err()
 		case r := <-ch:
 			if r.err != nil {
-				// An error after events is the end of this read; the next one
-				// resumes after the cursor. One before any event is the answer.
+				// An error after log events is the end of this read; the next
+				// one resumes after the cursor. One before any is the answer,
+				// even after the sandbox snapshot the stream sends first: that
+				// is where a cursor from another space is refused.
 				if errors.Is(r.err, io.EOF) || got {
 					return read, nil
 				}
 				return read, r.err
 			}
-			got = true
+			if r.ev.GetCursor() != "" {
+				got = true
+			}
 			if c := r.ev.GetCursor(); c > read.Cursor {
 				read.Cursor = c
 			}

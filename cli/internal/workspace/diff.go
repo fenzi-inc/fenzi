@@ -39,6 +39,9 @@ type FileDiff struct {
 	// are filled when they could be computed.
 	Large bool
 	Hunks []Hunk
+	// HostRun says why the file runs on this machine once applied, with
+	// no further step; empty when it does not. See HostRun.
+	HostRun string
 }
 
 // Diff compares one change: the file in root before, the file in staged after.
@@ -56,6 +59,7 @@ func Diff(root, staged string, c Change) (FileDiff, error) {
 			return d, err
 		}
 	}
+	d.HostRun = HostRun(c, before, after)
 	if before == nil && c.Kind != Added || after == nil && c.Kind != Deleted {
 		d.Large = true
 		return d, nil

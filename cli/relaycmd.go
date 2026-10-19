@@ -35,22 +35,80 @@ func cmdForward(e env, args []string) (int, error) {
 	fs := newFlags("forward", e.stderr)
 	once := fs.Bool("once", false, "upload one batch and exit")
 	every := fs.Duration("every", 5*time.Second, "how often to look")
+	install := fs.Bool("install", false, "keep forwarding in the background, after the terminal closes and at each login")
+	uninstall := fs.Bool("uninstall", false, "stop the background forwarder and remove it")
+	svc := fs.Bool("service", false, "run as the background forwarder; --install sets this up")
 	if _, err := parse(fs, args); err != nil {
 		return 1, err
 	}
-	ctx, stop := signal.NotifyContext(e.ctx, os.Interrupt)
+	switch {
+	case *install && *uninstall:
+		return 1, errors.New("choose --install or --uninstall")
+	case *install:
+		return cmdForwardInstall(e)
+	case *uninstall:
+		return cmdForwardUninstall(e)
+	}
+	// launchd and systemd stop a service with SIGTERM.
+	ctx, stop := signal.NotifyContext(e.ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	for {
-		rep, err := relayOnce(ctx, e)
-		if err != nil && ctx.Err() != nil {
-			// Ctrl-C during a pass. What was spooled stays for the next run.
-			return 0, nil
+	var log *serviceLog
+	if *svc {
+		log = &serviceLog{w: e.stdout}
+		if dirs, err := config.Default(); err == nil {
+			log.path = forwardLogPath(dirs)
 		}
+	}
+	if !*once {
+		dirs, err := config.Default()
 		if err != nil {
 			return 1, err
 		}
-		printReport(e, "Forward", rep)
+		who := holderForward
+		if *svc {
+			who = holderService
+		}
+		release, err := holdForwarder(ctx, dirs, who, func(other string) {
+			if log != nil {
+				log.say(fmt.Sprintf("%s is forwarding; this one takes over when it stops", other))
+				return
+			}
+			u := tui.New(e.stdin, e.stdout)
+			u.Note(fmt.Sprintf("%s is already forwarding on this machine. This one waits and takes over when it stops.", capitalize(other)))
+		})
+		if err != nil {
+			if ctx.Err() != nil {
+				return 0, nil
+			}
+			return 1, err
+		}
+		defer release()
+	}
+	for {
+		rep, err := relayOnce(ctx, e)
+		switch {
+		case err != nil && ctx.Err() != nil:
+			// Ctrl-C during a pass. What was spooled stays for the next run.
+			return 0, nil
+		case log != nil && errors.Is(err, errSignIn):
+			// A clean exit: neither launchd nor systemd starts it again.
+			log.say("this machine is signed out; the background forwarder stops")
+			return 0, nil
+		case log != nil && err != nil:
+			// The service keeps going: the gateway may not be up yet after a
+			// login, or the network may be away.
+			log.say(err.Error())
+		case err != nil:
+			return 1, err
+		case log != nil:
+			log.report(rep)
+		default:
+			printReport(e, "Forward", rep)
+		}
 		if *once {
+			if err != nil {
+				return 1, err
+			}
 			return 0, nil
 		}
 		timer := time.NewTimer(*every)
@@ -62,6 +120,17 @@ func cmdForward(e env, args []string) (int, error) {
 		}
 	}
 }
+
+// capitalize starts a holder name with a capital, for the start of a sentence.
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// errSignIn is what a pass says on a machine that is not signed in.
+var errSignIn = errors.New("sign in first (fenzi login)")
 
 func relayOnce(ctx context.Context, e env) (relay.Report, error) {
 	return relayOnceWait(ctx, e, relayLockWait)
@@ -75,11 +144,7 @@ func relayOnceWait(ctx context.Context, e env, wait time.Duration) (relay.Report
 	if err != nil {
 		return relay.Report{}, err
 	}
-	en, err := team.Load(dirs)
-	if errors.Is(err, team.ErrNotEnrolled) {
-		return relay.Report{}, errors.New("sign in first (fenzi login)")
-	}
-	if err != nil {
+	if _, err := loadEnrollment(dirs); err != nil {
 		return relay.Report{}, err
 	}
 	// Two passes at once would each rewrite the spool and the cursors, and
@@ -89,6 +154,12 @@ func relayOnceWait(ctx context.Context, e env, wait time.Duration) (relay.Report
 		return relay.Report{}, err
 	}
 	defer unlock()
+	// Read the sign-in again under the lock. fenzi logout clears it under the
+	// same lock, and a pass that read it before would save it back below.
+	en, err := loadEnrollment(dirs)
+	if err != nil {
+		return relay.Report{}, err
+	}
 	// A server that accepts the connection and never answers must not hold
 	// the pass, which also does the gateway's work.
 	tc := team.Client{Base: en.Server, HTTP: &http.Client{Timeout: 30 * time.Second}}
@@ -134,6 +205,14 @@ func relayOnceWait(ctx context.Context, e env, wait time.Duration) (relay.Report
 		return rep, errors.New("OpenShell gateway is not ready. Run fenzi doctor")
 	}
 	return rep, err
+}
+
+func loadEnrollment(dirs config.Dirs) (team.Enrollment, error) {
+	en, err := team.Load(dirs)
+	if errors.Is(err, team.ErrNotEnrolled) {
+		return en, errSignIn
+	}
+	return en, err
 }
 
 // beatNotes is what the heartbeat tells the console about this machine's

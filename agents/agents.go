@@ -28,6 +28,18 @@ var files embed.FS
 //go:embed guide.md
 var Guide string
 
+// HistoryNote and FilesNote tell the agent what the project folder is: a
+// copy of the developer's repository on a branch of its own, or a copy of
+// the files with no history. HistoryNote takes the agent's branch, the
+// start commit, and the developer's branch. run adds the one that applies
+// to the guide with WithNote.
+//
+//go:embed history.md
+var HistoryNote string
+
+//go:embed files.md
+var FilesNote string
+
 type Entry struct {
 	Name     string     `yaml:"name"`
 	Display  string     `yaml:"display"`
@@ -59,6 +71,9 @@ type Entry struct {
 	// by the catalog. CompilerAgent then compiles the model endpoints into
 	// the policy, since no provider adds them.
 	SignedIn bool `yaml:"-"`
+	// Notes are added by run after the guide, for this sandbox only: what
+	// the project folder is, see HistoryNote. Never set by the catalog.
+	Notes []string `yaml:"-"`
 	// GuideFlag is the agent's flag that appends text to its instructions.
 	// GuideConfig is the config key that does it, for agents that take
 	// `-c key=<TOML value>` instead. GuideFile is a path in the sandbox where
@@ -70,9 +85,12 @@ type Entry struct {
 	Resume      []string `yaml:"resume"`
 	GuideConfig string   `yaml:"guide_config"`
 	GuideFile   string   `yaml:"guide_file"`
-	Key         Key      `yaml:"key"`
-	Status      string   `yaml:"status"`
-	Verified    bool     `yaml:"verified"`
+	// Headless is how the agent takes a task with nobody at the terminal,
+	// for fenzi run --headless. Nil: the catalog does not say yet.
+	Headless *Headless `yaml:"headless"`
+	Key      Key       `yaml:"key"`
+	Status   string    `yaml:"status"`
+	Verified bool      `yaml:"verified"`
 }
 
 // Endpoint is a model endpoint, copied from the reviewed provider profile.
@@ -90,6 +108,36 @@ type Host struct {
 	Host  string   `yaml:"host"`
 	Port  int      `yaml:"port"`
 	Allow []string `yaml:"allow,omitempty"`
+}
+
+// Headless is the agent's own non-interactive mode.
+type Headless struct {
+	// Args go after the command, Args and the flags, before the guide: a
+	// subcommand such as Codex's exec, which must follow its top-level
+	// options, or a switch such as Claude Code's -p.
+	Args []string `yaml:"args"`
+	// Flags replace or add to DefaultFlags for an unattended run, unless
+	// the user passes the same flag.
+	Flags map[string]string `yaml:"flags"`
+	// TaskFlag is the flag that takes the task, passed as --flag=<task>.
+	// Empty: the task is the last argument.
+	TaskFlag string `yaml:"task_flag"`
+	// Refused says why the agent cannot run unattended. Set it alone.
+	Refused string `yaml:"refused"`
+}
+
+func (h *Headless) check() error {
+	if h == nil {
+		return nil
+	}
+	mode := len(h.Args) > 0 || len(h.Flags) > 0 || h.TaskFlag != ""
+	if mode == (h.Refused != "") {
+		return errors.New("headless needs args, flags or task_flag, or refused alone")
+	}
+	if h.TaskFlag != "" && !strings.HasPrefix(h.TaskFlag, "--") {
+		return errors.New("headless task_flag must be a long flag, passed as --flag=<task>")
+	}
+	return nil
 }
 
 type Key struct {
@@ -151,6 +199,9 @@ func load(dir string) (Entry, error) {
 	if e.GuideFile != "" && (!path.IsAbs(e.GuideFile) || strings.Contains(e.GuideFile, "..")) {
 		return Entry{}, fmt.Errorf("catalog %s/agent.yaml: guide_file must be an absolute path", dir)
 	}
+	if err := e.Headless.check(); err != nil {
+		return Entry{}, fmt.Errorf("catalog %s/agent.yaml: %w", dir, err)
+	}
 	return e, nil
 }
 
@@ -160,11 +211,28 @@ func (e Entry) Argv(args []string) []string {
 	argv := e.head(args)
 	switch {
 	case e.GuideFlag != "":
-		argv = append(argv, e.GuideFlag, Guide)
+		argv = append(argv, e.GuideFlag, e.GuideText())
 	case e.GuideConfig != "":
-		argv = append(argv, "-c", e.GuideConfig+"="+tomlString(Guide))
+		argv = append(argv, "-c", e.GuideConfig+"="+tomlString(e.GuideText()))
 	}
 	return append(argv, args...)
+}
+
+// GuideText is the guide with the sandbox's notes after it: what the agent
+// is told, through GuideFlag, GuideConfig, or the file at GuideFile. With no
+// notes it is Guide as it is.
+func (e Entry) GuideText() string {
+	text := Guide
+	for _, n := range e.Notes {
+		text += "\n" + n + "\n"
+	}
+	return text
+}
+
+// WithNote returns the entry with one more note for the agent.
+func (e Entry) WithNote(text string) Entry {
+	e.Notes = append(append([]string(nil), e.Notes...), strings.TrimSpace(text))
+	return e
 }
 
 // ResumeArgv is Argv with Resume right after the command, or nil for an
@@ -184,18 +252,109 @@ func (e Entry) CommandLine(args []string) []string {
 
 // head is the command, Args, and the default flags the user did not pass.
 func (e Entry) head(args []string) []string {
+	return e.headWith(e.DefaultFlags, args)
+}
+
+// headWith is head with flags in place of the default flags.
+func (e Entry) headWith(defaults map[string]string, args []string) []string {
 	argv := append([]string{e.Command}, e.Args...)
-	flags := make([]string, 0, len(e.DefaultFlags))
-	for f := range e.DefaultFlags {
+	flags := make([]string, 0, len(defaults))
+	for f := range defaults {
 		flags = append(flags, f)
 	}
 	sort.Strings(flags)
 	for _, f := range flags {
 		if !hasFlag(args, f) {
-			argv = append(argv, f, e.DefaultFlags[f])
+			argv = append(argv, f, defaults[f])
 		}
 	}
 	return argv
+}
+
+// MaxTask is the longest task fenzi run --headless passes. It goes to the
+// agent as one argument, and Linux takes at most 128 KiB in one.
+const MaxTask = 64 << 10
+
+// ErrNoHeadless means the catalog has no non-interactive mode for the agent.
+var ErrNoHeadless = errors.New("cannot run unattended")
+
+// CanRunHeadless returns nil when the agent has a non-interactive mode, and
+// otherwise an error that says why not.
+func (e Entry) CanRunHeadless() error {
+	switch {
+	case e.Headless == nil:
+		return fmt.Errorf("%s %w: the catalog does not name its non-interactive mode yet", e.Display, ErrNoHeadless)
+	case e.Headless.Refused != "":
+		return fmt.Errorf("%s %w: %s", e.Display, ErrNoHeadless, e.Headless.Refused)
+	}
+	return nil
+}
+
+// HeadlessArgv is Argv for an unattended run: the command, Args, the
+// default flags with Headless.Flags over them, Headless.Args, the guide,
+// the user's arguments, then the task, as the last argument or as the
+// value of TaskFlag.
+func (e Entry) HeadlessArgv(args []string, task string) ([]string, error) {
+	if err := e.CanRunHeadless(); err != nil {
+		return nil, err
+	}
+	task, err := CleanTask(task)
+	if err != nil {
+		return nil, err
+	}
+	argv := append(e.headlessHead(args), e.Headless.Args...)
+	switch {
+	case e.GuideFlag != "":
+		argv = append(argv, e.GuideFlag, e.GuideText())
+	case e.GuideConfig != "":
+		argv = append(argv, "-c", e.GuideConfig+"="+tomlString(e.GuideText()))
+	}
+	argv = append(argv, args...)
+	if e.Headless.TaskFlag != "" {
+		return append(argv, e.Headless.TaskFlag+"="+task), nil
+	}
+	return append(argv, task), nil
+}
+
+// HeadlessCommandLine is HeadlessArgv without the guide, and with the
+// task's length in place of the task, for showing what starts.
+func (e Entry) HeadlessCommandLine(args []string, task string) []string {
+	argv := append(e.headlessHead(args), e.Headless.Args...)
+	argv = append(argv, args...)
+	shown := fmt.Sprintf("<task, %d characters>", len([]rune(strings.TrimSpace(task))))
+	if e.Headless.TaskFlag != "" {
+		return append(argv, e.Headless.TaskFlag+"="+shown)
+	}
+	return append(argv, shown)
+}
+
+func (e Entry) headlessHead(args []string) []string {
+	flags := map[string]string{}
+	for f, v := range e.DefaultFlags {
+		flags[f] = v
+	}
+	for f, v := range e.Headless.Flags {
+		flags[f] = v
+	}
+	return e.headWith(flags, args)
+}
+
+// CleanTask trims the task and checks it can be passed as one argument. A
+// task that starts with a dash, such as a Markdown list, gets a newline in
+// front, so the agent does not read it as a flag.
+func CleanTask(task string) (string, error) {
+	task = strings.TrimSpace(task)
+	switch {
+	case task == "":
+		return "", errors.New("the task is empty")
+	case len(task) > MaxTask:
+		return "", fmt.Errorf("the task is %d KiB; at most %d KiB is passed to the agent", (len(task)+1023)>>10, MaxTask>>10)
+	case strings.ContainsRune(task, 0):
+		return "", errors.New("the task holds a NUL byte, which cannot be passed as an argument")
+	case strings.HasPrefix(task, "-"):
+		task = "\n" + task
+	}
+	return task, nil
 }
 
 func hasFlag(args []string, flag string) bool {

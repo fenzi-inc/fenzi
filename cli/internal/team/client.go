@@ -168,6 +168,21 @@ func (c Client) Me(ctx context.Context, token string) (Me, error) {
 	return out, err
 }
 
+// Key fetches the team's public key, which every signed revision is
+// checked against.
+func (c Client) Key(ctx context.Context, token string) (string, error) {
+	var out struct {
+		PublicKey string `json:"public_key"`
+	}
+	if err := c.call(ctx, http.MethodGet, "/v1/key", token, nil, &out); err != nil {
+		return "", err
+	}
+	if _, err := base64.StdEncoding.DecodeString(out.PublicKey); err != nil || out.PublicKey == "" {
+		return "", errors.New("the server sent no usable public key")
+	}
+	return out.PublicKey, nil
+}
+
 // RoleName is the member's role: admin, reviewer, developer, or auditor.
 // A server that predates roles sends only the admin flag, which reads as
 // admin or member.

@@ -91,6 +91,35 @@ func TestRunArgs(t *testing.T) {
 	}
 }
 
+func TestRunFlagAfterAgent(t *testing.T) {
+	cases := map[string]string{
+		"":                                  "",
+		"claude":                            "",
+		"claude --resume":                   "",
+		"claude --permission-mode auto":     "",
+		"claude --headless --task-text fix": "--headless",
+		"claude --resume --rm":              "--rm",
+		"codex --task-text=fix":             "--task-text",
+		"claude -- --headless":              "",
+		"claude --resume -- --rm":           "",
+		"--headless":                        "",
+	}
+	for in, want := range cases {
+		if got := runFlagAfterAgent(strings.Fields(in)); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestRunRefusesItsFlagAfterTheAgent(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var out, errOut bytes.Buffer
+	code := cli([]string{"run", "claude", "--headless", "--task-text", "fix it"}, strings.NewReader(""), &out, &errOut)
+	if code != 1 || !strings.Contains(errOut.String(), "Put it before the name: fenzi run --headless ... claude") {
+		t.Fatalf("exit %d: %s%s", code, out.String(), errOut.String())
+	}
+}
+
 func TestSplitDash(t *testing.T) {
 	before, after := splitDash([]string{"fenzi-web-1a2b", "--shell", "--", "--resume"})
 	if !reflect.DeepEqual(before, []string{"fenzi-web-1a2b", "--shell"}) || !reflect.DeepEqual(after, []string{"--resume"}) {

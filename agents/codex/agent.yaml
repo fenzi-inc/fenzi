@@ -66,6 +66,14 @@ guide_config: developer_instructions
 # without showing the picker". resume takes the same --no-daemon, --disable
 # and -c options as the top-level command.
 resume: [resume, --last]
+# fenzi run --headless. `codex exec --help` in 0.160.1: "Run Codex
+# non-interactively", the prompt as the last argument. exec does not take
+# --no-daemon ("unexpected argument"), so it goes after the top-level
+# options above. --skip-git-repo-check: "Allow running Codex outside a Git
+# repository", for a project that comes back as files only. exec asks for
+# no approvals, and Codex's own sandbox is off as above.
+headless:
+  args: [exec, --skip-git-repo-check]
 # How the agent reads the MCP servers in the policy's mcp section (agents/mcp.go).
 mcp_format: codex-config
 key:

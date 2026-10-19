@@ -173,3 +173,135 @@ func TestRequestedAccess(t *testing.T) {
 		}
 	}
 }
+
+func TestAllowLine(t *testing.T) {
+	cases := map[string]string{
+		"www.example.com:443 [L7 rest, allow GET /]":         "GET /",
+		"api.github.com:443 [L7 rest, allow POST /markdown]": "POST /markdown",
+		"registry.npmjs.org:443 [L7 rest, access=read-only]": "",
+		"paste.example.net:443 [L4]":                         "",
+		"mcp.deepwiki.com:443 [mcp, allow initialize *]":     "",
+		"": "",
+	}
+	for endpoints, want := range cases {
+		if got := (Proposal{Endpoints: endpoints}).AllowLine(); got != want {
+			t.Errorf("AllowLine(%q) = %q, want %q", endpoints, got, want)
+		}
+	}
+}
+
+// Recorded from OpenShell 0.1.4 on 19 October 2026 in sandbox
+// fenzi-pin-run-0213: a request filed through policy.local and two drafts
+// from refused connections, then, after more requests, a read-only preset and
+// a rule with two endpoints.
+const (
+	recordedRules014 = `Network Rules:  (version 2, 3 chunks)
+
+  Chunk: 4bf8dec4-5775-4de3-b130-59679dfa715c
+  Status: pending
+  Rule: pin_iana_read
+  Binary: /usr/bin/curl
+  Confidence: 75%
+  Rationale: Pin re-recording: read the www.iana.org homepage once with curl.
+  Prover: prover: no new findings
+  Candidate: 1581293d868b
+  Endpoints: www.iana.org:443 [L7 rest, allow GET /]
+  Binaries: /usr/bin/curl
+
+  Chunk: 9b1f3967-19de-44dd-9de7-e359f9ff90fc
+  Status: pending
+  Rule: allow_www_wikipedia_org_443
+  Binary: /usr/bin/curl
+  Confidence: 65%
+  Rationale: Allow curl to connect to www.wikipedia.org:443 (HTTPS).
+  Prover: prover: no new findings
+  Candidate: a8c66c649810
+  Endpoints: www.wikipedia.org:443 [L4]
+  Binaries: /usr/bin/curl
+
+  Chunk: 310b3bd1-e022-4f2d-9fd6-c73c5195b514
+  Status: pending
+  Rule: allow_paste_example_net_443
+  Binary: /usr/bin/curl
+  Confidence: 65%
+  Rationale: Allow curl to connect to paste.example.net:443 (HTTPS).
+  Prover: prover: no new findings
+  Candidate: 9fc1c67ed22c
+  Endpoints: paste.example.net:443 [L4]
+  Binaries: /usr/bin/curl
+`
+	recordedShapes014 = `Network Rules:  (version 5, 3 chunks)
+
+  Chunk: 483aa435-6248-4d58-8b66-8e1dda9e83c9
+  Status: pending
+  Rule: pin_two
+  Binary: /usr/bin/curl
+  Confidence: 75%
+  Rationale: Pin re-recording: two endpoints in one rule.
+  Prover: prover: no new findings
+  Candidate: 208e8eb942ad
+  Endpoints: www.kernel.org:443 [L7 rest, allow GET /], cdn.kernel.org:443 [L7 rest, allow POST /pub]
+  Binaries: /usr/bin/curl
+
+  Chunk: f8014d08-27fa-45e6-a854-badceae780e9
+  Status: pending
+  Rule: pin_gnu_ro
+  Binary: /usr/bin/curl
+  Confidence: 75%
+  Rationale: Pin re-recording: read-only access to www.gnu.org.
+  Prover: prover: no new findings
+  Candidate: d02339ec92bd
+  Endpoints: www.gnu.org:443 [L7 rest, access=read-only]
+  Binaries: /usr/bin/curl
+
+  Chunk: 9b1f3967-19de-44dd-9de7-e359f9ff90fc
+  Status: pending
+  Rule: allow_www_wikipedia_org_443
+  Binary: /usr/bin/curl
+  Confidence: 65%
+  Rationale: Allow curl to connect to www.wikipedia.org:443 (HTTPS).
+  Prover: prover: no new findings
+  Candidate: 970f1fd01d91
+  Endpoints: www.wikipedia.org:443 [L4]
+  Binaries: /usr/bin/curl
+`
+)
+
+func TestParseRules014(t *testing.T) {
+	list := ParseRules([]byte(recordedRules014))
+	if len(list) != 3 {
+		t.Fatalf("got %d proposals", len(list))
+	}
+	agent, draft := list[0], list[1]
+	shapes := ParseRules([]byte(recordedShapes014))
+	if len(shapes) != 3 {
+		t.Fatalf("got %d proposals", len(shapes))
+	}
+	two, ro := shapes[0], shapes[1]
+	if two.Destination() != "www.kernel.org:443" || two.RequestedAccess().Access != "" || two.AllowLine() != "" {
+		t.Errorf("two endpoints map to no single hosts entry: %+v %+v", two, two.RequestedAccess())
+	}
+	if got := ro.RequestedAccess(); got.Access != AccessReadOnly || got.L4 {
+		t.Errorf("read-only preset: %+v", got)
+	}
+	if agent.Drafted() || agent.AllowLine() != "GET /" || agent.Prover != "no new findings" {
+		t.Errorf("agent request: %+v", agent)
+	}
+	if !draft.Drafted() || !draft.RequestedAccess().L4 {
+		t.Errorf("draft: %+v", draft)
+	}
+	if !NoRules([]byte("No network rules for sandbox 'fenzi-pin-run-0213'\n")) {
+		t.Error("the 0.1.4 answer for nothing pending")
+	}
+}
+
+func TestAgentFiled014(t *testing.T) {
+	log := []byte(`[1792367365.432] [sandbox] [INFO ] [openshell_supervisor] Flushed denial analysis to gateway proposals=2 sandbox_name=fenzi-pin-run-0213 summaries=2
+[1792367362.813] [sandbox] [OCSF ] [ocsf] CONFIG:PROPOSED [INFO] agent_authored proposal chunk:4bf8dec4-5775-4de3-b130-59679dfa715c on www.iana.org:443 [GET /] by /usr/bin/curl [chunk_id:4bf8dec4-5775-4de3-b130-59679dfa715c]
+[1792367470.833] [sandbox] [OCSF ] [ocsf] CONFIG:PROPOSED [INFO] agent_authored proposal chunk:f8014d08-27fa-45e6-a854-badceae780e9 on www.gnu.org:443 by /usr/bin/curl [chunk_id:f8014d08-27fa-45e6-a854-badceae780e9]
+`)
+	ids := AgentFiled(log)
+	if len(ids) != 2 || !ids["4bf8dec4-5775-4de3-b130-59679dfa715c"] || !ids["f8014d08-27fa-45e6-a854-badceae780e9"] {
+		t.Errorf("ids = %v", ids)
+	}
+}

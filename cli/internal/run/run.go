@@ -94,6 +94,9 @@ type Options struct {
 	// secrets, before anything is built or created. Returning false stops the
 	// run with ErrSecretsDeclined. Nil continues, which is what a script does.
 	ConfirmSecrets func(files []string) (bool, error)
+	// Headless makes this an unattended run: the agent's non-interactive
+	// mode on a task, a time limit, and a summary. See headless.go.
+	Headless *Headless
 }
 
 // ErrSecretsDeclined means the person chose not to copy files that look like
@@ -113,6 +116,8 @@ type Result struct {
 	// stopped the sandbox while this run was attached to it. That command
 	// copied the changes out; Changes lists what it staged.
 	StoppedElsewhere bool
+	// Summary is set when an unattended run's agent has ended.
+	Summary *Summary
 }
 
 // Settings turned on for every sandbox Fenzi creates.
@@ -190,6 +195,23 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		scr.Label(label, fmt.Sprintf(format, args...))
 	}
 
+	// An unattended run's time limit covers everything up to the agent's
+	// exit. What comes after, the log, the commits and the copy, runs to
+	// the end, so the work is not lost at the limit.
+	h := o.Headless
+	started := d.Now()
+	agentStarted := false
+	if h != nil && h.Timeout > 0 {
+		limited, cancel := context.WithTimeout(ctx, h.Timeout)
+		defer cancel()
+		ctx = limited
+		defer func() {
+			if err != nil && !agentStarted && timedOut(limited) {
+				err = &TimeoutError{Limit: h.Timeout, Err: err}
+			}
+		}()
+	}
+
 	// 1. Check the machine.
 	if err := d.OpenShell.Ready(ctx); err != nil {
 		return res, &GatewayError{Err: err}
@@ -223,6 +245,14 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 	if o.SignIn && !a.CanSignIn() {
 		return res, fmt.Errorf("%s does not sign in itself; it runs with a key (fenzi key set %s)", a.Display, a.Name)
 	}
+	if h != nil {
+		if o.SignIn {
+			return res, errHeadlessKey(a.Name, a.Key.Env)
+		}
+		if _, err := a.HeadlessArgv(o.Args, h.Task); err != nil {
+			return res, err
+		}
+	}
 	provider := ProviderName(a)
 	stored, err := d.OpenShell.ProviderExists(ctx, provider)
 	if err != nil {
@@ -232,6 +262,9 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		a.SignedIn = true
 		provider = ""
 	} else if !stored && d.Getenv(a.Key.Env) == "" {
+		if h != nil {
+			return res, errHeadlessKey(a.Name, a.Key.Env)
+		}
 		if !a.CanSignIn() {
 			return res, fmt.Errorf("no key stored for %s; run fenzi key set %s, or export %s for this run. The key stays on this machine", a.Name, a.Name, a.Key.Env)
 		}
@@ -278,11 +311,14 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 
 	// Snapshot the project before upload, so changes can be compared later,
 	// and warn about files that look like secrets while nothing is created.
+	// Read the repository too: its branch and commit go on the record, and
+	// its history goes into the sandbox unless something rules that out.
 	filter := d.Filter(o.Repo)
 	base, err := workspace.Snapshot(o.Repo, filter)
 	if err != nil {
 		return res, err
 	}
+	gitRec := gitRecord(workspace.ReadRepo(o.Repo), o.NoUpload)
 	if !o.NoUpload {
 		if found := append(base.Secrets(), MCPConfigSecrets(o.Repo, base)...); len(found) > 0 {
 			warnSecrets(say, found)
@@ -378,7 +414,7 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		return res, err
 	}
 	say("sandbox", "%s, created", name)
-	sb := config.Sandbox{Name: name, Agent: a.Name, SignIn: a.SignedIn, Repo: o.Repo, Revision: c.Revision, TeamRevision: o.Policy.TeamRevision, Created: d.Now(), Running: true}
+	sb := config.Sandbox{Name: name, Agent: a.Name, SignIn: a.SignedIn, Repo: o.Repo, Revision: c.Revision, TeamRevision: o.Policy.TeamRevision, Created: d.Now(), Running: true, Git: gitRec}
 	state.Put(sb)
 	_ = d.Dirs.SaveState(state)
 
@@ -430,21 +466,63 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		}
 	}
 
-	// 10. Copy the project in.
+	// 10. Copy the project in. With a repository, pin its start just before
+	// the upload, so the start commit holds what the upload sends, and
+	// send the history beside the project; then make the copy a repository
+	// on the agent's branch. Any failure there leaves files only.
 	project := ProjectDir(o.Repo)
 	if o.NoUpload {
 		if _, err := d.OpenShell.ExecOutput(ctx, name, "mkdir", "-p", project); err != nil {
 			return res, err
 		}
 	} else {
-		if err := d.OpenShell.Upload(ctx, name, o.Repo); err != nil {
-			return res, err
+		var bundleSize int64
+		if gitRec != nil && gitRec.History {
+			bundleSize = prepareHistory(o.Repo, name, runDir, gitRec)
 		}
-		say("upload", "project copied to %s, .gitignore respected, .git left out", project)
+		switch err := d.OpenShell.Upload(ctx, name, o.Repo); {
+		case errors.Is(err, openshell.ErrNoFiles):
+			// A repository with nothing .gitignore lets through, such as a
+			// new one with no files yet. OpenShell 0.1.4 refuses that upload;
+			// the sandbox still needs the project folder to start in.
+			if _, err := d.OpenShell.ExecOutput(ctx, name, "mkdir", "-p", project); err != nil {
+				return res, err
+			}
+			say("upload", "nothing to copy, the repository has no files .gitignore lets through; %s is empty", project)
+		case err != nil:
+			return res, err
+		default:
+			say("upload", "project copied to %s, .gitignore respected, .git left out", project)
+		}
 		// True only for a folder that does not hold the home folder; the
 		// CLI refuses those, but this package does not assume it.
 		if home, err := os.UserHomeDir(); err == nil && !workspace.ContainsHome(o.Repo, home) {
 			say("", "your home directory is not copied")
+		}
+		if gitRec != nil && gitRec.History {
+			if err := d.OpenShell.Upload(ctx, name, inBundleDir(runDir)); err != nil {
+				gitRec.History, gitRec.FilesOnly = false, "uploading the history failed: "+err.Error()
+				workspace.DropRefs(o.Repo, name)
+			} else {
+				rebuildHistory(ctx, d, name, project, o.Repo, a, gitRec)
+			}
+		}
+		sayGit(say, gitRec, bundleSize)
+	}
+	if gitRec != nil {
+		if o.NoUpload {
+			sayGit(say, gitRec, 0)
+		}
+		sb.Git = gitRec
+		saveGit(d.Dirs, &sb)
+		a = a.WithNote(historyNote(gitRec))
+	}
+	team := o.Policy.TeamRevision > 0
+	if h != nil {
+		if team {
+			a = a.WithNote(fmt.Sprintf(unattendedTeam, requestWait(h)))
+		} else {
+			a = a.WithNote(unattendedFree)
 		}
 	}
 
@@ -460,22 +538,59 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		return res, err
 	}
 	if a.GuideFile != "" {
-		if err := writeGuide(ctx, d, name, a.GuideFile); err != nil {
+		if err := writeGuide(ctx, d, name, a.GuideFile, a.GuideText()); err != nil {
 			return res, err
 		}
 	}
 	if a.HasGuide() {
 		say("guide", "how to ask for access, added to the agent's instructions")
 	}
-	say("start", "%s", strings.Join(a.CommandLine(o.Args), " "))
-	note := a.StartNote
-	if a.SignedIn {
-		note = a.SignInNote
+	var (
+		execErr error
+		watch   *requestWatch
+		atLimit bool
+	)
+	if h != nil {
+		sayRequests(say, team, h)
+		say("start", "%s", strings.Join(a.HeadlessCommandLine(o.Args, h.Task), " "))
+		argv, err := a.HeadlessArgv(o.Args, h.Task)
+		if err != nil {
+			return res, err
+		}
+		// No agent starts at the limit.
+		if err := ctx.Err(); err != nil {
+			return res, err
+		}
+		agentStarted = true
+		every := h.PollEvery
+		if every <= 0 {
+			every = requestPoll
+		}
+		watch = newRequestWatch(d, name, h.RequestTimeout)
+		wctx, stopWatch := context.WithCancel(ctx)
+		watched := make(chan struct{})
+		go func() {
+			defer close(watched)
+			watch.loop(wctx, every)
+		}()
+		execErr = d.OpenShell.Exec(ctx, name, project, a.Env, argv...)
+		stopWatch()
+		<-watched
+		atLimit = timedOut(ctx)
+		// The rest runs to the end, past the limit.
+		ctx = context.WithoutCancel(ctx)
+		watch.pass(ctx, false)
+	} else {
+		say("start", "%s", strings.Join(a.CommandLine(o.Args), " "))
+		note := a.StartNote
+		if a.SignedIn {
+			note = a.SignInNote
+		}
+		if note != "" {
+			say("note", "%s", note)
+		}
+		execErr = d.OpenShell.Exec(ctx, name, project, a.Env, a.Argv(o.Args)...)
 	}
-	if note != "" {
-		say("note", "%s", note)
-	}
-	execErr := d.OpenShell.Exec(ctx, name, project, a.Env, a.Argv(o.Args)...)
 
 	// 12. Save the log, stage the changes, delete the sandbox. A fenzi stop
 	// run elsewhere does the same, and ending the sandbox is what closed
@@ -496,7 +611,12 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		deleted = true
 		return stoppedByOther(d, o, res, say)
 	}
-	if code := openshell.ExitCode(execErr); code >= 0 {
+	if atLimit {
+		// The exec was ended at the limit, so it has no status of its own.
+		// Whether the agent's process in the sandbox ends with it has not
+		// been recorded; deleting the sandbox at the end ends it.
+		say("agent", "stopped at the %s time limit", h.Timeout)
+	} else if code := openshell.ExitCode(execErr); code >= 0 {
 		res.ExitCode = code
 	} else if execErr != nil {
 		// The connection to the agent failed without an exit code. The
@@ -504,15 +624,31 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		o.Keep = true
 		return res, fmt.Errorf("%w; the sandbox %s is kept, fenzi stop %s brings its changes back", execErr, name, name)
 	}
-	say("agent", "exited")
+	switch {
+	case atLimit:
+	case h != nil:
+		say("agent", "exited with status %d", res.ExitCode)
+	default:
+		say("agent", "exited")
+	}
 
+	var logRaw []byte
 	if out, lerr := settledLog(ctx, d, name); lerr == nil {
+		logRaw = out
 		_ = os.WriteFile(filepath.Join(runDir, LogFile), out, 0o600)
 		say("log", "saved, fenzi log")
 	} else {
 		say("log", "could not be saved: %v", lerr)
 	}
 
+	// The agent's commits come back first, as git objects; then the files,
+	// for the diff. A failure keeps the sandbox, so nothing is lost.
+	if sb.Git != nil && sb.Git.History {
+		if err := collectHistory(ctx, d, &sb, project, res.Staging, say); err != nil {
+			o.Keep = true
+			return res, fmt.Errorf("%w; the sandbox %s is kept, fenzi stop %s tries again", err, name, name)
+		}
+	}
 	files, derr := stageCopy(ctx, d, name, project, res.Staging)
 	if derr != nil {
 		o.Keep = true
@@ -523,6 +659,19 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		return res, err
 	}
 	sayStaged(say, res.Changes)
+	if h != nil {
+		s := &Summary{Agent: a.Display, Sandbox: name, Policy: o.Policy.Sources, Revision: c.Revision, TeamRevision: o.Policy.TeamRevision, Started: started, Ended: d.Now()}
+		if h.Timeout > 0 {
+			s.Timeout = h.Timeout.String()
+		}
+		if !atLimit {
+			code := res.ExitCode
+			s.AgentExit = &code
+		}
+		summarize(s, logRaw, watch, sb.Git, res.Changes, atLimit)
+		res.Summary = s
+		sayHeadless(say, s)
+	}
 	// The question below can wait on the person for as long as they like;
 	// a stop from elsewhere must not wait on it.
 	unlock()
@@ -551,6 +700,9 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 	}
 	if o.Keep {
 		res.Kept = true
+		if res.Summary != nil {
+			res.Summary.Kept = true
+		}
 		say("sandbox", "%s, kept", name)
 	} else {
 		if err := d.OpenShell.Delete(ctx, name); err != nil {
@@ -559,6 +711,9 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		deleted = true
 		markStopped(d.Dirs, name)
 		dropEmptyStaging(d.Dirs, name)
+		if sb.Git != nil {
+			workspace.DropRefs(o.Repo, name)
+		}
 		say("sandbox", "%s, deleted", name)
 	}
 	return res, nil
@@ -585,7 +740,7 @@ func stoppedByOther(d Deps, o Options, res Result, say func(label, format string
 // writeGuide puts the request guide at dest, which is outside the project
 // directory so it stays out of the diff. Agents that read instruction files
 // (OpenCode's config `instructions`) are pointed at it.
-func writeGuide(ctx context.Context, d Deps, sandbox, dest string) error {
+func writeGuide(ctx context.Context, d Deps, sandbox, dest, text string) error {
 	dest = path.Clean(dest)
 	if !strings.HasPrefix(dest, compiler.DefaultWorkdir+"/") {
 		return fmt.Errorf("guide file %q is outside the sandbox workdir", dest)
@@ -593,7 +748,7 @@ func writeGuide(ctx context.Context, d Deps, sandbox, dest string) error {
 	script := "import base64, pathlib\n" +
 		"p = pathlib.Path(" + strconv.Quote(dest) + ")\n" +
 		"p.parent.mkdir(parents=True, exist_ok=True)\n" +
-		"p.write_bytes(base64.b64decode(" + strconv.Quote(base64.StdEncoding.EncodeToString([]byte(agents.Guide))) + "))\n"
+		"p.write_bytes(base64.b64decode(" + strconv.Quote(base64.StdEncoding.EncodeToString([]byte(text))) + "))\n"
 	if _, err := d.OpenShell.ExecOutput(ctx, sandbox, "python3", "-c", script); err != nil {
 		return fmt.Errorf("writing the request guide: %w", err)
 	}
@@ -685,6 +840,9 @@ func markStopped(dirs config.Dirs, name string) {
 	}
 	if sb, ok := s.Find(name); ok {
 		sb.Running = false
+		if sb.Ended.IsZero() {
+			sb.Ended = time.Now()
+		}
 		s.Put(sb)
 		_ = dirs.SaveState(s)
 	}

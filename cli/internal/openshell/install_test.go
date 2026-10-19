@@ -62,3 +62,35 @@ func TestCheckSHA256(t *testing.T) {
 		t.Fatal("a script with another sha256 was accepted")
 	}
 }
+
+func TestOlder(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{
+		{"0.1.2", "0.1.4", true},
+		{"0.1.4", "0.1.4", false},
+		{"0.1.10", "0.1.4", false},
+		{"0.1.4", "0.1.10", true},
+		{"0.0.9", "0.1.0", true},
+		{"1.0.0", "0.9.9", false},
+		{"", "0.1.4", false},
+	} {
+		if got := older(c.a, c.b); got != c.want {
+			t.Errorf("older(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+func TestBehindReadsTheVersionLine(t *testing.T) {
+	// The line `openshell --version` printed in 0.1.2 and 0.1.4.
+	if v, behind := Behind("openshell " + InstallVersion + "\n"); v != InstallVersion || behind {
+		t.Errorf("InstallVersion: %q, %v", v, behind)
+	}
+	if v, behind := Behind("openshell 0.1.0\n"); v != "0.1.0" || !behind {
+		t.Errorf("0.1.0: %q, %v", v, behind)
+	}
+	if v, behind := Behind("unreadable"); v != "" || behind {
+		t.Errorf("no version: %q, %v", v, behind)
+	}
+}

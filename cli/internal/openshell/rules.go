@@ -10,8 +10,8 @@ import (
 	"fenzi/compiler"
 )
 
-// Proposal is one chunk from `openshell rule get`. 0.1.2 prints text only,
-// in blocks like:
+// Proposal is one chunk from `openshell rule get`. 0.1.2 and 0.1.4 print
+// text only, in blocks like:
 //
 //	Chunk: df10f171-e5d2-41f0-b4f5-b58fa89ca326
 //	Status: pending
@@ -87,8 +87,9 @@ func ParseRules(out []byte) []Proposal {
 	return list
 }
 
-// noRules is what `rule get <name> --status pending` printed in 0.1.2, with
-// exit 0, for a sandbox with nothing pending (recorded 16 October 2026):
+// noRules is what `rule get <name> --status pending` prints in 0.1.2 and
+// 0.1.4, with exit 0, for a sandbox with nothing pending (recorded 16 and 19
+// October 2026):
 //
 //	No network rules for sandbox 'fenzi-mouse-keepe-5561'
 var noRules = regexp.MustCompile(`^No network rules for sandbox '[^']*'$`)
@@ -99,10 +100,13 @@ func NoRules(out []byte) bool {
 	return noRules.Match(bytes.TrimSpace(out))
 }
 
-// agentFiled matches the sandbox log line OpenShell 0.1.2 writes when the
-// agent submits a proposal through policy.local:
+// agentFiled matches the sandbox log line OpenShell writes when the agent
+// submits a proposal through policy.local. 0.1.2:
 //
 //	CONFIG:PROPOSED [INFO] agent_authored proposal chunk:fad7c2ed-… on host:443 HEAD / by /usr/bin/curl
+//
+// 0.1.4 brackets the method and path and ends with [chunk_id:…]; the chunk
+// is read from the same place.
 //
 // Drafts the supervisor makes from refusals are logged only as "Flushed
 // denial analysis", without a chunk id.
@@ -117,7 +121,8 @@ func AgentFiled(log []byte) map[string]bool {
 	return ids
 }
 
-// drafted is the rationale 0.1.2 writes on a draft made from a refusal:
+// drafted is the rationale 0.1.2 and 0.1.4 write on a draft made from a
+// refusal:
 // "Allow curl to connect to github.com:443 (HTTPS)."
 var drafted = regexp.MustCompile(`^Allow \S+ to connect to \S+:\d+( \([^)]*\))?\.$`)
 
@@ -188,19 +193,38 @@ type RequestAccess struct {
 }
 
 // endpointShape is the Endpoints line of `openshell rule get`. The shapes
-// recorded from OpenShell 0.1.2 are:
+// recorded from OpenShell 0.1.2, and again from 0.1.4, are:
 //
 //	paste.example.net:443 [L4]
 //	registry.npmjs.org:443 [L7 rest, access=read-only]
 //	www.example.com:443 [L7 rest, allow GET /]
 //
-// A line with more than one endpoint, more than one allow rule, or another
-// access level has not been recorded, so its access is left empty.
+// 0.1.4 lists a rule with two endpoints on one line, comma-separated:
+//
+//	www.kernel.org:443 [L7 rest, allow GET /], cdn.kernel.org:443 [L7 rest, allow POST /pub]
+//
+// That line, more than one allow rule, or another access level does not map
+// to one hosts entry, so its access is left empty.
 var (
 	endpointShape = regexp.MustCompile(`^([a-z0-9][a-z0-9.-]*):(\d+) \[([^\]]+)\]$`)
 	l7ReadOnly    = regexp.MustCompile(`^L7 rest, access=read-only$`)
 	l7AllowOne    = regexp.MustCompile(`^L7 rest, allow ([A-Z]+) (/\S*)$`)
 )
+
+// AllowLine is the rule's "METHOD /path" when its endpoints line names
+// one, whatever the method: what approving lets through, as a person
+// reads it. Empty for an L4 rule, a read-only preset, and any shape that
+// has not been recorded.
+func (p Proposal) AllowLine() string {
+	m := endpointShape.FindStringSubmatch(strings.TrimSpace(p.Endpoints))
+	if m == nil {
+		return ""
+	}
+	if a := l7AllowOne.FindStringSubmatch(m[3]); a != nil {
+		return a[1] + " " + a[2]
+	}
+	return ""
+}
 
 // RequestedAccess maps the rule's endpoints to an access level: GET or HEAD
 // is read-only, any other method is read-write with the rule's allow line,

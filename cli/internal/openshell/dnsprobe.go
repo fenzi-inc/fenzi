@@ -12,10 +12,10 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// How long the sandbox keeps an allowed name's address. In 0.1.2 the
-// supervisor asks the first nameserver in its own /etc/resolv.conf, keeps the
-// answer for its TTL clamped to 1 to 30 seconds, and answers the sandbox with
-// that clamped TTL (policy_dns/mod.rs MIN_MAPPING_TTL, MAX_MAPPING_TTL,
+// How long the sandbox keeps an allowed name's address. In 0.1.2 and 0.1.4
+// the supervisor asks the first nameserver in its own /etc/resolv.conf, keeps
+// the answer for its TTL clamped to 1 to 30 seconds, and answers the sandbox
+// with that clamped TTL (policy_dns/mod.rs MIN_MAPPING_TTL, MAX_MAPPING_TTL,
 // clamp_mapping_ttl; wire.rs). Neither the resolver nor the floor is a
 // setting. A connection made after the mapping expires is refused with
 // transparent_tcp_mapping_denied.

@@ -25,6 +25,9 @@ type Fake struct {
 	Replies map[string]Reply
 	// Hook runs on every call, for side effects such as writing downloaded files.
 	Hook func(args []string)
+	// Answer, when set, is asked for the output of a call before Replies.
+	// It returns false to leave the call to Replies.
+	Answer func(args []string) (out string, ok bool)
 	// Env holds every KEY=VALUE passed with OutputEnv, so tests can check that
 	// secrets went through the environment and not the arguments.
 	Env []string
@@ -59,6 +62,11 @@ func (f *Fake) answer(args []string) ([]byte, error) {
 	f.Calls = append(f.Calls, line)
 	if f.Hook != nil {
 		f.Hook(args)
+	}
+	if f.Answer != nil {
+		if out, ok := f.Answer(args); ok {
+			return []byte(out), nil
+		}
 	}
 	best := ""
 	for k := range f.Replies {

@@ -23,7 +23,8 @@ type Manifest map[string]string
 // are never uploaded, so they are never compared or applied.
 type Filter func(rels []string) ([]string, error)
 
-// All keeps every file except those under .git.
+// All keeps every file except git internals: a .git folder or file at any
+// depth, in any case.
 func All(rels []string) ([]string, error) {
 	kept := make([]string, 0, len(rels))
 	for _, r := range rels {
@@ -34,7 +35,39 @@ func All(rels []string) ([]string, error) {
 	return kept, nil
 }
 
-func isGitPath(rel string) bool { return rel == ".git" || strings.HasPrefix(rel, ".git/") }
+// isGitPath reports whether any component of a slash-separated path is a
+// .git folder or file. Git runs what it finds there: a nested sub/.git with
+// core.fsmonitor runs on the next git status in sub/, and on a
+// case-insensitive disk .GIT/hooks/pre-commit is the real hook. A .git file
+// is a gitlink, which points git at another folder. The sandbox is Linux and
+// case-sensitive, so it can hand back any of these as ordinary files.
+func isGitPath(rel string) bool {
+	for _, part := range strings.Split(rel, "/") {
+		if isDotGit(part) {
+			return true
+		}
+	}
+	return false
+}
+
+// isDotGit compares one name with .git the way the disks a project may land
+// on do, after git's own checks (verify_dotfile, is_hfs_dotgit,
+// is_ntfs_dotgit): any case, code points HFS+ ignores removed, and the
+// trailing dots and spaces and the GIT~1 short name that NTFS accepts.
+func isDotGit(name string) bool {
+	name = strings.Map(func(r rune) rune {
+		if hfsIgnored(r) {
+			return -1
+		}
+		return r
+	}, name)
+	name = strings.TrimRight(name, ". ")
+	return strings.EqualFold(name, ".git") || strings.EqualFold(name, "git~1")
+}
+
+func hfsIgnored(r rune) bool {
+	return r >= 0x200c && r <= 0x200f || r >= 0x202a && r <= 0x202e || r >= 0x206a && r <= 0x206f || r == 0xfeff
+}
 
 type Kind string
 
@@ -85,6 +118,11 @@ func Changes(base Manifest, staged string, include Filter) ([]Change, error) {
 		}
 	}
 	for rel := range base {
+		// A snapshot taken before git internals were skipped at every
+		// depth may list them; they are not the project's to delete.
+		if isGitPath(rel) {
+			continue
+		}
 		if _, ok := now[rel]; !ok {
 			out = append(out, Change{rel, Deleted})
 		}
@@ -119,13 +157,20 @@ func Conflicts(root string, base Manifest, changes []Change) ([]string, error) {
 }
 
 // Apply copies added and modified files from staged into root and removes
-// deleted ones. Call Conflicts first.
+// deleted ones. Call Conflicts first. It refuses the whole set, before
+// writing anything, if one path leaves the project or touches git
+// internals. Changes already leaves those out; this is the second check.
 func Apply(root, staged string, changes []Change) error {
 	for _, c := range changes {
-		dst := filepath.Join(root, filepath.FromSlash(c.Path))
-		if !within(root, dst) {
+		if isGitPath(c.Path) {
+			return fmt.Errorf("refusing to write git internals: %s", c.Path)
+		}
+		if !within(root, filepath.Join(root, filepath.FromSlash(c.Path))) {
 			return fmt.Errorf("refusing to write outside the project: %s", c.Path)
 		}
+	}
+	for _, c := range changes {
+		dst := filepath.Join(root, filepath.FromSlash(c.Path))
 		switch c.Kind {
 		case Deleted:
 			if err := os.Remove(dst); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -146,7 +191,9 @@ func Apply(root, staged string, changes []Change) error {
 func Applied(base Manifest, staged string, changes []Change) (Manifest, error) {
 	next := make(Manifest, len(base))
 	for rel, sum := range base {
-		next[rel] = sum
+		if !isGitPath(rel) {
+			next[rel] = sum
+		}
 	}
 	for _, c := range changes {
 		if c.Kind == Deleted {
@@ -180,7 +227,8 @@ func Load(path string) (Manifest, error) {
 	return m, json.Unmarshal(b, &m)
 }
 
-// files lists regular files under root, skipping .git.
+// files lists regular files under root, skipping git internals whatever
+// the filter, so no Filter can let them into a snapshot.
 func files(root string) ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(root, func(abs string, d fs.DirEntry, err error) error {
@@ -195,10 +243,13 @@ func files(root string) ([]string, error) {
 		if rel == "." {
 			return nil
 		}
-		if d.IsDir() {
-			if isGitPath(rel) {
+		if isGitPath(rel) {
+			if d.IsDir() {
 				return filepath.SkipDir
 			}
+			return nil
+		}
+		if d.IsDir() {
 			return nil
 		}
 		// Symlinks and special files are not compared; a symlink could point

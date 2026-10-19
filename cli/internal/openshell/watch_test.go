@@ -34,11 +34,15 @@ import (
 const (
 	streamAllow    = "NET:OPEN [INFO] ALLOWED /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe(0) -> api.anthropic.com:443 [policy:_provider_fenzi_claude engine:opa]"
 	streamApproval = "CONFIG:APPROVED [INFO] chunk:fad7c2ed-3aca-4fb7-bb37-495820dd7562 approved on example.com:443 HEAD / by /usr/bin/curl"
-	// Recorded for a cursor from another cursor space.
-	streamOutOfRange = "Restart the watch with an empty resume_after_cursor"
+	// Recorded from OpenShell 0.1.4 for a cursor from another cursor space,
+	// after the sandbox snapshot the stream always sends first.
+	streamOutOfRange = "resume_after_cursor belongs to a cursor space that no longer exists; the gateway restarted or the sandbox's buffers were torn down. Restart the watch with an empty resume_after_cursor. Events published in the meantime are not recoverable."
 )
 
-// fakeShell replays a stream in one cursor space, "v1:s1:<n>".
+// fakeShell replays a stream in one cursor space, "v1:s1:<n>", the way
+// OpenShell 0.1.4 answered on 19 October 2026: a cursor it cannot parse is
+// refused before anything is sent; otherwise the sandbox's snapshot comes
+// first, with no cursor, and a cursor from another space is refused after it.
 type fakeShell struct {
 	pb.UnimplementedOpenShellServer
 	mu     sync.Mutex
@@ -52,12 +56,15 @@ func (f *fakeShell) WatchSandbox(req *pb.WatchSandboxRequest, stream grpc.Server
 	events := f.events
 	f.mu.Unlock()
 	after := req.GetResumeAfterCursor()
-	switch {
-	case after == "":
-	case after == "v1:old:7":
+	if after != "" && after != "v1:old:7" && (len(after) < 6 || after[:6] != "v1:s1:") {
+		return status.Error(codes.InvalidArgument, "resume_after_cursor is not a valid watch cursor")
+	}
+	snapshot := &pb.SandboxStreamEvent{Payload: &pb.SandboxStreamEvent_Sandbox{Sandbox: &pb.Sandbox{}}}
+	if err := stream.Send(snapshot); err != nil {
+		return err
+	}
+	if after == "v1:old:7" {
 		return status.Error(codes.OutOfRange, streamOutOfRange)
-	case len(after) < 6 || after[:6] != "v1:s1:":
-		return status.Error(codes.InvalidArgument, "malformed cursor")
 	}
 	for _, ev := range events {
 		if after != "" && ev.GetCursor() != "" && ev.GetCursor() <= after {

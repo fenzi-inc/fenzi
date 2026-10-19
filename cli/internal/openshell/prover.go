@@ -74,8 +74,8 @@ func (r Result) MissingDomains() []string {
 	return missing
 }
 
-// Example renders the counterexample for people. Prover 0.1.2 gives an
-// object with domain, binary, host, port, protocol, method, and path for
+// Example renders the counterexample for people. Prover 0.1.2 and 0.1.4
+// give an object with domain, binary, host, port, protocol, method, and path for
 // network results.
 func (r Result) Example() string {
 	raw := strings.TrimSpace(string(r.Counterexample))

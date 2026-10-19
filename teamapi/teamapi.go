@@ -40,16 +40,14 @@ type Bundle struct {
 // formatHead starts every format 2 message. A format 1 message starts with
 // the tenant and then the revision number, so the two cannot be confused:
 // a tenant cannot hold a space, and "acme" is not a revision number.
-// The wire name stays boundlane: machines on CLIs before the rename to Fenzi
-// verify the same bytes.
-const formatHead = "boundlane bundle 2\n"
+const formatHead = "fenzi bundle 2\n"
 
 // Message is the signed bytes.
 //
 // Format 1: the tenant, the revision, and the published time in RFC 3339 with
 // nanoseconds, each on its own line, then the document.
 //
-// Format 2: the line "boundlane bundle 2", the same three lines, then the
+// Format 2: the line "fenzi bundle 2", the same three lines, then the
 // document's length in bytes on its own line and the document, then the
 // boundary's length on its own line and the boundary.
 func Message(b Bundle) []byte {

@@ -21,7 +21,7 @@ const (
 	vectorDocument = "version: 1\nagents: [claude]\n"
 	vectorBoundary = "version: 1\nagents: [claude, codex]\n"
 	vectorV1Sig    = "dssKPLiFqdSsPecARPrMZK1p+GoZqCd3qlgAiAQNp/qKJvmzfzpoXhzzeXXnHVU1g70xBnqLPuLrmbzcHjFFBA=="
-	vectorV2Sig    = "QOI0fWnFc7pJcZH6r3GlfDwOJ0t/1BljciUKLfnZJry29v+NC5I9TREC0Pe1oWBqWqs7yK3VB++dR/SKuw5zAA=="
+	vectorV2Sig    = "TQI31imq9uCL4dz/duVhPw6nsBGRFBzQgwKl2elUvVflFDtMK9bKyORi2YP47gaYYM/ARLdC+5Pz7bTxs6STDg=="
 )
 
 func vectorKey() ed25519.PrivateKey { return ed25519.NewKeyFromSeed(vectorSeed) }
@@ -59,7 +59,7 @@ func TestFormatOneIsTheMessageOldClientsVerify(t *testing.T) {
 
 func TestFormatTwoSignsTheBoundary(t *testing.T) {
 	b := vectorBundle(FormatBoundary)
-	want := "boundlane bundle 2\nacme\n4\n2026-10-15T12:00:00.1Z\n" +
+	want := "fenzi bundle 2\nacme\n4\n2026-10-15T12:00:00.1Z\n" +
 		"28\n" + vectorDocument + "35\n" + vectorBoundary
 	if got := string(Message(b)); got != want {
 		t.Fatalf("message %q", got)

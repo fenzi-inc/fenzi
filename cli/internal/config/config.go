@@ -33,21 +33,7 @@ func Default() (Dirs, error) {
 		cache = filepath.Join(home, ".cache")
 	}
 	d := Dirs{Config: filepath.Join(cfg, "fenzi"), Cache: filepath.Join(cache, "fenzi")}
-	// Machines set up before the rename from Boundlane keep their sign-in,
-	// state and cache: the old folders move once, when the new ones are missing.
-	moveLegacy(filepath.Join(cfg, "boundlane"), d.Config)
-	moveLegacy(filepath.Join(cache, "boundlane"), d.Cache)
 	return d, nil
-}
-
-func moveLegacy(old, cur string) {
-	if _, err := os.Stat(cur); err == nil {
-		return
-	}
-	if _, err := os.Stat(old); err != nil {
-		return
-	}
-	_ = os.Rename(old, cur)
 }
 
 // Run holds the compiled policy, boundary, and effective policy for one sandbox.
@@ -80,6 +66,46 @@ type Sandbox struct {
 	PendingLoad int       `json:"pending_load,omitempty"`
 	Created     time.Time `json:"created"`
 	Running     bool      `json:"running"`
+	// Ended is when fenzi saw the agent exit or stopped the sandbox. Zero
+	// while it runs, and for a sandbox that ended some other way.
+	Ended time.Time `json:"ended,omitzero"`
+	// Git is the repository state of the folder when the sandbox started,
+	// and what the agent's commits became on this machine. Nil when the
+	// folder is not a git repository.
+	Git *Git `json:"git,omitempty"`
+}
+
+// Git records one sandbox's round trip through the developer's repository.
+// The repository on this machine is the only history: the sandbox gets a
+// copy of it, the agent works on a branch of its own, and its commits come
+// back as git objects with the same ids.
+type Git struct {
+	// Branch is the branch checked out when the sandbox started, "" when
+	// HEAD was detached. Head is the commit checked out then.
+	Branch string `json:"branch,omitempty"`
+	Head   string `json:"head,omitempty"`
+	// Dirty is whether the folder had uncommitted edits at start.
+	Dirty bool `json:"dirty,omitempty"`
+	// History is whether the sandbox was given the repository's history.
+	// When it was not, only files come back, as before, and FilesOnly says
+	// why.
+	History   bool   `json:"history,omitempty"`
+	FilesOnly string `json:"files_only,omitempty"`
+	// Start is the commit the agent's branch began at: Head, or the start
+	// commit built from the uncommitted edits when the folder was dirty.
+	// AgentBranch is the branch the agent was started on in the sandbox.
+	Start       string `json:"start,omitempty"`
+	AgentBranch string `json:"agent_branch,omitempty"`
+	// Landed is the branch in the repository that holds the agent's
+	// commits, set when the sandbox was collected at exit. Tip is its
+	// commit, Commits how many commits it has since Start, and Checkpoint
+	// whether the last of them holds what the agent left uncommitted.
+	Landed     string `json:"landed,omitempty"`
+	Tip        string `json:"tip,omitempty"`
+	Commits    int    `json:"commits,omitempty"`
+	Checkpoint bool   `json:"checkpoint,omitempty"`
+	// Merged is the commit fenzi apply moved Branch to, "" until then.
+	Merged string `json:"merged,omitempty"`
 }
 
 func (d Dirs) LoadState() (*State, error) {

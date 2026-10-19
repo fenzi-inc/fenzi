@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/openshell"
 	"fenzi/cli/internal/team"
 )
 
@@ -54,5 +55,39 @@ func TestPublishByAMemberNamesTheConsole(t *testing.T) {
 	out, code := runCLI(t, "", "policy", "publish", file)
 	if code != 1 || !strings.Contains(out, "ana@acme.dev is a member") || !strings.Contains(out, "https://fenzi.example/console") || strings.Contains(out, "dana@") || strings.Contains(out, "local server") {
 		t.Errorf("exit %d:\n%s", code, out)
+	}
+}
+
+func TestDoctorNotesAnOlderPatch(t *testing.T) {
+	runtime := func(version string) jsonCheck {
+		t.Helper()
+		r := doctorReplies(t, "")
+		r["--version"] = reply{out: "openshell " + version + "\n"}
+		fakeRuntime(t, r, "")
+		var doc jsonDoctor
+		runJSON(t, &doc, "doctor", "--json")
+		for _, c := range doc.Checks {
+			if c.Name == "Runtime" {
+				return c
+			}
+		}
+		t.Fatalf("no Runtime check: %+v", doc.Checks)
+		return jsonCheck{}
+	}
+	// 0.1.0 is older than any InstallVersion this pin can have.
+	c := runtime("0.1.0")
+	if c.Status != "ok" {
+		t.Errorf("an older patch is a note, not a failure: %+v", c)
+	}
+	for _, want := range []string{"0.1.0, older than " + openshell.InstallVersion, "run fenzi setup to upgrade", "restarts the gateway. No sandbox is running, so nothing is interrupted."} {
+		if !strings.Contains(c.Detail, want) {
+			t.Errorf("missing %q in %q", want, c.Detail)
+		}
+	}
+	if strings.Contains(c.Detail, "openshell ") {
+		t.Errorf("doctor tells the user to run openshell: %q", c.Detail)
+	}
+	if c := runtime(openshell.InstallVersion); c.Status != "ok" || c.Detail != openshell.InstallVersion {
+		t.Errorf("the installed release is InstallVersion: %+v", c)
 	}
 }

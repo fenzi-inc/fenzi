@@ -37,6 +37,12 @@ env:
 guide_file: /sandbox/.fenzi/guide.md
 # `opencode --help` in 1.18.34: "-c, --continue  continue the last session".
 resume: [--continue]
+# fenzi run --headless. `opencode run --help` in 1.18.34: "run opencode with
+# a message", the message as the last argument. --auto: "auto-approve
+# permissions that are not explicitly denied"; with nobody to answer, the
+# sandbox's policy decides.
+headless:
+  args: [run, --auto]
 # How the agent reads the MCP servers in the policy's mcp section (agents/mcp.go).
 mcp_format: opencode-env
 key:

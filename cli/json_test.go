@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -213,8 +214,9 @@ func TestJSONRequests(t *testing.T) {
 	want := jsonRequest{
 		ID: "ccd96a39-17bd-4710-af49-c88725b0540f", Destination: "www.example.com:443", Binary: "/usr/bin/curl",
 		Rationale: "User asked to see what is on the example.com homepage. Need a single read-only GET of the homepage with curl.",
+		Rule:      "example_home_read", Endpoints: "www.example.com:443 [L7 rest, allow GET /]", Access: "read-only", Allow: []string{"GET /"},
 	}
-	if len(docs) != 1 || docs[0] != want {
+	if len(docs) != 1 || !reflect.DeepEqual(docs[0], want) {
 		t.Errorf("requests = %+v", docs)
 	}
 	if stderr, code := runJSON(t, &docs, "requests", "--all", "--sandbox", "fenzi-web-1a2b", "--json"); code != 0 || stderr != "" {
@@ -222,6 +224,43 @@ func TestJSONRequests(t *testing.T) {
 	}
 	if len(docs) != 3 || docs[0].Draft || !docs[1].Draft || !docs[2].Draft || docs[1].Destination != "github.com:443" {
 		t.Errorf("requests --all = %+v", docs)
+	}
+	// What approving opens: an L4 rule lets everything through to the host.
+	if d := docs[1]; !d.L4 || d.Access != "read-only" || d.Rule != "allow_github_com_443" || d.Endpoints != "github.com:443 [L4]" || d.MCP {
+		t.Errorf("l4 request = %+v", d)
+	}
+}
+
+// Recorded from OpenShell 0.1.2: a read-write REST rule, and an MCP rule.
+const shapedRules = `  Chunk: 1a2b3c4d-0000-4000-8000-000000000001
+  Status: pending
+  Rule: api_github_com_markdown
+  Binary: /usr/bin/curl
+  Rationale: Render the README through the GitHub markdown API.
+  Endpoints: api.github.com:443 [L7 rest, allow POST /markdown]
+
+  Chunk: 1a2b3c4d-0000-4000-8000-000000000002
+  Status: pending
+  Rule: mcp_deepwiki_com
+  Binary: /usr/local/bin/node
+  Rationale: Read the wiki through the deepwiki MCP server.
+  Endpoints: mcp.deepwiki.com:443 [mcp, allow initialize *, allow tools/call read_wiki_structure]
+`
+
+func TestJSONRequestsSayWhatApprovingOpens(t *testing.T) {
+	fakeOpenShell(t, shapedRules)
+	var docs []jsonRequest
+	if stderr, code := runJSON(t, &docs, "requests", "--sandbox", "fenzi-web-1a2b", "--json"); code != 0 || stderr != "" {
+		t.Fatalf("exit %d stderr %q", code, stderr)
+	}
+	if len(docs) != 2 {
+		t.Fatalf("requests = %+v", docs)
+	}
+	if d := docs[0]; d.Access != "read-write" || !reflect.DeepEqual(d.Allow, []string{"POST /markdown"}) || d.L4 || d.MCP {
+		t.Errorf("rest request = %+v", d)
+	}
+	if d := docs[1]; !d.MCP || d.Access != "" || d.L4 || d.Endpoints != "mcp.deepwiki.com:443 [mcp, allow initialize *, allow tools/call read_wiki_structure]" {
+		t.Errorf("mcp request = %+v", d)
 	}
 }
 
@@ -296,6 +335,18 @@ func TestJSONLog(t *testing.T) {
 	if len(recs) != 2 || recs[0].Rule != "allow_api_github_com_443" || recs[1].Reason != "policy_dns_ineligible" {
 		t.Errorf("denies = %+v", recs)
 	}
+	// A deny also carries its reason in plain words, when the CLI knows
+	// the runtime's reason; an allow carries none.
+	var docs []jsonDecision
+	if stderr, code := runJSON(t, &docs, "log", "--sandbox", "fenzi-web-1a2b", "--json"); code != 0 || stderr != "" {
+		t.Fatalf("exit %d stderr %q", code, stderr)
+	}
+	if len(docs) != 3 || docs[0].Explained != "" || docs[1].Explained != "method not allowed on this host" || docs[2].Explained != "not in the policy" {
+		t.Errorf("explained = %q, %q, %q", docs[0].Explained, docs[1].Explained, docs[2].Explained)
+	}
+	if docs[1].Destination != "POST api.github.com/markdown" || docs[2].Reason != "policy_dns_ineligible" {
+		t.Errorf("the record's own fields are kept: %+v", docs[1:])
+	}
 	var none json.RawMessage
 	if stderr, code := runJSON(t, &none, "log", "--raw", "--sandbox", "fenzi-web-1a2b", "--json"); code != 1 || none != nil || !strings.Contains(stderr, "--raw") {
 		t.Errorf("--raw --json: exit %d stdout %q stderr %q", code, none, stderr)
@@ -329,12 +380,15 @@ func TestJSONLogFollow(t *testing.T) {
 		t.Fatalf("got %d lines:\n%s", len(lines), out.String())
 	}
 	for i, l := range lines {
-		var r forward.Record
+		var r jsonDecision
 		if err := json.Unmarshal([]byte(l), &r); err != nil {
 			t.Fatalf("line %d is not one JSON object: %v: %s", i, err, l)
 		}
 		if r.Sandbox != "fenzi-web-1a2b" || r.Destination == "" {
 			t.Errorf("line %d = %+v", i, r)
+		}
+		if r.Denied() && r.Explained == "" || !r.Denied() && r.Explained != "" {
+			t.Errorf("line %d explained = %q for %s", i, r.Explained, r.Action)
 		}
 	}
 	out.Reset()

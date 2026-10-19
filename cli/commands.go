@@ -94,6 +94,10 @@ func cmdDoctor(e env, args []string) (int, error) {
 	} else {
 		out, err := oc.Version(e.ctx)
 		if v, ok := openshell.Pinned.Contains(out); err == nil && ok {
+			// An older patch still works, so it is a note, not a failure.
+			if _, behind := openshell.Behind(out); behind {
+				v += ", older than " + openshell.InstallVersion + ". Upstream fixes only the newest patch; run fenzi setup to upgrade. " + restartWarning(e.ctx, oc)
+			}
 			line("ok", "Runtime", v)
 		} else {
 			line("FAIL", "Runtime", fmt.Sprintf("%q is outside %s. Install a release from that line.", strings.TrimSpace(out), openshell.Pinned))
@@ -277,10 +281,36 @@ func cmdRun(e env, args []string) (int, error) {
 	noUpload := fs.Bool("no-upload", false, "start with an empty working folder")
 	allowSecrets := fs.Bool("allow-secrets", false, "copy files that look like secrets without asking; the warning is still printed")
 	signIn := fs.Bool("sign-in", false, "start without the stored key, so the agent signs in itself: Claude Code with your Claude subscription")
+	headless := fs.Bool("headless", false, "run unattended: the agent's own non-interactive mode on --task or --task-text, no terminal, a time limit, a summary")
+	taskFile := fs.String("task", "", "with --headless: file that holds the task, - for standard input")
+	taskText := fs.String("task-text", "", "with --headless: the task itself")
+	timeout := fs.Duration("timeout", 30*time.Minute, "with --headless: time limit for the whole run, 0 for none")
+	requestTimeout := fs.Duration("request-timeout", 0, "with --headless: how long a request the agent files waits for a reviewer before it stays refused (default: until the time limit)")
+	outDir := fs.String("out", "", "with --headless: folder for summary.json, summary.md and branch.bundle")
 	if err := fs.Parse(args); err != nil {
 		return 1, err
 	}
+	if flag := runFlagAfterAgent(fs.Args()); flag != "" {
+		agent := fs.Args()[0]
+		return 1, fmt.Errorf("%s is a flag of fenzi run, and everything after the agent's name goes to the agent. Put it before the name: fenzi run %s ... %s. To pass it to the agent anyway, write %s -- %s", flag, flag, agent, agent, flag)
+	}
 	rest := runArgs(fs.Args())
+	var unattended *run.Headless
+	if *headless {
+		task, err := readTask(e, *taskFile, *taskText)
+		if err != nil {
+			return 1, err
+		}
+		if *signIn {
+			return 1, errors.New("--headless runs with a key; signing in takes a person at a browser. Drop --sign-in")
+		}
+		if *timeout < 0 || *requestTimeout < 0 {
+			return 1, errors.New("--timeout and --request-timeout cannot be negative")
+		}
+		unattended = &run.Headless{Task: task, Timeout: *timeout, RequestTimeout: *requestTimeout}
+	} else if *taskFile != "" || *taskText != "" || *outDir != "" || *requestTimeout != 0 || *timeout != 30*time.Minute {
+		return 1, errors.New("--task, --task-text, --timeout, --request-timeout and --out go with --headless")
+	}
 	// The folder is checked before anything else, so a run from the home
 	// folder never reaches the gateway.
 	repo, err := cwd()
@@ -294,6 +324,11 @@ func cmdRun(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
+	if unattended != nil {
+		if err := entry.CanRunHeadless(); err != nil {
+			return 1, err
+		}
+	}
 	if *signIn && !entry.CanSignIn() {
 		return 1, fmt.Errorf("%s does not sign in itself; it runs with a key. Drop --sign-in", entry.Display)
 	}
@@ -305,13 +340,6 @@ func cmdRun(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	if *policyFile == "" {
-		if moved, err := run.MigrateProjectFile(repo); err != nil {
-			return 1, fmt.Errorf("renaming %s to %s: %w", run.LegacyProjectFile, run.ProjectFile, err)
-		} else if moved {
-			fmt.Fprintf(e.stderr, "Renamed %s to %s, the name since Boundlane became Fenzi.\n", run.LegacyProjectFile, run.ProjectFile)
-		}
-	}
 	resolved, err := resolvePolicy(e, dirs, repo, *policyFile)
 	if err != nil {
 		return 1, err
@@ -319,7 +347,7 @@ func cmdRun(e env, args []string) (int, error) {
 	u := tui.New(e.stdin, e.stdout)
 	// A sandbox already running for this folder and agent holds the agent's
 	// session; going back to it keeps the conversation.
-	if !*fresh && *name == "" && *policyFile == "" && u.Interactive() {
+	if !*fresh && *name == "" && *policyFile == "" && unattended == nil && u.Interactive() {
 		// With --sign-in, only a sandbox that was started without the key.
 		if sb, ok := runningFor(e, dirs, repo, entry.Name); ok && (!*signIn || sb.SignIn) {
 			u.Title(sb.Name+" is still running", tilde(repo, homeDir()))
@@ -343,7 +371,7 @@ func cmdRun(e env, args []string) (int, error) {
 		return 1, err
 	}
 	var confirmSecrets func([]string) (bool, error)
-	if !*allowSecrets && u.Interactive() {
+	if !*allowSecrets && unattended == nil && u.Interactive() {
 		confirmSecrets = func([]string) (bool, error) {
 			i, err := u.Select("Copy them into the sandbox?", []tui.Option{
 				{Label: "No, stop here", Hint: "nothing is created; add them to .gitignore, then run again"},
@@ -369,6 +397,32 @@ func cmdRun(e env, args []string) (int, error) {
 		}
 	}
 	defer finishForward()
+	onExit := func(sandbox string) (bool, error) {
+		// The agent has exited: send its last decisions and requests before
+		// the questions, while the sandbox still exists.
+		finishForward()
+		if u.Interactive() {
+			u.Title(entry.Display+" exited", sandbox)
+			if sb, base, files, changes, err := staged(e, sandbox); err == nil && len(changes) > 0 {
+				reviewed = true
+				if _, err := newReview(sb, base, files, changes, "").offer(e); err != nil {
+					return true, err
+				}
+				u.Blank()
+			}
+		}
+		// The sandbox stays by default: it holds the agent's session, its
+		// files, and the approvals from this run.
+		return !*remove, nil
+	}
+	if unattended != nil {
+		// Nobody reviews at the end, and the sandbox goes unless --keep:
+		// the commits are back as a branch, the files are staged.
+		onExit = func(string) (bool, error) {
+			finishForward()
+			return false, nil
+		}
+	}
 	res, err := run.Run(e.ctx, run.Deps{
 		OpenShell: client(),
 		Prover:    prover(),
@@ -381,24 +435,7 @@ func cmdRun(e env, args []string) (int, error) {
 	}, run.Options{
 		Agent: entry, Profile: profile, Args: rest[1:], Repo: repo, Policy: resolved,
 		Name: *name, Keep: *keep, NoUpload: *noUpload, SignIn: *signIn, ConfirmSecrets: confirmSecrets,
-		OnExit: func(sandbox string) (bool, error) {
-			// The agent has exited: send its last decisions and requests before
-			// the questions, while the sandbox still exists.
-			finishForward()
-			if u.Interactive() {
-				u.Title(entry.Display+" exited", sandbox)
-				if sb, base, files, changes, err := staged(e, sandbox); err == nil && len(changes) > 0 {
-					reviewed = true
-					if _, err := newReview(sb, base, files, changes, "").offer(e); err != nil {
-						return true, err
-					}
-					u.Blank()
-				}
-			}
-			// The sandbox stays by default: it holds the agent's session, its
-			// files, and the approvals from this run.
-			return !*remove, nil
-		},
+		OnExit: onExit, Headless: unattended,
 	})
 	if errors.Is(err, run.ErrSecretsDeclined) {
 		u.Blank()
@@ -409,6 +446,9 @@ func cmdRun(e env, args []string) (int, error) {
 	}
 	if err != nil {
 		return 1, err
+	}
+	if unattended != nil {
+		return finishHeadless(e, repo, *outDir, res)
 	}
 	if res.StoppedElsewhere {
 		// The window that stopped it shows the changes; this one points at them.
@@ -441,6 +481,34 @@ func cmdRun(e env, args []string) (int, error) {
 // runArgs puts the agent first: `run`, `run claude`, `run -- claude --resume`,
 // `run claude -- --resume`, and `run -- --resume` all work. Without a name it
 // is the agent setup chose.
+// runOnlyFlags are fenzi run's own flags that no supported agent takes, so
+// one written after the agent's name is a mistake, not an agent argument.
+var runOnlyFlags = map[string]bool{"headless": true, "task-text": true, "request-timeout": true, "no-upload": true, "allow-secrets": true, "sign-in": true, "rm": true}
+
+// runFlagAfterAgent returns the first of runOnlyFlags written after the
+// agent's name and before any --, or "" when there is none.
+func runFlagAfterAgent(rest []string) string {
+	if len(rest) < 2 || strings.HasPrefix(rest[0], "-") {
+		return ""
+	}
+	for _, a := range rest[1:] {
+		if a == "--" {
+			return ""
+		}
+		if !strings.HasPrefix(a, "-") {
+			continue
+		}
+		name := strings.TrimLeft(a, "-")
+		if i := strings.IndexByte(name, '='); i >= 0 {
+			name = name[:i]
+		}
+		if runOnlyFlags[name] {
+			return "--" + name
+		}
+	}
+	return ""
+}
+
 func runArgs(rest []string) []string {
 	if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
 		rest = append([]string{defaultAgent()}, rest...)
@@ -515,7 +583,7 @@ func cmdRequests(e env, args []string) (int, error) {
 	if *asJSON {
 		docs := make([]jsonRequest, 0, len(shown))
 		for i, p := range shown {
-			docs = append(docs, jsonRequest{ID: p.Chunk, Destination: p.Destination(), Binary: p.Binary, Rationale: p.Rationale, Draft: i >= len(asked)})
+			docs = append(docs, requestJSON(p, i >= len(asked)))
 		}
 		return 0, writeJSON(e.stdout, docs)
 	}
@@ -773,11 +841,6 @@ func cmdApprove(e env, args []string) (int, error) {
 				return 1, err
 			}
 		}
-		if moved, err := run.MigrateProjectFile(repo); err != nil {
-			return 1, fmt.Errorf("not approved: renaming %s to %s: %w", run.LegacyProjectFile, run.ProjectFile, err)
-		} else if moved {
-			fmt.Fprintf(e.stderr, "Renamed %s to %s, the name since Boundlane became Fenzi.\n", run.LegacyProjectFile, run.ProjectFile)
-		}
 		if file, err = loadProject(filepath.Join(repo, run.ProjectFile)); err != nil {
 			return 1, fmt.Errorf("not approved: %w", err)
 		}
@@ -984,12 +1047,16 @@ func cmdLog(e env, args []string) (int, error) {
 	since := fs.String("since", "", "only decisions newer than this, for example 10m or 2h")
 	follow := fs.Bool("follow", false, "keep printing new decisions (running sandboxes)")
 	rawOut := fs.Bool("raw", false, "print the sandbox's full log as OpenShell wrote it, not only decisions")
+	requests := fs.Bool("requests", false, "also list the requests the agent filed and the approvals, as the runtime logged them")
 	asJSON := jsonFlag(fs)
 	if _, err := parse(fs, args); err != nil {
 		return 1, err
 	}
 	if *rawOut && *asJSON {
 		return 1, errors.New("--raw prints the runtime's own lines; drop it or drop --json")
+	}
+	if *rawOut && *requests {
+		return 1, errors.New("--raw prints the runtime's own lines, requests included; drop it or drop --requests")
 	}
 	var cut time.Time
 	if *since != "" {
@@ -1011,11 +1078,11 @@ func cmdLog(e env, args []string) (int, error) {
 	if sb.Running && *follow {
 		switch {
 		case *asJSON:
-			return 0, followJSON(e, sb.Name, *since, *deny)
+			return 0, followJSON(e, sb.Name, *since, *deny, *requests)
 		case *rawOut:
 			return 0, c.Logs(e.ctx, sb.Name, *since, true)
 		}
-		return 0, followTable(e, sb.Name, *since, *deny)
+		return 0, followTable(e, sb.Name, *since, *deny, *requests)
 	}
 	var raw []byte
 	if sb.Running {
@@ -1030,7 +1097,11 @@ func cmdLog(e env, args []string) (int, error) {
 		e.stdout.Write(raw)
 		return 0, nil
 	}
-	recs, err := forward.ReadShorthand(strings.NewReader(string(raw)), sb.Name)
+	readLog := forward.ReadShorthand
+	if *requests {
+		readLog = forward.ReadEvents
+	}
+	recs, err := readLog(strings.NewReader(string(raw)), sb.Name)
 	if err != nil {
 		return 1, err
 	}
@@ -1044,10 +1115,10 @@ func cmdLog(e env, args []string) (int, error) {
 		recs = kept
 	}
 	if *asJSON {
-		docs := []forward.Record{}
+		docs := []jsonDecision{}
 		for _, r := range recs {
 			if !*deny || (r.Denied() && !r.Reset()) {
-				docs = append(docs, r)
+				docs = append(docs, decisionJSON(r))
 			}
 		}
 		return 0, writeJSON(e.stdout, docs)
@@ -1100,6 +1171,12 @@ func logRow(r forward.Record, deny bool) ([]screen.Cell, bool) {
 	}
 	t := r.Time.Local().Format("15:04:05")
 	switch {
+	case deny && r.Config():
+		return nil, false
+	case r.Config():
+		// A request the agent filed, or an approval, with --requests: the
+		// chunk's short id where a decision has its rule.
+		return []screen.Cell{{Text: t}, {Text: strings.ToLower(r.Action)}, {Text: proc}, {Text: r.What()}, {Text: shortID(r.Chunk)}}, true
 	case deny && r.Denied() && !r.Reset():
 		return []screen.Cell{{Text: t}, {Text: proc}, {Text: r.What()}, {Text: dash(r.Reason), Tone: "deny"}}, true
 	case deny:
@@ -1128,7 +1205,7 @@ var followWidths = map[bool][]int{
 
 // followTable is log --follow as text: the same rows as the table, from the
 // same decisions --json prints, one line each as they arrive.
-func followTable(e env, sandbox, since string, denyOnly bool) error {
+func followTable(e env, sandbox, since string, denyOnly, requests bool) error {
 	scr := screen.New(e.stdout)
 	widths := followWidths[denyOnly]
 	line := func(row []screen.Cell, header bool) error {
@@ -1157,7 +1234,7 @@ func followTable(e env, sandbox, since string, denyOnly bool) error {
 	if err := line(logHeader(denyOnly), true); err != nil {
 		return err
 	}
-	return followRecords(e, sandbox, since, func(r forward.Record) error {
+	return followRecords(e, sandbox, since, requests, func(r forward.Record) error {
 		row, ok := logRow(r, denyOnly)
 		if !ok {
 			return nil
@@ -1301,6 +1378,9 @@ func cmdPolicy(e env, args []string) (int, error) {
 				missing = []string{}
 			}
 			doc := jsonPolicyCheck{Passed: r.Passed(), Result: r.Result, Checked: from, Boundary: resolved.BoundarySource, Agent: entry.Display, Example: r.Example(), Reason: r.Reason, NotChecked: missing}
+			if doc.Policy, err = policyView(resolved, entry); err != nil {
+				return 1, err
+			}
 			if err := writeJSON(e.stdout, doc); err != nil {
 				return 1, err
 			}

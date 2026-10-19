@@ -57,6 +57,11 @@ func Stop(ctx context.Context, d Deps, sb config.Sandbox) ([]workspace.Change, e
 	case err != nil:
 		return nil, err
 	default:
+		if sb.Git != nil && sb.Git.History {
+			if err := collectHistory(ctx, d, &sb, ProjectDir(sb.Repo), staging, say); err != nil {
+				return nil, fmt.Errorf("%w; the sandbox %s is kept so the agent's work is not lost", err, sb.Name)
+			}
+		}
 		files, err := stageCopy(ctx, d, sb.Name, ProjectDir(sb.Repo), staging)
 		if err != nil {
 			return nil, fmt.Errorf("copying changes out of %s: %w; the sandbox is kept so the agent's work is not lost", sb.Name, err)
@@ -76,6 +81,9 @@ func Stop(ctx context.Context, d Deps, sb config.Sandbox) ([]workspace.Change, e
 	}
 	markStopped(d.Dirs, sb.Name)
 	dropEmptyStaging(d.Dirs, sb.Name)
+	if sb.Git != nil && sb.Repo != "" {
+		workspace.DropRefs(sb.Repo, sb.Name)
+	}
 	say("sandbox", "%s, deleted", sb.Name)
 	return changes, nil
 }

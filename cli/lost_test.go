@@ -21,9 +21,8 @@ const (
 func lostFixture(t *testing.T, extra map[string]reply) config.Dirs {
 	t.Helper()
 	replies := map[string]reply{
-		"sandbox list --selector fenzi=1":     {out: lostList},
-		"sandbox list --selector boundlane=1": {out: "No sandboxes found.\n"},
-		"sandbox start":                       {out: lostStart, exit: 1},
+		"sandbox list --selector fenzi=1": {out: lostList},
+		"sandbox start":                   {out: lostStart, exit: 1},
 	}
 	for k, v := range extra {
 		replies[k] = v

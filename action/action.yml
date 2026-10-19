@@ -1,0 +1,83 @@
+name: Fenzi run
+description: Run an AI coding agent unattended in a sandbox under your Fenzi policy. Its commits come back as a branch, with a summary of every refused call.
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  agent:
+    description: The agent to run, from fenzi agents. claude, codex, opencode or grok.
+    default: claude
+  task:
+    description: The task, as text. Set this or task-file.
+    default: ''
+  task-file:
+    description: A file in the repository that holds the task. Set this or task.
+    default: ''
+  timeout:
+    description: Time limit for the whole run, such as 30m. 0 for none.
+    default: 30m
+  request-timeout:
+    description: How long a request the agent files waits for a reviewer in the team console before it stays refused. Empty waits until the time limit.
+    default: ''
+  team-token:
+    description: A team token from fenzi login --token-for, passed from a secret. Empty runs on Free, with the policy in the repository or developer-default.
+    default: ''
+  team-server:
+    description: The team server.
+    default: https://fenzi.dev
+  fenzi-version:
+    description: The fenzi release to install, such as 0.1.32. Empty installs the latest.
+    default: ''
+  fenzi-path:
+    description: Use this fenzi binary instead of installing one, such as a build of this repository.
+    default: ''
+  working-directory:
+    description: The project folder the agent gets a copy of. It must be the root of a git repository for the commits to come back as a branch.
+    default: .
+  artifact-name:
+    description: Name of the artifact that keeps summary.json, summary.md, branch.bundle and the run's output.
+    default: fenzi-run
+
+outputs:
+  outcome:
+    description: finished, agent failed, timed out, or request unanswered. Empty when the run did not start.
+    value: ${{ steps.run.outputs.outcome }}
+  exit-status:
+    description: fenzi's exit status. 0 finished, 4 the agent failed, 5 timed out, 6 a request had no answer, 1 to 3 the run did not start.
+    value: ${{ steps.run.outputs.exit-status }}
+  branch:
+    description: The branch that holds the agent's commits, in the runner's checkout. Empty when there is none.
+    value: ${{ steps.run.outputs.branch }}
+  refused:
+    description: How many distinct calls the policy refused.
+    value: ${{ steps.run.outputs.refused }}
+  out:
+    description: The folder that holds summary.json, summary.md and branch.bundle.
+    value: ${{ steps.run.outputs.out }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        FENZI_ACTION_AGENT: ${{ inputs.agent }}
+        FENZI_ACTION_TASK: ${{ inputs.task }}
+        FENZI_ACTION_TASK_FILE: ${{ inputs.task-file }}
+        FENZI_ACTION_TIMEOUT: ${{ inputs.timeout }}
+        FENZI_ACTION_REQUEST_TIMEOUT: ${{ inputs.request-timeout }}
+        FENZI_ACTION_SERVER: ${{ inputs.team-server }}
+        FENZI_ACTION_VERSION: ${{ inputs.fenzi-version }}
+        FENZI_ACTION_PATH: ${{ inputs.fenzi-path }}
+        FENZI_ACTION_ARTIFACT: ${{ inputs.artifact-name }}
+        FENZI_TEAM_TOKEN: ${{ inputs.team-token }}
+      run: '"$GITHUB_ACTION_PATH/run.sh"'
+
+    - if: always() && steps.run.outputs.out != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.run.outputs.out }}
+        if-no-files-found: ignore

@@ -1,0 +1,1 @@
+This folder is a copy of the developer's files, without git history. Do not run git init or git clone in this folder: a repository you create here is not brought back. Your changes come back to the developer as edited files, which they review and apply.

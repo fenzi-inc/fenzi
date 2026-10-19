@@ -929,5 +929,11 @@ func saveCursors(dirs config.Dirs, c cursorFile) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(cursorPath(dirs), b, 0o600)
+	// Replaced in one step: a forwarder stopped mid-write (a logout, a
+	// service manager's SIGTERM) must not leave a file no pass can read.
+	tmp := cursorPath(dirs) + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, cursorPath(dirs))
 }

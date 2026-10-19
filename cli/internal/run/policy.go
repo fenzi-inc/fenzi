@@ -17,23 +17,6 @@ import (
 // ProjectFile is the optional policy file in a project root.
 const ProjectFile = "fenzi.yaml"
 
-// LegacyProjectFile is the name before the rename from Boundlane. It is read
-// when ProjectFile is missing, and MigrateProjectFile renames it.
-const LegacyProjectFile = "boundlane.yaml"
-
-// MigrateProjectFile renames boundlane.yaml to fenzi.yaml in repo when only
-// the old one exists, and reports whether it did.
-func MigrateProjectFile(repo string) (bool, error) {
-	newPath, oldPath := filepath.Join(repo, ProjectFile), filepath.Join(repo, LegacyProjectFile)
-	if _, err := os.Stat(newPath); err == nil {
-		return false, nil
-	}
-	if _, err := os.Stat(oldPath); err != nil {
-		return false, nil
-	}
-	return true, os.Rename(oldPath, newPath)
-}
-
 // Resolved is the policy a run uses: on the Free plan, or the team's signed
 // revision on a signed-in machine.
 type Resolved struct {
@@ -99,9 +82,6 @@ func ResolveFree(repo, file string) (Resolved, error) {
 	}
 	if file == "" {
 		file = filepath.Join(repo, ProjectFile)
-		if _, err := os.Stat(file); errors.Is(err, fs.ErrNotExist) {
-			file = filepath.Join(repo, LegacyProjectFile)
-		}
 		if _, err := os.Stat(file); errors.Is(err, fs.ErrNotExist) {
 			return Resolved{Doc: base, Sources: sources}, nil
 		}

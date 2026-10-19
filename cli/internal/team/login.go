@@ -53,6 +53,44 @@ func Login(ctx context.Context, c Client, machine string, out io.Writer) (Enroll
 	}
 }
 
+// ErrTokenRefused means the server did not take a token: it was signed
+// out in the console, or it is not a machine token of a team.
+var ErrTokenRefused = errors.New("the server refused the token")
+
+// LoginToken signs in with the token of a machine that an earlier device
+// login enrolled, for a CI runner where nobody can open a browser. The
+// member, the team and the machine are the token's, as the server says;
+// the public key and the policy come from the same server, as they do in
+// a device login, and the policy is checked against the key before it is
+// cached.
+func LoginToken(ctx context.Context, c Client, token string) (Enrollment, error) {
+	me, err := c.Me(ctx, token)
+	if Status(err) == http.StatusUnauthorized || Status(err) == http.StatusForbidden {
+		return Enrollment{}, ErrTokenRefused
+	}
+	if err != nil {
+		return Enrollment{}, err
+	}
+	key, err := c.Key(ctx, token)
+	if err != nil {
+		return Enrollment{}, err
+	}
+	en := Enrollment{
+		Server: c.base(), Token: token, Email: me.Email, Name: me.Name, Tenant: me.Tenant,
+		Machine: me.Machine, Admin: me.Admin, Role: me.Role, PublicKey: key,
+	}
+	b, ok, err := c.Policy(ctx, token)
+	if err != nil {
+		return Enrollment{}, err
+	}
+	if ok {
+		if err := en.Take(b); err != nil {
+			return Enrollment{}, fmt.Errorf("the team policy r%d %w", b.Revision, err)
+		}
+	}
+	return en, nil
+}
+
 // ErrNoPolicy means the server could not be reached and no policy is cached.
 var ErrNoPolicy = errors.New("control plane unreachable, and no policy is cached")
 

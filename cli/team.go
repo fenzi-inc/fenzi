@@ -8,10 +8,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"golang.org/x/term"
 
 	"fenzi/agents"
 	"fenzi/cli/internal/config"
@@ -35,6 +39,12 @@ func reportAccount(e env, line func(status, check, detail string)) {
 		line("ok", "Plan", en.Email+", "+en.Tenant+", no policy yet")
 	default:
 		line("ok", "Plan", fmt.Sprintf("%s, %s, revision %d", en.Email, en.Tenant, en.Revision))
+	}
+	// Forwarding only matters on a signed-in machine.
+	if _, err := team.Load(configDirs(e)); err == nil {
+		dirs := configDirs(e)
+		status, detail := forwarderLine(readForwarder(e.ctx, dirs), dirs)
+		line(status, "Forwarder", detail)
 	}
 }
 
@@ -98,12 +108,23 @@ func cmdPublish(e env, args []string) (int, error) {
 func cmdLogin(e env, args []string) (int, error) {
 	fs := newFlags("login", e.stderr)
 	server := fs.String("server", team.DefaultServer, "team server")
+	tokenStdin := fs.Bool("token-stdin", false, "sign in with a team token read from standard input, for a CI runner")
+	tokenFor := fs.String("token-for", "", "enroll a machine with this name, such as a CI runner, and print its token for a secret; this machine stays as it is")
 	if _, err := parse(fs, args); err != nil {
 		return 1, err
+	}
+	if *tokenStdin && *tokenFor != "" {
+		return 1, errors.New("--token-stdin signs this machine in; --token-for makes a token for another. Use one")
+	}
+	if *tokenFor != "" {
+		return loginTokenFor(e, *server, *tokenFor)
 	}
 	dirs, err := config.Default()
 	if err != nil {
 		return 1, err
+	}
+	if *tokenStdin {
+		return loginWithToken(e, dirs, *server)
 	}
 	host, _ := os.Hostname()
 	ctx, cancel := context.WithTimeout(e.ctx, 2*time.Minute)
@@ -115,7 +136,82 @@ func cmdLogin(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	return 0, en.Save(dirs)
+	if err := en.Save(dirs); err != nil {
+		return 1, err
+	}
+	offerForwarder(e, tui.New(e.stdin, e.stdout), dirs)
+	return 0, nil
+}
+
+// maxToken is more than a team token is ever long.
+const maxToken = 4096
+
+// loginWithToken is fenzi login --token-stdin. The token comes on
+// standard input, never on the command line, where other users of the
+// machine and the job log could read it.
+func loginWithToken(e env, dirs config.Dirs, server string) (int, error) {
+	if f, ok := e.stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+		return 1, errors.New("--token-stdin reads the token from a pipe, such as: echo \"$FENZI_TEAM_TOKEN\" | fenzi login --token-stdin")
+	}
+	raw, err := io.ReadAll(io.LimitReader(e.stdin, maxToken+1))
+	if err != nil {
+		return 1, err
+	}
+	token := strings.TrimSpace(string(raw))
+	switch {
+	case token == "":
+		return 1, errors.New("no token on standard input. In GitHub Actions, check that the secret is set for this repository")
+	case len(token) > maxToken || strings.ContainsAny(token, " \t\r\n"):
+		return 1, errors.New("standard input holds more than one token")
+	}
+	ctx, cancel := context.WithTimeout(e.ctx, teamTimeout)
+	defer cancel()
+	en, err := team.LoginToken(ctx, team.Client{Base: server}, token)
+	if errors.Is(err, team.ErrTokenRefused) {
+		return 1, errors.New("the team server refused the token: it was signed out in the console, or it is not a team token. Make a new one with fenzi login --token-for <name>")
+	}
+	if err != nil {
+		return 1, err
+	}
+	if err := en.Save(dirs); err != nil {
+		return 1, err
+	}
+	u := tui.ForOutput(e.stdout)
+	u.Title("Signed in", "")
+	u.Done("Member", en.Email+", "+withArticle(en.RoleName())+" of team "+en.Tenant)
+	u.Done("Machine", en.Machine+", runs count against this member")
+	if en.Revision == 0 {
+		u.Skip("Policy", "none published yet")
+	} else {
+		u.Done("Policy", fmt.Sprintf("%s r%d, verified and cached", en.Tenant, en.Revision))
+	}
+	u.Blank()
+	return 0, nil
+}
+
+// loginTokenFor is fenzi login --token-for <name>: a device login for a
+// new machine, such as a CI runner, approved by the member who will own
+// it. The token goes to standard output, for a secret store, and nothing
+// is stored on this machine.
+func loginTokenFor(e env, server, name string) (int, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > 64 || strings.ContainsAny(name, "\t\r\n") {
+		return 1, errors.New("--token-for takes a short machine name, such as github-actions")
+	}
+	ctx, cancel := context.WithTimeout(e.ctx, 2*time.Minute)
+	defer cancel()
+	en, err := team.Login(ctx, team.Client{Base: server}, name, e.stderr)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return 1, errors.New("no approval after two minutes, no token was made. Run fenzi login --token-for again for a new code")
+	}
+	if err != nil {
+		return 1, err
+	}
+	u := tui.ForOutput(e.stderr)
+	u.Note("The token is on standard output and was not stored here. Keep it as a secret, such as: fenzi login --token-for " + name + " | gh secret set FENZI_TEAM_TOKEN. Runs with it count against " + en.Email + ". Signing the machine out in the console ends it.")
+	u.Blank()
+	fmt.Fprintln(e.stdout, en.Token)
+	return 0, nil
 }
 
 func cmdLogout(e env, args []string) (int, error) {
@@ -126,12 +222,28 @@ func cmdLogout(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	if err := team.Clear(dirs); err != nil {
+	// The background forwarder goes first, so it cannot start a pass after
+	// the sign-in is gone.
+	removed, removeErr := removeForwarder(e)
+	// A pass in flight saves the sign-in back when it ends. Wait for it.
+	unlock, err := lockRelay(e.ctx, dirs, relayLockWait)
+	if err != nil {
+		return 1, err
+	}
+	err = team.Clear(dirs)
+	unlock()
+	if err != nil {
 		return 1, err
 	}
 	u := tui.New(e.stdin, e.stdout)
 	u.Title("Signed out", "")
 	u.Done("This machine", "the sign-in is forgotten")
+	switch {
+	case removeErr != nil:
+		u.Problem("Forwarder", "could not remove the background forwarder: "+removeErr.Error()+". It stops on its next pass, and fenzi forward --uninstall removes it")
+	case removed:
+		u.Done("Forwarder", "the background forwarder is stopped and removed")
+	}
 	u.Note("A sandbox that is already running keeps its policy.")
 	u.Blank()
 	return 0, nil
@@ -176,9 +288,14 @@ func cmdStatus(e env, args []string) (int, error) {
 	}
 	role := en.RoleName()
 	if *asJSON {
+		fw := readForwarder(e.ctx, dirs)
 		doc := jsonStatus{
 			SignedIn: true, Email: en.Email, Role: role, Team: en.Tenant, Machine: en.Machine,
-			Server: en.Server, ConsoleURL: en.Server + "/console", PolicyRevision: en.Revision, Notes: []string{},
+			Server: en.Server, ConsoleURL: en.Server + "/console", PolicyRevision: en.Revision, PolicyPublished: publishedAt(en), Notes: []string{},
+			Forwarder: &jsonForwarder{
+				Installed: fw.Installed, Running: fw.Installed && fw.Running, Manager: fw.Kind,
+				Detail: fw.Detail, ForwardingNow: fw.Holder,
+			},
 		}
 		if note != "" {
 			doc.Notes = append(doc.Notes, note)
@@ -199,12 +316,33 @@ func cmdStatus(e env, args []string) (int, error) {
 	} else {
 		u.Done("Policy", fmt.Sprintf("r%d, verified", en.Revision))
 	}
+	switch status, detail := forwarderLine(readForwarder(e.ctx, dirs), dirs); status {
+	case "ok":
+		u.Done("Forwarder", detail)
+	case "FAIL":
+		u.Problem("Forwarder", detail)
+	default:
+		u.Skip("Forwarder", detail)
+	}
 	if note != "" {
 		u.Note(note)
 	}
 	u.Blank()
 	_ = tc.Heartbeat(e.ctx, en.Token, statusBeat(e, dirs, en))
 	return 0, nil
+}
+
+// publishedAt is when the cached revision was published, RFC 3339 in UTC,
+// or "" with no revision or a time the bundle did not carry.
+func publishedAt(en team.Enrollment) string {
+	if en.Revision == 0 || en.Published == "" {
+		return ""
+	}
+	t, err := time.Parse(time.RFC3339Nano, en.Published)
+	if err != nil {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 // statusBeat is the heartbeat status sends, with the same notes as a

@@ -179,3 +179,80 @@ func TestShorthandMCP(t *testing.T) {
 		t.Errorf("a cut tool name is dropped, not shown wrong: %+v", r)
 	}
 }
+
+// One decision from recordedLog, for the mixed read below.
+const decisionLine = `[1791059126.330] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] ALLOWED /usr/bin/curl(0) -> api.github.com:443 [policy:allow_api_github_com_443 engine:opa]`
+
+// Recorded in the same Codex session as approvedLine, 24 seconds earlier.
+const proposedLine = `[1791297778.239] [sandbox] [OCSF ] [ocsf] CONFIG:PROPOSED [INFO] agent_authored proposal chunk:fad7c2ed-3aca-4fb7-bb37-495820dd7562 on example.com:443 HEAD / by /usr/bin/curl`
+
+// fenzi log --requests shows the request the agent filed and its approval;
+// the forwarder (AuditFromShorthand) still ships decisions and approvals only.
+func TestEventsMapAFiledRequest(t *testing.T) {
+	r, ok := EventFromShorthand(proposedLine, "fenzi-mouse-keepe-a3a6")
+	want := Record{
+		Time: time.Unix(1791297778, 239e6).UTC(), Sandbox: "fenzi-mouse-keepe-a3a6", Class: "Config", Action: "Requested",
+		Destination: "example.com:443 HEAD /", Process: "/usr/bin/curl", Chunk: "fad7c2ed-3aca-4fb7-bb37-495820dd7562",
+	}
+	if !ok || r != want {
+		t.Errorf("EventFromShorthand = %+v, want %+v", r, want)
+	}
+	if !r.Config() {
+		t.Error("a request is a policy event, not a decision")
+	}
+	if a, ok := EventFromShorthand(approvedLine, "s"); !ok || a.Action != "Approved" || a.Chunk != r.Chunk {
+		t.Errorf("the approval maps too, with the same chunk: %+v", a)
+	}
+	if d, ok := EventFromShorthand(decisionLine, "s"); !ok || d.Config() || d.Action != "Allowed" {
+		t.Errorf("a decision maps as before: %+v", d)
+	}
+	if _, ok := EventFromShorthand(`[1791059016.500] [sandbox] [OCSF ] [ocsf] CONFIG:LOADED [INFO] Acknowledged initial policy revision as loaded [version:1]`, "s"); ok {
+		t.Error("a policy load is not an event the log shows")
+	}
+	recs, err := ReadEvents(strings.NewReader(proposedLine+"\n"+decisionLine+"\n"+approvedLine+"\n"), "s")
+	if err != nil || len(recs) != 3 || recs[0].Action != "Requested" || recs[1].Action != "Allowed" || recs[2].Action != "Approved" {
+		t.Errorf("ReadEvents = %+v, %v", recs, err)
+	}
+}
+
+// Recorded from OpenShell 0.1.4 on 19 October 2026: the request lines bracket
+// the method and path and end with the chunk again, and the approval of a
+// request the agent waited on does the same. The decision lines did not
+// change.
+func TestEventsFromOpenShell014(t *testing.T) {
+	const (
+		proposed  = `[1792367428.942] [sandbox] [OCSF ] [ocsf] CONFIG:PROPOSED [INFO] agent_authored proposal chunk:f42110d7-6838-4088-a1b1-5482aeb88792 on www.ietf.org:443 [HEAD /] by /usr/bin/curl [chunk_id:f42110d7-6838-4088-a1b1-5482aeb88792]`
+		approved  = `[1792367433.045] [sandbox] [OCSF ] [ocsf] CONFIG:APPROVED [INFO] chunk:f42110d7-6838-4088-a1b1-5482aeb88792 approved on www.ietf.org:443 [HEAD /] by /usr/bin/curl [chunk_id:f42110d7-6838-4088-a1b1-5482aeb88792]`
+		readOnly  = `[1792367470.833] [sandbox] [OCSF ] [ocsf] CONFIG:PROPOSED [INFO] agent_authored proposal chunk:f8014d08-27fa-45e6-a854-badceae780e9 on www.gnu.org:443 by /usr/bin/curl [chunk_id:f8014d08-27fa-45e6-a854-badceae780e9]`
+		two       = `[1792367471.170] [sandbox] [OCSF ] [ocsf] CONFIG:PROPOSED [INFO] agent_authored proposal chunk:483aa435-6248-4d58-8b66-8e1dda9e83c9 on www.kernel.org:443 [GET /], cdn.kernel.org:443 [POST /pub] by /usr/bin/curl [chunk_id:483aa435-6248-4d58-8b66-8e1dda9e83c9]`
+		decision  = `[1792367394.923] [sandbox] [OCSF ] [ocsf] HTTP:GET [INFO] ALLOWED GET http://www.iana.org:443/ [policy:pin_iana_read engine:l7]`
+		refused   = `[1792367362.125] [sandbox] [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/bin/curl(0) -> paste.example.net:443 [reason:transparent_tcp_policy_denied]`
+		chunk     = "f42110d7-6838-4088-a1b1-5482aeb88792"
+		sandbox   = "fenzi-pin-run-0213"
+		wantWhere = "www.ietf.org:443 HEAD /"
+	)
+	r, ok := EventFromShorthand(proposed, sandbox)
+	if !ok || r.Action != "Requested" || r.Chunk != chunk || r.Destination != wantWhere || r.Process != "/usr/bin/curl" {
+		t.Errorf("request = %+v", r)
+	}
+	a, ok := AuditFromShorthand(approved, sandbox)
+	want := Record{
+		Time: time.Unix(1792367433, 45e6).UTC(), Sandbox: sandbox, Class: "Config", Action: "Approved",
+		Destination: wantWhere, Process: "/usr/bin/curl", Chunk: chunk,
+	}
+	if !ok || a != want {
+		t.Errorf("approval = %+v, want %+v", a, want)
+	}
+	if r, ok := EventFromShorthand(readOnly, sandbox); !ok || r.Destination != "www.gnu.org:443" || r.Process != "/usr/bin/curl" {
+		t.Errorf("read-only request = %+v", r)
+	}
+	if r, ok := EventFromShorthand(two, sandbox); !ok || r.Destination != "www.kernel.org:443 [GET /], cdn.kernel.org:443 [POST /pub]" || r.Chunk != "483aa435-6248-4d58-8b66-8e1dda9e83c9" {
+		t.Errorf("two endpoints are kept as written: %+v", r)
+	}
+	if r, ok := FromShorthand(decision, sandbox); !ok || r.Destination != "GET www.iana.org/" || r.Rule != "pin_iana_read" || r.Action != "Allowed" {
+		t.Errorf("decision = %+v", r)
+	}
+	if r, ok := FromShorthand(refused, sandbox); !ok || r.Destination != "paste.example.net:443" || r.Reason != "transparent_tcp_policy_denied" || r.Action != "Denied" {
+		t.Errorf("refusal = %+v", r)
+	}
+}

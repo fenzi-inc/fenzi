@@ -9,8 +9,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 
 	"fenzi/cli/internal/run"
 	"fenzi/cli/internal/tui"
@@ -126,26 +124,7 @@ func distance(a, b string) int {
 }
 
 func main() {
-	legacyEnv()
-	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "boundlane" {
-		fmt.Fprintln(os.Stderr, "Boundlane is now Fenzi. This command still works; new installs are called fenzi (https://fenzi.dev).")
-	}
 	os.Exit(cli(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
-}
-
-// legacyEnv copies each BOUNDLANE_ variable, the names before the rename,
-// to its FENZI_ name when that one is not set.
-func legacyEnv() {
-	for _, kv := range os.Environ() {
-		k, v, ok := strings.Cut(kv, "=")
-		if !ok || !strings.HasPrefix(k, "BOUNDLANE_") {
-			continue
-		}
-		n := "FENZI_" + strings.TrimPrefix(k, "BOUNDLANE_")
-		if _, set := os.LookupEnv(n); !set {
-			os.Setenv(n, v)
-		}
-	}
 }
 
 type env struct {
@@ -232,11 +211,14 @@ func cli(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s fenzi %s: %v\n", eu.Bold("!"), args[0], err)
 		var pe *run.PolicyError
 		var ge *run.GatewayError
+		var te *run.TimeoutError
 		switch {
 		case errors.As(err, &pe):
 			return 2
 		case errors.As(err, &ge):
 			return 3
+		case errors.As(err, &te):
+			return run.ExitTimedOut
 		case code == 0:
 			return 1
 		}

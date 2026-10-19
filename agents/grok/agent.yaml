@@ -37,6 +37,15 @@ guide_flag: --rules
 # for the current working directory". With no session it prints "No session
 # found for current directory" and exits 1; fenzi connect then starts a new one.
 resume: [--continue]
+# fenzi run --headless. `grok --help` in 1.0.46: "-p, --single <PROMPT>
+# Single-turn prompt. Prints the response to stdout and exits". The task
+# goes as --single=<task>, so one that starts with a dash is still a value.
+# bypassPermissions is one of --permission-mode's values; with nobody to
+# answer, the sandbox's policy decides.
+headless:
+  task_flag: --single
+  flags:
+    --permission-mode: bypassPermissions
 # How the agent reads the MCP servers in the policy's mcp section (agents/mcp.go).
 mcp_format: grok-toml
 key:

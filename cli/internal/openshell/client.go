@@ -20,8 +20,9 @@ import (
 var Pinned = VersionRange{Major: 0, Minor: 1}
 
 // Client wraps the openshell CLI. Every method names the upstream page its
-// arguments come from. Forms the docs do not show in full were checked
-// against OpenShell 0.1.2, and the tests replay that recorded output.
+// arguments come from. Forms the docs do not show in full were recorded from
+// OpenShell 0.1.2 and recorded again from 0.1.4 on 19 October 2026; the tests
+// replay that output, and the comments say where the two differ.
 type Client struct {
 	R Runner
 }
@@ -31,8 +32,8 @@ func (c Client) Status(ctx context.Context) ([]byte, error) {
 	return c.R.Output(ctx, "status", "--output", "json")
 }
 
-// Ready checks the status JSON, as recorded from 0.1.2:
-// {"status":"connected","authentication":{"status":"authenticated"},"version":"0.1.2",...}
+// Ready checks the status JSON, the same in 0.1.2 and 0.1.4:
+// {"status":"connected","authentication":{"status":"authenticated"},"version":"0.1.4",...}
 func (c Client) Ready(ctx context.Context) error {
 	out, err := c.Status(ctx)
 	if err != nil {
@@ -123,13 +124,13 @@ func (c Client) GlobalSettings(ctx context.Context, keys ...string) (map[string]
 const Unset = "<unset>"
 
 // GlobalSettingDelete: `openshell settings delete --global --key <key> --yes`
-// (0.1.2 help text). The setting falls back to OpenShell's default.
+// (0.1.2 and 0.1.4 help text). The setting falls back to OpenShell's default.
 func (c Client) GlobalSettingDelete(ctx context.Context, key string) error {
 	_, err := c.R.Output(ctx, "settings", "delete", "--global", "--key", key, "--yes")
 	return err
 }
 
-// Version: `openshell --version`, which prints "openshell 0.1.2".
+// Version: `openshell --version`, which prints "openshell 0.1.4".
 func (c Client) Version(ctx context.Context) (string, error) {
 	out, err := c.R.Output(ctx, "--version")
 	return string(out), err
@@ -158,9 +159,9 @@ func (p profileAccess) same(o profileAccess) bool {
 	return string(a) == string(b)
 }
 
-// EnsureProfile makes the gateway hold this provider profile. In 0.1.2 a
-// second `profile import` fails with "already exists", and `profile update`
-// needs the current resource_version from `profile export`. The update
+// EnsureProfile makes the gateway hold this provider profile. In 0.1.2 and
+// 0.1.4 a second `profile import` fails with "already exists", and `profile
+// update` needs the current resource_version from `profile export`. The update
 // runs only when endpoints, binaries, or credential variables differ.
 func (c Client) EnsureProfile(ctx context.Context, id, file string) error {
 	_, err := c.R.Output(ctx, "profile", "import", "-f", file)
@@ -238,8 +239,8 @@ func (c Client) ProviderDelete(ctx context.Context, name string) error {
 }
 
 // MaxSandboxName is the longest name the gateway accepts. OpenShell 0.1.2
-// refused a 20-character name with `name exceeds maximum length (20 > 19)`;
-// the docs do not state the limit.
+// and 0.1.4 refuse a 20-character name with `name exceeds maximum length
+// (20 > 19)`; the docs do not state the limit.
 const MaxSandboxName = 19
 
 type CreateOptions struct {
@@ -248,7 +249,8 @@ type CreateOptions struct {
 	Policy   string
 	Provider string
 	// Providers are attached as well, one --provider each (the flag is
-	// repeatable in 0.1.2's sandbox create help): MCP server tokens.
+	// repeatable in the sandbox create help of 0.1.2 and 0.1.4): MCP server
+	// tokens.
 	Providers []string
 	Labels    map[string]string
 }
@@ -290,11 +292,31 @@ func (c Client) SettingsSet(ctx context.Context, name, key, value string) error 
 }
 
 // Upload: `openshell sandbox upload <name> <dir>`. Respects .gitignore and
-// skips .git. A directory lands as <workdir>/<basename of dir>.
+// skips .git. A directory lands as <workdir>/<basename of dir>. From 0.1.3,
+// a folder outside a Git work tree is copied whole with a warning, and a
+// repository Git filtering leaves empty is refused: Upload returns
+// ErrNoFiles for that. 0.1.2 copied nothing and exited 0.
 func (c Client) Upload(ctx context.Context, name, path string) error {
 	_, err := c.R.Output(ctx, "sandbox", "upload", name, path)
+	if err != nil && strings.Contains(ErrorMessage(err), noFiles) {
+		return ErrNoFiles
+	}
 	return err
 }
+
+// noFiles starts the refusal 0.1.4 prints for a repository with nothing to
+// copy, such as one just made with `git init` (recorded 19 October 2026, the
+// folder replaced):
+//
+//	Error:   × Git filtering selected no files for /tmp/up-empty-git;
+//	  │ upload stopped.
+//	  │ Git returned 0 uploadable paths: the source may be empty or all files may
+//	  │ be ignored.
+//	  │ Use --no-git-ignore to upload intentionally without filtering
+const noFiles = "Git filtering selected no files for "
+
+// ErrNoFiles means Git filtering left nothing to upload.
+var ErrNoFiles = errors.New("Git filtering selected no files to upload")
 
 // Download: `openshell sandbox download <name> <remote> <local>`. When local
 // does not exist, the contents of remote land directly in it.
@@ -345,30 +367,19 @@ type Listed struct {
 const PhaseError = "Error"
 
 // List: `openshell sandbox list --selector fenzi=1`, a table recorded from
-// 0.1.2:
+// 0.1.2, and the same from 0.1.4:
 //
 //	NAME                 CREATED              PHASE
 //	fenzi-rs-brain-8a52  2026-10-17 19:20:02  Error
 //
 // or "No sandboxes found." when none match. Every sandbox run creates
-// carries that label. Sandboxes created before the rename from Boundlane
-// carry boundlane=1 instead, so both are listed.
+// carries that label.
 func (c Client) List(ctx context.Context) ([]Listed, error) {
-	var list []Listed
-	seen := map[string]bool{}
-	for _, label := range []string{"fenzi=1", "boundlane=1"} {
-		out, err := c.R.Output(ctx, "sandbox", "list", "--selector", label)
-		if err != nil {
-			return nil, err
-		}
-		for _, l := range parseList(out) {
-			if !seen[l.Name] {
-				seen[l.Name] = true
-				list = append(list, l)
-			}
-		}
+	out, err := c.R.Output(ctx, "sandbox", "list", "--selector", "fenzi=1")
+	if err != nil {
+		return nil, err
 	}
-	return list, nil
+	return parseList(out), nil
 }
 
 // parseList reads the table, or a list of names with no header.
@@ -438,14 +449,16 @@ func (c Client) Delete(ctx context.Context, name string) error {
 	return err
 }
 
-// PendingRules: `openshell rule get <name> --status pending`. 0.1.2 has no
-// structured output; the text is printed as given.
+// PendingRules: `openshell rule get <name> --status pending`. 0.1.2 and
+// 0.1.4 have no structured output; the text is printed as given.
 func (c Client) PendingRules(ctx context.Context, name string) ([]byte, error) {
 	return c.R.Output(ctx, "rule", "get", name, "--status", "pending")
 }
 
 // RuleApprove: `openshell rule approve <name> --chunk-id <id>`. The new
-// revision loads on the supervisor's next poll, about 10 seconds.
+// revision loads on the supervisor's next poll, about 10 seconds. 0.1.4
+// prints "OK Chunk approved. Policy version: 3, hash: 391f128dbf9c", and
+// also approves a chunk that was rejected before.
 func (c Client) RuleApprove(ctx context.Context, name, chunk string) error {
 	_, err := c.R.Output(ctx, "rule", "approve", name, "--chunk-id", chunk)
 	return err
@@ -464,7 +477,12 @@ func (c Client) PolicySet(ctx context.Context, name, file string) error {
 	return err
 }
 
-// PolicyList: `openshell policy list <name>`, which shows revision status such as Loaded.
+// PolicyList: `openshell policy list <name>`, which shows revision status
+// such as Loaded. Recorded from 0.1.4 right after `policy set --wait`:
+//
+//	VERSION  HASH           STATUS       CREATED                  ERROR
+//	2        80f33a887fd1   Loaded       1792367334323
+//	1        7b5540b70130   Superseded   1792367265322
 func (c Client) PolicyList(ctx context.Context, name string) ([]byte, error) {
 	return c.R.Output(ctx, "policy", "list", name)
 }
@@ -483,8 +501,8 @@ func (c Client) Logs(ctx context.Context, name, since string, follow bool) error
 }
 
 // LogLines: `openshell logs <name> --source sandbox -n <n>`, the shorthand
-// format. 0.1.2 has no JSON output here, and the OCSF JSONL file is not
-// visible to commands run with sandbox exec.
+// format. 0.1.2 and 0.1.4 have no JSON output here, and the OCSF JSONL file
+// is not visible to commands run with sandbox exec.
 func (c Client) LogLines(ctx context.Context, name string, n int) ([]byte, error) {
 	return c.R.Output(ctx, "logs", name, "--source", "sandbox", "-n", strconv.Itoa(n))
 }
@@ -508,7 +526,7 @@ func (v VersionRange) Contains(s string) (string, bool) {
 }
 
 // ErrorMessage is the message of an OpenShell error, without the frame
-// 0.1.2 draws around it. Recorded from `sandbox start` on a sandbox lost in
+// 0.1.2 and 0.1.4 draw around it. Recorded from `sandbox start` on a sandbox lost in
 // a runtime restart:
 //
 //	Error:   × code: 'The system is not in a state required for the operation's

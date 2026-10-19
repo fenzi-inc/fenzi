@@ -11,12 +11,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
 // InstallVersion is the release setup installs. It must stay inside Pinned.
-// 0.1.2 is the release the recorded test output comes from.
-const InstallVersion = "0.1.2"
+// 0.1.4 is the release the recorded test output was checked against; older
+// 0.1 releases still pass doctor, and the code keeps what 0.1.2 printed
+// where 0.1.4 differs.
+const InstallVersion = "0.1.4"
 
 // upstreamInstaller is the upstream install script at the release tag for
 // InstallVersion, so the script is as fixed as the binaries it installs. On
@@ -26,7 +29,7 @@ const upstreamInstaller = "https://raw.githubusercontent.com/NVIDIA/OpenShell/v"
 // upstreamInstallerSHA256 is the sha256 of upstreamInstaller. Tags can move,
 // so Install refuses a script that does not match. Change it together with
 // InstallVersion.
-const upstreamInstallerSHA256 = "5c98a86a4b811c471b212219cb2a62d458244220ffa71ac8e3baf3700b17b871"
+const upstreamInstallerSHA256 = "21bd8739dc3c9b16da258590d30fa2e5647489fa998fe4ed68d0f065ea693df1"
 
 // InstallCommand is the shell line setup shows before it runs it: download
 // the installer, check its sha256, run it for InstallVersion.
@@ -65,6 +68,33 @@ func Install(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) err
 	}
 	FindInstalled()
 	return nil
+}
+
+// Behind returns the first x.y.z in `openshell --version` output and whether
+// it is older than InstallVersion. Upstream fixes only the newest patch of
+// each supported minor line, so an older patch on Pinned gets no fixes.
+func Behind(out string) (string, bool) {
+	have := semver.FindString(out)
+	if have == "" {
+		return "", false
+	}
+	return have, older(have, InstallVersion)
+}
+
+// older reports whether release a (x.y.z) comes before release b.
+func older(a, b string) bool {
+	x, y := semver.FindStringSubmatch(a), semver.FindStringSubmatch(b)
+	if x == nil || y == nil {
+		return false
+	}
+	for i := 1; i <= 3; i++ {
+		m, _ := strconv.Atoi(x[i])
+		n, _ := strconv.Atoi(y[i])
+		if m != n {
+			return m < n
+		}
+	}
+	return false
 }
 
 // checkSHA256 returns an error unless the file at path hashes to want.

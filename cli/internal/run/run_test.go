@@ -470,6 +470,23 @@ func TestNoUploadCreatesProjectDir(t *testing.T) {
 	}
 }
 
+// OpenShell 0.1.4 refuses to upload a repository Git filtering leaves empty,
+// such as one just made with `git init` (recorded 19 October 2026, the folder
+// replaced). The run goes on with an empty project folder, as it did on 0.1.2.
+func TestEmptyRepositoryStartsInAnEmptyFolder(t *testing.T) {
+	h := setup(t)
+	h.os.Replies["sandbox upload fenzi-test-0001"] = openshell.Reply{Exit: 1, Stderr: "Error:   × Git filtering selected no files for /tmp/up-empty-git;\n  │ upload stopped.\n  │ Git returned 0 uploadable paths: the source may be empty or all files may\n  │ be ignored.\n  │ Use --no-git-ignore to upload intentionally without filtering\n"}
+	if _, err := Run(context.Background(), h.deps, h.opts); err != nil {
+		t.Fatalf("%v\n%s", err, h.out)
+	}
+	if !h.called("sandbox exec -n fenzi-test-0001 --no-login-shell -- mkdir -p /sandbox/") {
+		t.Errorf("calls: %v", h.os.Calls)
+	}
+	if out := h.out.String(); !strings.Contains(out, "nothing to copy") || strings.Contains(out, "project copied") {
+		t.Errorf("output:\n%s", out)
+	}
+}
+
 func TestLogIsSavedOnceSettled(t *testing.T) {
 	h := setup(t)
 	n := 0
@@ -562,6 +579,16 @@ func TestStopStagesThenDeletes(t *testing.T) {
 	if sb, _ := s.Find("fenzi-test-0001"); sb.Running {
 		t.Error("stopped sandbox still marked running")
 	}
+	// The end is recorded once, for the Mac app's timeline.
+	if sb, _ := s.Find("fenzi-test-0001"); sb.Ended.IsZero() || time.Since(sb.Ended) > time.Minute {
+		t.Errorf("ended = %v, want now", sb.Ended)
+	}
+	stopped, _ := s.Find("fenzi-test-0001")
+	markStopped(h.deps.Dirs, "fenzi-test-0001")
+	s, _ = h.deps.Dirs.LoadState()
+	if again, _ := s.Find("fenzi-test-0001"); !again.Ended.Equal(stopped.Ended) {
+		t.Errorf("a second stop moved ended from %v to %v", stopped.Ended, again.Ended)
+	}
 }
 
 func TestStopKeepsSandboxWhenCopyFails(t *testing.T) {
@@ -605,7 +632,7 @@ func TestWriteGuide(t *testing.T) {
 	fake := &openshell.Fake{}
 	d := Deps{OpenShell: openshell.Client{R: fake}}
 	dest := "/sandbox/.fenzi/guide.md"
-	if err := writeGuide(context.Background(), d, "sb", dest); err != nil {
+	if err := writeGuide(context.Background(), d, "sb", dest, agents.Guide); err != nil {
 		t.Fatal(err)
 	}
 	if len(fake.Calls) != 1 || !strings.Contains(fake.Calls[0], "python3 -c") {
@@ -626,7 +653,7 @@ func TestWriteGuide(t *testing.T) {
 	if string(raw) != agents.Guide {
 		t.Fatalf("decoded guide does not match agents.Guide (%d bytes)", len(raw))
 	}
-	if err := writeGuide(context.Background(), d, "sb", "/tmp/guide.md"); err == nil {
+	if err := writeGuide(context.Background(), d, "sb", "/tmp/guide.md", agents.Guide); err == nil {
 		t.Fatal("a guide path outside the workdir must be refused")
 	}
 }

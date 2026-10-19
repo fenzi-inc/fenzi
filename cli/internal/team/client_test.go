@@ -4,16 +4,21 @@ package team
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"fenzi/cli/internal/config"
 	"fenzi/controlplane"
+	"fenzi/teamapi"
 )
 
 func TestLoginCachesASignedPolicy(t *testing.T) {
@@ -164,5 +169,63 @@ func TestRefreshSaysWhenTheMachineWasSignedOut(t *testing.T) {
 	srv.Close()
 	if _, note, _ := Refresh(context.Background(), Client{Base: srv.URL}, en); !strings.Contains(note, "unreachable") {
 		t.Fatalf("a dead server is still unreachable: %q", note)
+	}
+}
+
+// A CI runner signs in with the token of a machine a member enrolled: the
+// member, team and machine are the token's, and the policy is verified
+// against the team's key before it is cached.
+func TestLoginTokenTakesTheTokensMember(t *testing.T) {
+	s, err := controlplane.Open(filepath.Join(t.TempDir(), "team.db"), checker{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	if _, err := s.Publish(context.Background(), "acme", []byte(org)); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(controlplane.Handler(s))
+	t.Cleanup(srv.Close)
+	c := Client{Base: srv.URL}
+	li, err := loginAs(c, "li@acme.dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	en, err := LoginToken(context.Background(), c, li.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if en.Email != "li@acme.dev" || en.RoleName() != "developer" || en.Tenant != li.Tenant || en.Machine != li.Machine || en.Token != li.Token || en.Revision != 1 || en.PublicKey != li.PublicKey {
+		t.Fatalf("enrollment %+v, from device login %+v", en, li)
+	}
+	if _, err := en.Bundle(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoginToken(context.Background(), c, "not-a-token"); !errors.Is(err, ErrTokenRefused) {
+		t.Errorf("a bad token: %v", err)
+	}
+}
+
+// A bundle that fails the signature check is not taken at sign-in.
+func TestLoginTokenRefusesABadBundle(t *testing.T) {
+	_, other, _ := ed25519.GenerateKey(nil)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/me", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"email":"li@acme.dev","tenant":"acme","machine":"ci","role":"developer"}`))
+	})
+	mux.HandleFunc("GET /v1/key", func(w http.ResponseWriter, r *http.Request) {
+		pub, _, _ := ed25519.GenerateKey(nil)
+		w.Write([]byte(`{"public_key":"` + base64.StdEncoding.EncodeToString(pub) + `"}`))
+	})
+	mux.HandleFunc("GET /v1/policy", func(w http.ResponseWriter, r *http.Request) {
+		b := teamapi.Bundle{Tenant: "acme", Revision: 1, Document: []byte(org), Published: time.Unix(0, 0)}
+		b.Signature = ed25519.Sign(other, teamapi.Message(b))
+		json.NewEncoder(w).Encode(teamapi.ToWire(b))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	if _, err := LoginToken(context.Background(), Client{Base: srv.URL}, "tok"); !errors.Is(err, ErrUnverified) {
+		t.Errorf("err = %v", err)
 	}
 }

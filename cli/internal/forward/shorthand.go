@@ -27,13 +27,37 @@ var (
 	shortReason = regexp.MustCompile(`\[reason:(.*)\]\s*$`)
 	// HTTP reasons repeat the request path; records never keep a query string.
 	query = regexp.MustCompile(`\?[^\s\]]*`)
-	// The one approval event recorded from OpenShell 0.1.2:
+	// The approval event the sandbox log carries when the agent waits on a
+	// request it filed. OpenShell 0.1.2 wrote:
 	//
 	//	CONFIG:APPROVED [INFO] chunk:fad7c2ed-3aca-4fb7-bb37-495820dd7562 approved on example.com:443 HEAD / by /usr/bin/curl
 	//
-	// CONFIG:REJECTED and the other CONFIG events have not been recorded, so
-	// they are not mapped.
-	approval = regexp.MustCompile(`^CONFIG:APPROVED \[\w+\] chunk:(\S+) approved on (.+) by (\S+)$`)
+	// and 0.1.4 brackets the method and path and adds the chunk again
+	// (recorded 19 October 2026):
+	//
+	//	CONFIG:APPROVED [INFO] chunk:f42110d7-6838-4088-a1b1-5482aeb88792 approved on www.ietf.org:443 [HEAD /] by /usr/bin/curl [chunk_id:f42110d7-6838-4088-a1b1-5482aeb88792]
+	//
+	// Both are read. 0.1.4 logs CONFIG:APPROVED and CONFIG:REJECTED for every
+	// review in the gateway's log, which `--source sandbox` leaves out; the
+	// other CONFIG events are not mapped.
+	approval = regexp.MustCompile(`^CONFIG:APPROVED \[\w+\] chunk:(\S+) approved on (.+?) by (\S+)(?: \[chunk_id:[^\]]*\])?$`)
+	// The line written when the agent files a request through policy.local.
+	// OpenShell 0.1.2 (recorded 16 October 2026, the same session):
+	//
+	//	CONFIG:PROPOSED [INFO] agent_authored proposal chunk:fad7c2ed-3aca-4fb7-bb37-495820dd7562 on example.com:443 HEAD / by /usr/bin/curl
+	//
+	// OpenShell 0.1.4 (recorded 19 October 2026), for one endpoint with an
+	// allow rule, a read-only preset, and two endpoints:
+	//
+	//	CONFIG:PROPOSED [INFO] agent_authored proposal chunk:4bf8dec4-5775-4de3-b130-59679dfa715c on www.iana.org:443 [GET /] by /usr/bin/curl [chunk_id:4bf8dec4-5775-4de3-b130-59679dfa715c]
+	//	CONFIG:PROPOSED [INFO] agent_authored proposal chunk:f8014d08-27fa-45e6-a854-badceae780e9 on www.gnu.org:443 by /usr/bin/curl [chunk_id:f8014d08-27fa-45e6-a854-badceae780e9]
+	//	CONFIG:PROPOSED [INFO] agent_authored proposal chunk:483aa435-6248-4d58-8b66-8e1dda9e83c9 on www.kernel.org:443 [GET /], cdn.kernel.org:443 [POST /pub] by /usr/bin/curl [chunk_id:483aa435-6248-4d58-8b66-8e1dda9e83c9]
+	//
+	// Drafts the supervisor makes from refusals are logged without a chunk
+	// id ("Flushed denial analysis") and are not mapped.
+	proposed = regexp.MustCompile(`^CONFIG:PROPOSED \[\w+\] agent_authored proposal chunk:(\S+) on (.+?) by (\S+)(?: \[chunk_id:[^\]]*\])?$`)
+	// bracketed is one 0.1.4 endpoint with its method and path in brackets.
+	bracketed = regexp.MustCompile(`^(\S+) \[([A-Z]+ /\S*)\]$`)
 	// MCP requests, recorded from OpenShell 0.1.2 (engine:l7-mcp):
 	//
 	//	HTTP:POST [MED] DENIED POST http://mcp.deepwiki.com:443/mcp [policy:mcp_deepwiki_com engine:l7-mcp] [reason:JSONRPC_L7_REQUEST decision=deny rule_methods=tools/call tools=read_wiki_contents http_method=POST endpoint=mcp.deepwiki.com:443/mcp policy_version=2 reason=POST /mcp not permitted by policy]
@@ -148,9 +172,59 @@ func AuditFromStream(t time.Time, level, message, sandbox string) (Record, bool)
 	}
 	return Record{
 		Time: t.UTC().Truncate(time.Millisecond), Sandbox: sandbox, Class: "Config", Action: "Approved",
-		Destination: m[2], Process: m[3], Chunk: m[1],
+		Destination: configDestination(m[2]), Process: m[3], Chunk: m[1],
 	}, true
 }
+
+// EventFromStream maps a decision, an approval, or a request the agent
+// filed. `fenzi log --requests` shows all three; the forwarder ships only
+// the first two (AuditFromStream), so the control plane's contract does not
+// change. A request is Class "Config", Action "Requested", with the chunk
+// id, the destination (configDestination), and the program.
+func EventFromStream(t time.Time, level, message, sandbox string) (Record, bool) {
+	if r, ok := AuditFromStream(t, level, message, sandbox); ok {
+		return r, true
+	}
+	if level != "OCSF" {
+		return Record{}, false
+	}
+	m := proposed.FindStringSubmatch(strings.TrimSpace(message))
+	if m == nil {
+		return Record{}, false
+	}
+	return Record{
+		Time: t.UTC().Truncate(time.Millisecond), Sandbox: sandbox, Class: "Config", Action: "Requested",
+		Destination: configDestination(m[2]), Process: m[3], Chunk: m[1],
+	}, true
+}
+
+// configDestination writes one endpoint the way 0.1.2 did, "host:443 HEAD /",
+// so records do not change with the runtime version. More than one endpoint
+// is kept as the runtime wrote it.
+func configDestination(d string) string {
+	if m := bracketed.FindStringSubmatch(d); m != nil {
+		return m[1] + " " + m[2]
+	}
+	return d
+}
+
+// EventFromShorthand is EventFromStream for one shorthand log line.
+func EventFromShorthand(line, sandbox string) (Record, bool) {
+	m := shortLine.FindStringSubmatch(strings.TrimSpace(line))
+	if m == nil {
+		return Record{}, false
+	}
+	return EventFromStream(epoch(m[1]), "OCSF", m[2], sandbox)
+}
+
+// ReadEvents maps every decision, approval and filed request in a
+// shorthand log.
+func ReadEvents(rd io.Reader, sandbox string) ([]Record, error) {
+	return read(rd, sandbox, EventFromShorthand)
+}
+
+// Config reports a policy event (a request or an approval), not a decision.
+func (r Record) Config() bool { return r.Class == "Config" }
 
 // AuditFromShorthand is AuditFromStream for one shorthand log line.
 func AuditFromShorthand(line, sandbox string) (Record, bool) {
