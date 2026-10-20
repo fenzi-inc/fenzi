@@ -10,6 +10,10 @@ package main
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
+	"slices"
+
+	"fenzi/agents"
 
 	"fenzi/cli/internal/config"
 	"fenzi/cli/internal/openshell"
@@ -34,6 +38,15 @@ func sameKind(e env, dirs config.Dirs, sb config.Sandbox, p openshell.Proposal) 
 		return sameKindResult{}
 	} else if !errors.Is(err, team.ErrNotEnrolled) {
 		return sameKindResult{Skipped: err.Error()}
+	}
+	// The host rule is compiled for the agent's own programs. A request
+	// from another program (curl run by the agent's shell, git) would be
+	// replaced by a rule that does not name it, and that program refused
+	// again after its approval (run of 19 October 2026), so it stays as
+	// the request asked.
+	own := agentPrograms(sb.Agent)
+	if p.Binary != "" && own != nil && !slices.Contains(own, p.Binary) {
+		return sameKindResult{Skipped: "only this request was approved: it is for " + filepath.Base(p.Binary) + ", and host rules cover the agent's own program"}
 	}
 	h, err := requestHost(p.Endpoints)
 	if err != nil {
@@ -65,7 +78,7 @@ func sameKind(e env, dirs config.Dirs, sb config.Sandbox, p openshell.Proposal) 
 	// covered by the rule now; answering them clears the pending list.
 	if out, err := client().PendingRules(e.ctx, sb.Name); err == nil {
 		for _, q := range openshell.ParseRules(out) {
-			if q.Chunk == p.Chunk || q.MCP() {
+			if q.Chunk == p.Chunk || q.MCP() || (q.Binary != "" && own != nil && !slices.Contains(own, q.Binary)) {
 				continue
 			}
 			qh, err := requestHost(q.Endpoints)
@@ -93,4 +106,14 @@ func (r sameKindResult) line(host string) string {
 		s += fmt.Sprintf(" Also approved %d other pending request(s) it covers.", len(r.Also))
 	}
 	return s
+}
+
+// agentPrograms is the agent's binaries from the catalog, nil when the agent
+// is not in it (then nothing is compared).
+func agentPrograms(name string) []string {
+	a, err := agents.Get(name)
+	if err != nil || len(a.Binaries) == 0 {
+		return nil
+	}
+	return a.Binaries
 }

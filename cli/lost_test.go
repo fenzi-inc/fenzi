@@ -1,12 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"fenzi/cli/internal/config"
+	"fenzi/cli/internal/run"
+	"fenzi/cli/internal/tui"
 )
 
 // Recorded from OpenShell 0.1.2 on 17 October 2026: the container runtime
@@ -92,5 +97,61 @@ func TestRmALostSandbox(t *testing.T) {
 	}
 	if !deleted || len(names(t, dirs)) != 0 {
 		t.Errorf("deleted %v, records %v", deleted, names(t, dirs))
+	}
+}
+
+func TestConnectExplainsALostSandbox(t *testing.T) {
+	lostFixture(t, nil)
+	out, code := runCLI(t, "", "connect", lostSandbox)
+	if code != 1 || !strings.Contains(out, "its container stopped") || !strings.Contains(out, "fenzi rm "+lostSandbox) || strings.Contains(out, "Still running") {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	for _, c := range runtimeCalls(t) {
+		if strings.HasPrefix(c, "sandbox exec") {
+			t.Errorf("connect ran %q on a stopped sandbox", c)
+		}
+	}
+}
+
+// The sandbox stops between the list and the exec, or during the session.
+// The exec's refusal is what OpenShell 0.1.4 printed on 19 October 2026 for
+// a sandbox the gateway could not start again after it restarted.
+func TestConnectSaysWhenTheSandboxStoppedDuringTheSession(t *testing.T) {
+	lostFixture(t, map[string]reply{
+		"sandbox exec": {out: "Error:   × sandbox '" + lostSandbox + "' is not ready (phase: Error); wait for it to reach Ready state\n", exit: 1},
+	})
+	var out bytes.Buffer
+	e := env{ctx: t.Context(), stdin: strings.NewReader(""), stdout: &out, stderr: &out}
+	sb := config.Sandbox{Name: lostSandbox, Agent: "claude", Repo: t.TempDir(), Created: time.Now(), Running: true}
+	code, err := connectTo(e, tui.New(strings.NewReader(""), &out), sb, nil, false, true)
+	if err != nil || code != 1 || !strings.Contains(out.String(), "its container stopped") || strings.Contains(out.String(), "Still running") {
+		t.Fatalf("exit %d, err %v\n%s", code, err, out.String())
+	}
+}
+
+// ps --json marks a finished sandbox whose changes were applied, from the
+// same record fenzi diff reads.
+func TestPsMarksAnAppliedSandbox(t *testing.T) {
+	dirs := lostFixture(t, map[string]reply{"sandbox list --selector fenzi=1": {out: "No sandboxes found.\n"}})
+	staging := dirs.Staging(lostSandbox)
+	if err := os.MkdirAll(staging, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staging, run.AppliedMark), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var list []jsonSandbox
+	if stderr, code := runJSON(t, &list, "ps", "--all", "--json"); code != 0 {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	if len(list) != 1 || !list[0].Applied || list[0].Running {
+		t.Fatalf("list = %+v", list)
+	}
+	// A copy staged again (a later stop) is not applied.
+	if err := os.MkdirAll(filepath.Join(staging, "files"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if appliedFor(dirs, lostSandbox) {
+		t.Error("a staged copy counts as applied")
 	}
 }

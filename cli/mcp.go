@@ -48,6 +48,7 @@ func cmdMCP(e env, args []string) (int, error) {
 			{"mcp add <name> <url> --tool <tool>", "Add a remote server and the tools agents may call; --all-tools for every tool"},
 			{"mcp add <name> --claude-account --tool <tool>", "Let Claude Code use the connectors of the Claude account it is signed in with, and the tools it may call there"},
 			{"mcp add <name> -- <command>", "Add a local server, which runs inside the sandbox; --secret <VAR> --host <host> for one that needs a secret"},
+			{"mcp allow <name> <tool>...", "Let agents call more tools on a server already listed, in the file it comes from"},
 			{"mcp remove <name>", "Remove a server"},
 			{"mcp token <name>", "Store or replace a server's token, or a local server's secret; it is hidden as you type"},
 			{"mcp token <name> --env <VAR>", "Store the secret a local server reads from VAR; every server that lists VAR shares it"},
@@ -59,6 +60,8 @@ func cmdMCP(e env, args []string) (int, error) {
 		return mcpList(e, args[1:])
 	case "add":
 		return mcpAdd(e, args[1:])
+	case "allow":
+		return mcpAllow(e, args[1:])
 	case "remove", "rm":
 		return mcpRemove(e, args[1:])
 	case "token":
@@ -66,7 +69,7 @@ func cmdMCP(e env, args []string) (int, error) {
 	case "import":
 		return mcpImport(e, args[1:])
 	}
-	return 1, fmt.Errorf("%q is not an mcp command; try fenzi mcp list, add, remove, token, or import", args[0])
+	return 1, fmt.Errorf("%q is not an mcp command; try fenzi mcp list, add, allow, remove, token, or import", args[0])
 }
 
 // jsonMCP is one server in fenzi mcp list --json.
@@ -394,6 +397,86 @@ func mcpAddAccount(e env, pos []string, local, all bool, tools, deny []string, e
 	u.Note("On the connectors of its Claude account, the sandbox lets Claude Code call " + mcpToolsLine(jsonMCP{Account: s.Account, Allow: s.Tools.Allow, Deny: s.Tools.Deny}) + ". Each call is recorded in fenzi log. Other agents get nothing from it.")
 	u.Note("Connectors come with a Claude subscription sign-in (fenzi run --sign-in claude); with an API key Claude Code has none.")
 	u.Note("The next fenzi run gives them to Claude Code.")
+	u.Blank()
+	return 0, nil
+}
+
+// mcpAllow adds tools to a remote server's allow list, in the file the
+// entry comes from: this folder's fenzi.yaml when it has the entry, else
+// the machine file. It is how a refused MCP tool is let through: an agent
+// cannot ask for one through the sandbox, and fenzi does not approve MCP
+// requests, because the runtime stores an approved one for every tool.
+func mcpAllow(e env, args []string) (int, error) {
+	fs := newFlags("mcp allow", e.stderr)
+	machine := fs.Bool("machine", false, "edit the entry in ~/.config/fenzi/mcp.yaml even when this folder's fenzi.yaml has one")
+	pos, err := parse(fs, args)
+	if err != nil {
+		return 1, err
+	}
+	if len(pos) < 2 {
+		return 1, errors.New("name the server and the tools: fenzi mcp allow claude-ai api_request")
+	}
+	if dirs, err := config.Default(); err == nil {
+		if _, err := team.Load(dirs); err == nil {
+			return 1, errors.New("this machine is signed in to a team, so its MCP servers come from the team's policy. An admin adds the tool in the team console")
+		}
+	}
+	name, tools := pos[0], pos[1:]
+	// This folder's entry first: it is the one that applies here.
+	useMachine := *machine
+	if !useMachine {
+		file, _ := mcpFile(false)
+		f, err := loadMCPFile(file)
+		useMachine = file == "" || err != nil || !f.has(name)
+	}
+	file, label := mcpFile(useMachine)
+	if file == "" {
+		return 1, errors.New("no config folder on this machine")
+	}
+	f, err := loadMCPFile(file)
+	if err != nil {
+		return 1, err
+	}
+	node := value(f.mcpNode(), name)
+	if node == nil {
+		return 1, fmt.Errorf("%s is not in ./%s or %s; fenzi mcp list shows the servers agents get here", name, run.ProjectFile, run.MachineMCPSource)
+	}
+	var s compiler.MCPServer
+	if err := node.Decode(&s); err != nil {
+		return 1, fmt.Errorf("%s in %s: %w", name, label, err)
+	}
+	if !s.Remote() {
+		return 1, fmt.Errorf("%s is a local server: it runs inside the sandbox and is not checked per tool", name)
+	}
+	u := tui.New(e.stdin, e.stdout)
+	if slices.Contains(s.Tools.Allow, compiler.AllTools) {
+		u.Blank()
+		u.Skip("Nothing to change", name+" already allows every tool in "+label)
+		u.Blank()
+		return 0, nil
+	}
+	var added []string
+	for _, t := range tools {
+		if slices.Contains(s.Tools.Deny, t) {
+			return 1, fmt.Errorf("%s denies %s in %s. A denied tool stays refused; to allow it, replace the entry with fenzi mcp add", name, t, label)
+		}
+		if !slices.Contains(s.Tools.Allow, t) && !slices.Contains(added, t) {
+			added = append(added, t)
+		}
+	}
+	u.Blank()
+	if len(added) == 0 {
+		u.Skip("Nothing to change", name+" already allows "+strings.Join(tools, ", ")+" in "+label)
+		u.Blank()
+		return 0, nil
+	}
+	s.Tools.Allow = append(s.Tools.Allow, added...)
+	f.put(name, s)
+	if err := f.writeMCP(useMachine); err != nil {
+		return 1, err
+	}
+	u.Done("Allowed", strings.Join(added, ", ")+" on "+name+" in "+label)
+	u.Note("Agents may now call " + strings.Join(s.Tools.Allow, ", ") + " there. The next fenzi run gets it; a sandbox already running keeps the tools it started with.")
 	u.Blank()
 	return 0, nil
 }

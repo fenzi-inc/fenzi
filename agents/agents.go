@@ -82,9 +82,14 @@ type Entry struct {
 	GuideFlag string `yaml:"guide_flag"`
 	// Resume goes right after the command when fenzi connect opens the agent
 	// again, so it continues its last session in the project folder.
-	Resume      []string `yaml:"resume"`
-	GuideConfig string   `yaml:"guide_config"`
-	GuideFile   string   `yaml:"guide_file"`
+	Resume []string `yaml:"resume"`
+	// ResumeWhen is a shell test, run in the project folder in the sandbox,
+	// that succeeds when the agent has a session there to resume. Without
+	// it, fenzi connect tries Resume and starts a new session when that
+	// fails at once.
+	ResumeWhen  string `yaml:"resume_when"`
+	GuideConfig string `yaml:"guide_config"`
+	GuideFile   string `yaml:"guide_file"`
 	// Headless is how the agent takes a task with nobody at the terminal,
 	// for fenzi run --headless. Nil: the catalog does not say yet.
 	Headless *Headless `yaml:"headless"`

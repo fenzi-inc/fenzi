@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"golang.org/x/text/unicode/norm"
 	"io"
 	"os"
 	"path"
@@ -18,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"fenzi/agents"
 	"fenzi/cli/internal/config"
@@ -582,9 +584,9 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		watch.pass(ctx, false)
 	} else {
 		say("start", "%s", strings.Join(a.CommandLine(o.Args), " "))
-		note := a.StartNote
+		note := forClient(a.StartNote)
 		if a.SignedIn {
-			note = a.SignInNote
+			note = forClient(a.SignInNote)
 		}
 		if note != "" {
 			say("note", "%s", note)
@@ -853,7 +855,7 @@ var unsafe = regexp.MustCompile(`[^a-z0-9-]+`)
 // SandboxName is fenzi-<folder>-<4 hex>, with the folder shortened to fit
 // openshell.MaxSandboxName.
 func SandboxName(repo string) string {
-	base := strings.Trim(unsafe.ReplaceAllString(strings.ToLower(filepath.Base(repo)), "-"), "-")
+	base := strings.Trim(unsafe.ReplaceAllString(strings.ToLower(withoutAccents(filepath.Base(repo))), "-"), "-")
 	if base == "" {
 		base = "project"
 	}
@@ -863,4 +865,32 @@ func SandboxName(repo string) string {
 	b := make([]byte, 2)
 	_, _ = rand.Read(b)
 	return "fenzi-" + base + "-" + hex.EncodeToString(b)
+}
+
+// forClient keeps a note to what the person can do where they are: in the
+// Fenzi app (FENZI_APP set by the app) the advice to type commands is
+// replaced by the screen that does the same.
+func forClient(note string) string {
+	if os.Getenv("FENZI_APP") == "" {
+		return note
+	}
+	if i := strings.Index(note, " To use a key instead"); i != -1 {
+		return note[:i] + " To use a key instead, add it under Keys and start a new sandbox."
+	}
+	if i := strings.Index(note, ", or start with fenzi run"); i != -1 {
+		return note[:i] + ", or choose the subscription in New Sandbox."
+	}
+	return note
+}
+
+// withoutAccents drops the marks from accented letters, so "Été projet"
+// names its sandbox fenzi-ete-projet, not fenzi-t-projet.
+func withoutAccents(s string) string {
+	var b strings.Builder
+	for _, r := range norm.NFD.String(s) {
+		if !unicode.Is(unicode.Mn, r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }

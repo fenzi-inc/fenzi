@@ -24,13 +24,22 @@ const sameHostRules = mixedRules + `
   Endpoints: www.example.com:443 [L4]
 `
 
+// agentSameHostRules is sameHostRules with both www.example.com requests
+// made by the agent's own program, which a host rule covers.
+var agentSameHostRules = strings.NewReplacer(
+	"Binary: /usr/bin/curl", "Binary: /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe",
+	"Binary: /usr/bin/wget", "Binary: /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe",
+).Replace(sameHostRules)
+
 // sameKindFixture is applyFixture with the requests above pending.
-func sameKindFixture(t *testing.T) config.Dirs {
+func sameKindFixture(t *testing.T) config.Dirs { return sameKindFixtureWith(t, agentSameHostRules) }
+
+func sameKindFixtureWith(t *testing.T, rules string) config.Dirs {
 	t.Helper()
 	fakeRuntime(t, map[string]reply{
 		"sandbox list": {out: "fenzi-web-1a2b\n"},
 		"policy list":  {out: policyList},
-		"rule get":     {out: sameHostRules},
+		"rule get":     {out: rules},
 	}, proverWithin)
 	repo := t.TempDir()
 	t.Chdir(repo)
@@ -114,5 +123,19 @@ func TestApproveOnATeamMachineStaysAsAsked(t *testing.T) {
 	}
 	if called(t, "policy set") || strings.Contains(out, "same kind") {
 		t.Fatalf("widened on a team machine:\n%s\n%q", out, runtimeCalls(t))
+	}
+}
+
+// A request from another program than the agent's stays as asked: a host
+// rule for the agent's program would replace it and refuse that program.
+func TestApproveForAnotherProgramStaysAsAsked(t *testing.T) {
+	_ = sameKindFixtureWith(t, sameHostRules)
+	out, code := runCLI(t, "", "approve", "ccd96a39", "--sandbox", "fenzi-web-1a2b")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	flat := strings.Join(strings.Fields(out), " ")
+	if called(t, "policy set") || strings.Contains(flat, "Calls of the same kind") || !strings.Contains(flat, "it is for curl") {
+		t.Fatalf("widened a curl request:\n%s\n%q", out, runtimeCalls(t))
 	}
 }

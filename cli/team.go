@@ -449,7 +449,8 @@ func resolvePolicy(e env, dirs config.Dirs, repo, file string) (run.Resolved, er
 		return run.Resolved{}, err
 	}
 	if note != "" {
-		screen.New(e.stdout).Label("policy", note)
+		// stderr: a note, and `--json` output must stay JSON.
+		screen.New(e.stderr).Label("policy", note)
 	}
 	if en.Revision == 0 {
 		return run.Resolved{}, errors.New("no team policy yet; an admin publishes one in the console or with fenzi policy publish")
@@ -463,7 +464,7 @@ func resolvePolicy(e env, dirs config.Dirs, repo, file string) (run.Resolved, er
 		return run.Resolved{}, err
 	}
 	if _, err := os.Stat(filepath.Join(repo, run.ProjectFile)); err == nil {
-		screen.New(e.stdout).Label("policy", "project file not used; the team policy applies")
+		screen.New(e.stderr).Label("policy", "project file not used; the team policy applies")
 	}
 	res := run.Resolved{Doc: doc, Sources: fmt.Sprintf("%s r%d (signed)", en.Tenant, en.Revision), TeamRevision: en.Revision}
 	return res.WithTeamBoundary(b.Boundary, en.Tenant, en.Revision)

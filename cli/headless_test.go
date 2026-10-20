@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fenzi/cli/internal/openshell"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,14 +60,16 @@ func TestReadTask(t *testing.T) {
 
 // fenzi setup --runtime on a machine that has OpenShell asks nothing and
 // installs nothing: it checks the version and the gateway (answers in the
-// shapes recorded from 0.1.2).
+// shapes recorded from 0.1.2, the same in 0.1.4). The fake reports the
+// pinned release: an older patch would send setup down the upgrade path,
+// which until 19 October 2026 ran the real installer on the test machine.
 func TestSetupRuntimeChecksWhatIsInstalled(t *testing.T) {
 	fakeRuntime(t, map[string]reply{
-		"--version": {out: "openshell 0.1.2\n"},
+		"--version": {out: "openshell " + openshell.InstallVersion + "\n"},
 		"status":    {out: doctorStatus},
 	}, "")
 	out, code := runCLI(t, "", "setup", "--runtime")
-	if code != 0 || !strings.Contains(out, "OpenShell 0.1.2") || !strings.Contains(out, "connected") {
+	if code != 0 || !strings.Contains(out, "OpenShell "+openshell.InstallVersion) || !strings.Contains(out, "connected") {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
 	if strings.Contains(out, "Installing") {
@@ -89,7 +92,7 @@ func TestSetupRuntimeWaitsForTheGateway(t *testing.T) {
 	defer func(w time.Duration) { runtimeWait = w }(runtimeWait)
 	runtimeWait = 0
 	fakeRuntime(t, map[string]reply{
-		"--version": {out: "openshell 0.1.2\n"},
+		"--version": {out: "openshell " + openshell.InstallVersion + "\n"},
 		"status":    {out: `{"status":"disconnected"}`},
 	}, "")
 	out, code := runCLI(t, "", "setup", "--runtime")

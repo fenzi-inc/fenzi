@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"golang.org/x/term"
@@ -22,7 +23,7 @@ import (
 // only for a person at a terminal, never in CI, and not for a build that has
 // no release number.
 func checkUpdates(stderr io.Writer, command string) bool {
-	if command == "update" || command == "version" || Version == "dev" {
+	if command == "update" || command == "version" || command == "uninstall" || Version == "dev" {
 		return false
 	}
 	if os.Getenv("FENZI_NO_UPDATE_CHECK") != "" || os.Getenv("CI") != "" {
@@ -84,7 +85,12 @@ func cmdUpdate(e env, args []string) (int, error) {
 	}
 	if *check {
 		u.Println(fmt.Sprintf("  %s %s", u.Accent("↑"), u.Bold(latest+" is available. You have "+Version+".")))
-		u.Command("fenzi update", "install it")
+		if self, err := os.Executable(); err == nil && inAppBundle(resolved(self)) {
+			// The app's copy: fenzi update would refuse it.
+			u.Note("This fenzi comes with the Fenzi app. Update the app to get it.")
+		} else {
+			u.Command("fenzi update", "install it")
+		}
 		u.Blank()
 		return 0, nil
 	}
@@ -94,6 +100,9 @@ func cmdUpdate(e env, args []string) (int, error) {
 	}
 	if err != nil {
 		return 1, err
+	}
+	if inAppBundle(exe) {
+		return 1, errors.New("this fenzi comes with the Fenzi app, which updates it. Update the app instead")
 	}
 	if _, err := u.Spin("Installed", "downloading "+latest+" and checking its sha256", func() (string, error) {
 		if err := update.Install(e.ctx, client, base, latest, runtime.GOOS, runtime.GOARCH, exe); err != nil {
@@ -128,6 +137,9 @@ func updateJSON(e env, client *http.Client, base string, check bool) (int, error
 	if err != nil {
 		return 1, err
 	}
+	if inAppBundle(exe) {
+		return 1, errors.New("this fenzi comes with the Fenzi app, which updates it. Update the app instead")
+	}
 	if err := update.Install(e.ctx, client, base, latest, runtime.GOOS, runtime.GOARCH, exe); err != nil {
 		if errors.Is(err, fs.ErrPermission) {
 			return 1, fmt.Errorf("%w. You cannot write to %s. Run sudo fenzi update, or run the installer again", err, filepath.Dir(exe))
@@ -136,4 +148,20 @@ func updateJSON(e env, client *http.Client, base string, check bool) (int, error
 	}
 	doc.Installed = exe
 	return 0, writeJSON(e.stdout, doc)
+}
+
+// resolved follows symbolic links, such as the one in ~/.local/bin that the
+// app makes for Terminal; the path as given when that fails.
+func resolved(path string) string {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real
+	}
+	return path
+}
+
+// inAppBundle reports whether the binary sits inside a macOS .app bundle,
+// as the copy the Fenzi app ships does. Replacing it would break the app's
+// signature, so the app updates it instead.
+func inAppBundle(exe string) bool {
+	return strings.Contains(filepath.ToSlash(exe), ".app/Contents/")
 }

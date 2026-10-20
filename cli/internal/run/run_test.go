@@ -884,3 +884,28 @@ func TestMCPConfigSecrets(t *testing.T) {
 		t.Errorf("a file .gitignore leaves out is not copied, so not listed: %v", got)
 	}
 }
+
+// In the app the sign-in note names the Keys screen, not commands.
+func TestSignInNoteForTheApp(t *testing.T) {
+	note := "Claude asks you to sign in. Choose your Claude subscription and paste back the code your browser shows. To use a key instead, run fenzi key set claude, then fenzi run without --sign-in."
+	t.Setenv("FENZI_APP", "")
+	if got := forClient(note); got != note {
+		t.Errorf("in a terminal the note changed: %q", got)
+	}
+	t.Setenv("FENZI_APP", "1")
+	got := forClient(note)
+	if strings.Contains(got, "fenzi key set") || !strings.Contains(got, "add it under Keys") {
+		t.Errorf("in the app: %q", got)
+	}
+	start := "Claude may ask whether to use the API key it found. Choose Yes for the key you stored: Claude sees a placeholder, not your key. To use your Claude subscription instead, choose No, then type /login, or start with fenzi run --sign-in claude."
+	if got := forClient(start); strings.Contains(got, "fenzi run") || !strings.HasSuffix(got, "or choose the subscription in New Sandbox.") {
+		t.Errorf("the start note in the app: %q", got)
+	}
+}
+
+func TestSandboxNameKeepsAccentedLetters(t *testing.T) {
+	name := SandboxName("/Users/ana/Été projet")
+	if !strings.HasPrefix(name, "fenzi-ete-proj") {
+		t.Errorf("got %q", name)
+	}
+}

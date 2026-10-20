@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fenzi/cli/internal/openshell"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -64,6 +67,26 @@ func fakeRuntime(t *testing.T, replies map[string]reply, prover string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	// Nothing in a test may touch the machine's own gateway: no colima
+	// socket, no config written, no service restarted, no installer. On
+	// 19 October 2026 a test with a disconnected fake gateway wrote the
+	// real colima config and restarted the real service on this Mac.
+	oldSocket, oldWrite, oldRestart, oldInstall := colimaSocket, writeColima, restartGateway, installOpenShell
+	t.Cleanup(func() {
+		colimaSocket, writeColima, restartGateway, installOpenShell = oldSocket, oldWrite, oldRestart, oldInstall
+	})
+	colimaSocket = func() string { return "" }
+	oldDiagnose := diagnoseRuntime
+	t.Cleanup(func() { diagnoseRuntime = oldDiagnose })
+	diagnoseRuntime = func() openshell.Diagnosis {
+		return openshell.Diagnosis{Running: []openshell.Runtime{{Name: "Docker Desktop", Running: true}}}
+	}
+	writeColima = func(string) error { t.Fatal("a test tried to write the gateway config"); return nil }
+	restartGateway = func(context.Context) error { t.Fatal("a test tried to restart the gateway"); return nil }
+	installOpenShell = func(context.Context, io.Reader, io.Writer, io.Writer) error {
+		t.Fatal("a test tried to run the OpenShell installer")
+		return nil
+	}
 }
 
 func itoa(n int) string { return string(rune('0' + n)) }

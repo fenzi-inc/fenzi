@@ -357,6 +357,15 @@ func TestValidationListsEveryProblem(t *testing.T) {
 	}
 }
 
+func TestHostProblemsNameTheHost(t *testing.T) {
+	d, _ := Parse([]byte("version: 1\nhosts:\n  - host: api.stripe.com\n    access: everything\n"))
+	err := d.Validate()
+	var ve *ValidationError
+	if !errors.As(err, &ve) || len(ve.Problems) != 1 || !strings.HasPrefix(ve.Problems[0], "hosts[api.stripe.com].access: ") {
+		t.Fatalf("want the problem named by host, got %v", err)
+	}
+}
+
 func TestMerge(t *testing.T) {
 	base := load(t, "default.yaml")
 	merged, err := Merge(base, load(t, "project.yaml"))

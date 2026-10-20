@@ -76,7 +76,8 @@ func TestPolicyViewReadsTheCompiledPolicy(t *testing.T) {
 			baseline++
 		} else {
 			mine++
-			if p != (jsonPolicyPath{Path: "/opt/data", Access: "read-only"}) {
+			// The project file lists it, so the screen may change it.
+			if p != (jsonPolicyPath{Path: "/opt/data", Access: "read-only", Project: true}) {
 				t.Errorf("path = %+v", p)
 			}
 		}
@@ -94,6 +95,10 @@ func TestPolicyViewReadsTheCompiledPolicy(t *testing.T) {
 	}
 	if h := hosts["api.github.com"]; h.Access != "read-only" || h.From != "policy" || len(h.Allow) != 0 || h.Allow == nil {
 		t.Errorf("api.github.com = %+v", h)
+	}
+	// The project's own host is marked; developer-default's is not.
+	if !hosts["api.example.com"].Project || hosts["api.github.com"].Project {
+		t.Errorf("project marks: api.example.com %v, api.github.com %v", hosts["api.example.com"].Project, hosts["api.github.com"].Project)
 	}
 	// The agent's own host, with the one write its sign-in needs.
 	if h := hosts["platform.claude.com"]; h.From != "agent" || h.Access != "read-write" || !reflect.DeepEqual(h.Allow, []string{"GET /**", "HEAD /**", "OPTIONS /**", "POST /v1/oauth/token"}) {

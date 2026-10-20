@@ -29,7 +29,11 @@ import (
 	"fenzi/policies"
 )
 
-func client() openshell.Client { return openshell.Client{R: openshell.Exec{Bin: "openshell"}} }
+func client() openshell.Client { return newClient() }
+
+// newClient makes the gateway client; tests replace it with a fake.
+var newClient = func() openshell.Client { return openshell.Client{R: openshell.Exec{Bin: "openshell"}} }
+
 func prover() openshell.Prover { return openshell.Prover{R: openshell.Exec{Bin: "openshell-prover"}} }
 
 // imageBuilder picks docker or podman to match the gateway's compute driver:
@@ -228,7 +232,7 @@ func failureMode() string {
 }
 
 const initTemplate = `# Fenzi project policy. Merged over developer-default on the Free plan.
-# Reference: https://fenzi.dev/docs/policy (not published yet).
+# Reference: https://fenzi.dev/docs/policy
 version: 1
 
 # Hosts this project needs beyond developer-default.
@@ -519,6 +523,71 @@ func runArgs(rest []string) []string {
 	return rest
 }
 
+// refusedTool is a tool on a listed MCP server that the sandbox refused,
+// with how often.
+type refusedTool struct {
+	Server, Tool string
+	Times        int
+}
+
+// refusedMCPTools reads the sandbox's recent decisions for tool calls the
+// policy refused, and names each one's server from the rule that refused
+// it (compiler.MCPRuleKey). A rule fenzi did not write is left out.
+func refusedMCPTools(e env, dirs config.Dirs, sb config.Sandbox) []refusedTool {
+	doc, err := run.LoadResolved(dirs.Run(sb.Name))
+	if err != nil || doc == nil || len(doc.MCP) == 0 {
+		return nil
+	}
+	servers := map[string]string{}
+	for name := range doc.MCP {
+		servers[compiler.MCPRuleKey(name)] = name
+	}
+	log, err := client().LogLines(e.ctx, sb.Name, openshell.RequestLogWindow)
+	if err != nil {
+		return nil
+	}
+	var out []refusedTool
+	at := map[[2]string]int{}
+	for _, line := range strings.Split(string(log), "\n") {
+		r, ok := forward.FromShorthand(line, sb.Name)
+		if !ok || !r.Denied() || r.MCPTool == "" {
+			continue
+		}
+		server := servers[r.Rule]
+		if server == "" {
+			continue
+		}
+		key := [2]string{server, r.MCPTool}
+		if i, seen := at[key]; seen {
+			out[i].Times++
+			continue
+		}
+		at[key] = len(out)
+		out = append(out, refusedTool{Server: server, Tool: r.MCPTool, Times: 1})
+	}
+	return out
+}
+
+// showRefusedMCP lists the refused tools and how to allow each.
+func showRefusedMCP(u *tui.UI, tools []refusedTool) {
+	if len(tools) == 0 {
+		return
+	}
+	u.Title(plural(len(tools), "MCP tool the policy refused", "MCP tools the policy refused"), "not requests: the agent cannot ask for these")
+	var hints [][2]string
+	for _, t := range tools {
+		times := ""
+		if t.Times > 1 {
+			times = fmt.Sprintf(", %d times", t.Times)
+		}
+		u.Problem(t.Tool, "on "+t.Server+times+": not in the server's list")
+		hints = append(hints, [2]string{"fenzi mcp allow " + t.Server + " " + t.Tool, "let agents call it, from the next fenzi run"})
+	}
+	u.Blank()
+	u.Commands(hints...)
+	u.Blank()
+}
+
 func cmdRequests(e env, args []string) (int, error) {
 	fs := newFlags("requests", e.stderr)
 	sandbox := fs.String("sandbox", "", "sandbox name (default: the latest running one for this folder)")
@@ -544,6 +613,11 @@ func cmdRequests(e env, args []string) (int, error) {
 	out, err := client().PendingRules(e.ctx, sb.Name)
 	if err != nil {
 		return 1, err
+	}
+	// Refused MCP tools are not requests: an agent cannot ask for one, so
+	// they are listed after the requests with the command that allows them.
+	if !*asJSON {
+		defer showRefusedMCP(u, refusedMCPTools(e, dirs, sb))
 	}
 	list := openshell.ParseRules(out)
 	if len(list) == 0 {
@@ -1275,6 +1349,18 @@ func staged(e env, name string) (config.Sandbox, workspace.Manifest, string, []w
 	return sb, base, files, changes, err
 }
 
+// appliedFor says whether fenzi apply wrote a sandbox's changes: its
+// staging folder holds the apply mark and no copy of the files, the case
+// fenzi diff reports as "its changes were applied".
+func appliedFor(dirs config.Dirs, name string) bool {
+	dir := dirs.Staging(name)
+	if _, err := os.Stat(filepath.Join(dir, "files")); err == nil {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(dir, run.AppliedMark))
+	return err == nil
+}
+
 func cmdPolicy(e env, args []string) (int, error) {
 	if len(args) > 0 && args[0] == "publish" {
 		return cmdPublish(e, args[1:])
@@ -1282,17 +1368,25 @@ func cmdPolicy(e env, args []string) (int, error) {
 	if len(args) > 0 && args[0] == "apply" {
 		return cmdPolicyApply(e, args[1:])
 	}
+	if len(args) > 0 && args[0] == "host" {
+		return cmdPolicyHost(e, args[1:])
+	}
+	if len(args) > 0 && args[0] == "path" {
+		return cmdPolicyPath(e, args[1:])
+	}
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		subHelp(e, "policy", "The policy for this folder is the one fenzi run uses: developer-default plus ./fenzi.yaml, if there is one, or the team's signed revision on a signed-in machine.", [][2]string{
 			{"policy check [file]", "Prove it stays inside the org boundary"},
 			{"policy compile [file]", "Print the OpenShell policy it becomes"},
+			{"policy host set|remove <host>", "Change a host in ./fenzi.yaml"},
+			{"policy path add|remove <path>", "Change a path in ./fenzi.yaml"},
 			{"policy apply", "Load host changes onto running sandboxes (Free plan)"},
 			{"policy publish <file>", "Send an org policy to the team (Team plan)"},
 		}, "--org treats the file as a whole org policy. --agent picks the agent, claude by default.")
 		return 0, nil
 	}
 	if args[0] != "compile" && args[0] != "check" {
-		return 1, fmt.Errorf("%q is not a policy command; try fenzi policy check, compile, apply, or publish", args[0])
+		return 1, fmt.Errorf("%q is not a policy command; try fenzi policy check, compile, host, path, apply, or publish", args[0])
 	}
 	sub := args[0]
 	fs := newFlags("policy "+sub, e.stderr)
@@ -1380,6 +1474,11 @@ func cmdPolicy(e env, args []string) (int, error) {
 			doc := jsonPolicyCheck{Passed: r.Passed(), Result: r.Result, Checked: from, Boundary: resolved.BoundarySource, Agent: entry.Display, Example: r.Example(), Reason: r.Reason, NotChecked: missing}
 			if doc.Policy, err = policyView(resolved, entry); err != nil {
 				return 1, err
+			}
+			if resolved.TeamRevision == 0 && file == "" {
+				// A missing or broken file marks nothing; check says why.
+				project, _ := readProjectDoc(repo)
+				markProject(doc.Policy, project)
 			}
 			if err := writeJSON(e.stdout, doc); err != nil {
 				return 1, err
@@ -1627,6 +1726,7 @@ func cmdPs(e env, args []string) (int, error) {
 			if sb.Running || lost[sb.Name] || *all {
 				d := sandboxJSON(sb)
 				d.Lost = lost[sb.Name]
+				d.Applied = !sb.Running && appliedFor(dirs, sb.Name)
 				docs = append(docs, d)
 			}
 		}

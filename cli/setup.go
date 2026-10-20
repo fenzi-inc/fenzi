@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -198,6 +199,16 @@ func setupMachine(e env, u *tui.UI) error {
 		if err := installOpenShell(e.ctx, os.Stdin, e.stdout, e.stderr); err != nil {
 			u.Blank()
 			u.Problem("Runtime", err.Error())
+			if openshell.Installed("openshell") || openshell.FindInstalled() != "" {
+				// The packages are in place; what failed is the installer
+				// waiting for its gateway. On a Mac whose runtime is colima
+				// the gateway has no driver until the gateway step below
+				// writes one, so that step is the way on, not another
+				// install (seen on a clean Mac, 19 October 2026).
+				u.Note("OpenShell is installed. Its gateway has not started yet; the next step sets it up.")
+				u.Blank()
+				break
+			}
 			retry, err := u.Confirm("Try again?", "Try again", "Quit setup")
 			if err != nil {
 				return err
@@ -435,7 +446,33 @@ var (
 	installOpenShell = openshell.Install
 	gatewayService   = openshell.Service
 	restartGateway   = func(ctx context.Context) error { return openshell.RunService(ctx, "restart") }
+	// What setup --runtime reads and writes on the machine; tests replace them.
+	runtimeInstalled = func() bool { return openshell.Installed("openshell") || openshell.FindInstalled() != "" }
+	colimaSocket     = openshell.ColimaSocket
+	colimaConfigDue  = needsColimaConfig
+	writeColima      = openshell.WriteColimaConfig
+	diagnoseRuntime  = openshell.Diagnose
 )
+
+// colimaGateway is the gateway step of setup --runtime with no questions:
+// on a Mac whose runtime is colima and whose gateway has no config yet, it
+// writes the colima config and restarts the gateway, the way the
+// interactive setup does after asking. Nothing on a machine where the
+// config exists, colima is absent, or setup cannot restart the service.
+func colimaGateway(e env, u *tui.UI) (bool, error) {
+	sock := colimaSocket()
+	if sock == "" || !colimaConfigDue() || gatewayService("restart") == nil {
+		return false, nil
+	}
+	u.Note("colima runs sandboxes in its own VM, so the gateway needs colima's Docker socket. Writing " + tilde(openshell.GatewayConfig(), homeDir()) + " and restarting the gateway.")
+	if err := writeColima(sock); err != nil {
+		return false, err
+	}
+	if err := restartGateway(e.ctx); err != nil {
+		return false, err
+	}
+	return true, nil
+}
 
 // runtimeVersion checks the installed release is on Pinned and returns
 // what `openshell --version` printed.
@@ -1028,15 +1065,37 @@ var runtimeWait = 60 * time.Second
 func setupRuntime(e env) (int, error) {
 	u := tui.ForOutput(e.stdout)
 	u.Title("Sandbox runtime", "")
-	if !openshell.Installed("openshell") && openshell.FindInstalled() == "" {
+	// A container runtime that is installed and stopped: say so now, rather
+	// than install and then wait a minute for a gateway that cannot start.
+	if d := diagnoseRuntime(); len(d.Running) == 0 && len(d.Stopped) > 0 {
+		return 3, errors.New(strings.TrimSuffix(d.Summary(), " This is normal after a restart.") + " Start it and try again.")
+	}
+	if !runtimeInstalled() {
 		if openshell.NeedsHomebrew() {
 			return 3, errors.New("OpenShell needs Homebrew on a Mac, and its installer asks for a password. Install Homebrew from https://brew.sh first")
+		}
+		// On a Mac whose runtime is colima the gateway has no driver until
+		// it is told colima's socket, and the upstream installer then waits
+		// 30 s for a gateway that cannot start. Writing the setting first
+		// lets the installer's own start succeed.
+		if sock := colimaSocket(); runtime.GOOS == "darwin" && sock != "" && colimaConfigDue() {
+			u.Note("colima runs sandboxes in its own VM, so the gateway needs colima's Docker socket. Writing " + tilde(openshell.GatewayConfig(), homeDir()) + " before the install.")
+			if err := writeColima(sock); err != nil {
+				return 3, err
+			}
 		}
 		u.Note("Installing OpenShell " + openshell.InstallVersion + " with the upstream installer:")
 		u.Command(openshell.InstallCommand(), "")
 		u.Blank()
-		if err := openshell.Install(e.ctx, strings.NewReader(""), e.stdout, e.stderr); err != nil {
-			return 3, err
+		if err := installOpenShell(e.ctx, strings.NewReader(""), e.stdout, e.stderr); err != nil {
+			if !runtimeInstalled() {
+				return 3, err
+			}
+			// The packages are in place; what failed is the installer's
+			// wait for its gateway, which has no driver yet on a Mac whose
+			// runtime is colima. The gateway step below writes one (seen
+			// on a clean Mac, 19 October 2026).
+			u.Note("The installer could not reach its gateway yet. Setup goes on: " + err.Error())
 		}
 		u.Blank()
 	}
@@ -1053,6 +1112,13 @@ func setupRuntime(e env) (int, error) {
 		v = now
 	}
 	u.Done("Runtime", "OpenShell "+v)
+	if err := oc.Ready(e.ctx); err != nil {
+		if done, err := colimaGateway(e, u); err != nil {
+			return 3, err
+		} else if done {
+			u.Done("Gateway", "set up for colima")
+		}
+	}
 	deadline := time.Now().Add(runtimeWait)
 	for {
 		err := oc.Ready(e.ctx)

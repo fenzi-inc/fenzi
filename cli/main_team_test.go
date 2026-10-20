@@ -72,19 +72,34 @@ func TestRunUsesTheSignedTeamPolicy(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, "fenzi.yaml"), []byte("version: 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	var out bytes.Buffer
-	resolved, err := resolvePolicy(env{ctx: context.Background(), stdout: &out}, dirs, repo, "")
+	var out, notes bytes.Buffer
+	resolved, err := resolvePolicy(env{ctx: context.Background(), stdout: &out, stderr: &notes}, dirs, repo, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if resolved.Sources != "acme r1 (signed)" || resolved.Doc.Name != "acme" {
 		t.Fatalf("resolved %q name %q", resolved.Sources, resolved.Doc.Name)
 	}
-	if !strings.Contains(out.String(), "project file not used") {
-		t.Fatalf("stdout %q", out.String())
+	if !strings.Contains(notes.String(), "project file not used") || out.Len() != 0 {
+		t.Fatalf("stdout %q stderr %q; the note belongs on stderr", out.String(), notes.String())
 	}
-	if _, err := resolvePolicy(env{ctx: context.Background(), stdout: &out}, dirs, repo, "other.yaml"); err == nil {
+	if _, err := resolvePolicy(env{ctx: context.Background(), stdout: &out, stderr: &notes}, dirs, repo, "other.yaml"); err == nil {
 		t.Fatal("--policy must not override a team policy")
+	}
+}
+
+func TestMCPListJSONStaysJSONOnTeam(t *testing.T) {
+	fakeRuntime(t, nil, proverWithin)
+	enrollAcme(t)
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "fenzi.yaml"), []byte("version: 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(repo)
+	var servers []map[string]any
+	stderr, code := runJSON(t, &servers, "mcp", "list", "--json")
+	if code != 0 || len(servers) != 0 {
+		t.Fatalf("exit %d stderr %q servers %v", code, stderr, servers)
 	}
 }
 

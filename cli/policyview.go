@@ -45,6 +45,9 @@ type jsonPolicyPath struct {
 	// Baseline marks a path OpenShell needs for any program to run (/usr,
 	// /etc, /tmp and the like), listed by the compiler, not by the policy.
 	Baseline bool `json:"baseline,omitempty"`
+	// Project marks a path this folder's fenzi.yaml lists, which
+	// fenzi policy path can change.
+	Project bool `json:"project,omitempty"`
 }
 
 // jsonPolicyHost is one host the agent's programs may reach.
@@ -61,6 +64,9 @@ type jsonPolicyHost struct {
 	// for a host the agent cannot start without (from its catalog entry),
 	// "mcp" for a host a local MCP server calls.
 	From string `json:"from"`
+	// Project marks a host this folder's fenzi.yaml lists, which
+	// fenzi policy host can change or remove.
+	Project bool `json:"project,omitempty"`
 	// Server names the local MCP server for a host From "mcp".
 	Server string `json:"server,omitempty"`
 	// Secret is the variable whose stored value the sandbox puts on requests
@@ -271,4 +277,30 @@ func secretFor(d *compiler.Document, server, provider string) string {
 		}
 	}
 	return ""
+}
+
+// markProject flags the hosts and paths the folder's own fenzi.yaml lists,
+// so a screen can offer to change those and only those.
+func markProject(v *jsonPolicyView, project *compiler.Document) {
+	if v == nil || project == nil {
+		return
+	}
+	hosts := map[string]bool{}
+	for _, h := range project.Hosts {
+		port := h.Port
+		if port == 0 {
+			port = 443
+		}
+		hosts[hostKey(h.Host, port)] = true
+	}
+	for i := range v.Hosts {
+		v.Hosts[i].Project = hosts[hostKey(v.Hosts[i].Host, v.Hosts[i].Port)]
+	}
+	paths := map[string]bool{}
+	for _, p := range append(append([]string{}, project.Paths.ReadOnly...), project.Paths.ReadWrite...) {
+		paths[p] = true
+	}
+	for i := range v.Paths {
+		v.Paths[i].Project = paths[v.Paths[i].Path]
+	}
 }

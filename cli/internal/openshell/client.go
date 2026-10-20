@@ -232,6 +232,23 @@ func (c Client) ProviderSetKey(ctx context.Context, name, profileType, envVar, v
 	return err
 }
 
+// ProviderNames: `openshell provider list --names`, one name per line
+// (recorded from 0.1.4 on 20 October 2026: "fenzi-claude",
+// "fenzi-mcp-huggingface").
+func (c Client) ProviderNames(ctx context.Context) ([]string, error) {
+	out, err := c.R.Output(ctx, "provider", "list", "--names")
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, l := range strings.Split(string(out), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			names = append(names, l)
+		}
+	}
+	return names, nil
+}
+
 // ProviderDelete: `openshell provider delete <name>`.
 func (c Client) ProviderDelete(ctx context.Context, name string) error {
 	_, err := c.R.Output(ctx, "provider", "delete", name)

@@ -43,6 +43,13 @@ guide_flag: --append-system-prompt
 # `claude --help` in 2.1.288: "-c, --continue  Continue the most recent
 # conversation in the current directory".
 resume: [--continue]
+# Claude Code 2.1.288 keeps each conversation as a .jsonl file under
+# ${CLAUDE_CONFIG_DIR:-~/.claude}/projects/, in a folder named after the
+# working directory with every character but letters and digits as "-".
+# With none there, `claude --continue` prints "No conversation found to
+# continue" and exits 1, and on a first start it can take longer than the
+# time fallback allows; so connect looks for the file first.
+resume_when: ls "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(pwd | sed 's/[^A-Za-z0-9]/-/g')"/*.jsonl >/dev/null 2>&1
 # claude --help in 2.1.288 lists "auto" and "manual" among the modes. In auto,
 # Claude's own check can refuse a command before it reaches the sandbox; in
 # manual a person approves each action and the policy decides the rest.

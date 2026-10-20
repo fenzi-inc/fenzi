@@ -270,12 +270,12 @@ func (d *Document) validateMCP(hosts map[string]int) []string {
 			add("%s.url: port %d is not accepted", f, ep.Port)
 		}
 		key := fmt.Sprintf("%s:%d", ep.Host, ep.Port)
-		if i, ok := hosts[key]; ok {
+		if _, ok := hosts[key]; ok {
 			at := f + ".url"
 			if s.Connectors() {
 				at = f
 			}
-			add("%s: %s is also in hosts[%d]; a host and port is either an MCP server or a host rule", at, key, i)
+			add("%s: %s is also under hosts; a host and port is either an MCP server or a host rule", at, key)
 		}
 		if other, ok := seen[key]; ok {
 			if s.Connectors() || d.MCP[other].Connectors() {

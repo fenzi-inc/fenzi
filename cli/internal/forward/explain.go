@@ -4,7 +4,7 @@ import "strings"
 
 // Explained is a deny's reason in plain words, for the places that show a
 // person why a call was refused. Every phrase maps a reason recorded from
-// OpenShell 0.1.2; a reason that has not been recorded gets no phrase, and
+// OpenShell 0.1.2 or 0.1.4; a reason that has not been recorded gets no phrase, and
 // the caller shows the runtime's own words instead. Allows have no reason.
 func (r Record) Explained() string {
 	if !r.Denied() {
@@ -29,6 +29,10 @@ func (r Record) Explained() string {
 			return "method not allowed on this server"
 		}
 		return "method not allowed on this host"
+	case strings.HasPrefix(r.Reason, "MCP tool call has no matching allow rule") && r.MCPTool != "":
+		// 0.1.4's wording for a tool not in the rule; the runtime cuts
+		// the rest of it off in its own log.
+		return "tool not in the server's list"
 	case strings.Contains(r.Reason, "is not allowed by endpoint policy"):
 		return "protocol version not allowed on this server"
 	}

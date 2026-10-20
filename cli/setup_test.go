@@ -266,3 +266,118 @@ func TestSetupRuntimeUpgradesOnlyWithNothingRunning(t *testing.T) {
 		t.Fatalf("ok %v, %d installs:\n%s", ok, *installs, buf.String())
 	}
 }
+
+// setup --runtime on a Mac whose runtime is colima: the colima setting is
+// written before the upstream installer runs, so the installer's own
+// gateway start finds a driver instead of waiting 30 s and failing, as it
+// did on a clean Mac on 19 October 2026.
+func TestSetupRuntimeFinishesTheColimaGateway(t *testing.T) {
+	fake, _, _ := upgradeFake(t, openshell.InstallVersion, errors.New("the OpenShell installer failed: exit status 1"))
+	ready := false
+	fake.Replies = map[string]openshell.Reply{
+		"sandbox list --selector fenzi=1": {Out: "NAME                 CREATED              PHASE\n"},
+	}
+	fake.Answer = func(args []string) (string, bool) {
+		switch strings.Join(args, " ") {
+		case "--version":
+			return "openshell " + openshell.InstallVersion + "\n", true
+		case "status --output json", "status -o json":
+			if ready {
+				return `{"status":"connected","authentication":{"status":"authenticated"},"version":"0.1.4"}`, true
+			}
+			return `{"status":"disconnected"}`, true
+		}
+		return "", false
+	}
+	installed := false
+	written := ""
+	oldInstalled, oldSocket, oldDue, oldWrite, oldClient := runtimeInstalled, colimaSocket, colimaConfigDue, writeColima, newClient
+	t.Cleanup(func() {
+		runtimeInstalled, colimaSocket, colimaConfigDue, writeColima, newClient = oldInstalled, oldSocket, oldDue, oldWrite, oldClient
+	})
+	runtimeInstalled = func() bool { return installed }
+	colimaSocket = func() string { return "/Users/ana/.colima/default/docker.sock" }
+	colimaConfigDue = func() bool { return written == "" }
+	writeColima = func(sock string) error {
+		written = sock
+		// The setting is written before the installer runs, so the
+		// installer's own gateway start finds a driver.
+		if installed {
+			t.Error("the colima setting was written after the install")
+		}
+		return nil
+	}
+	newClient = func() openshell.Client { return openshell.Client{R: fake} }
+	oldDiagnose := diagnoseRuntime
+	t.Cleanup(func() { diagnoseRuntime = oldDiagnose })
+	diagnoseRuntime = func() openshell.Diagnosis {
+		return openshell.Diagnosis{Running: []openshell.Runtime{{Name: "colima", Running: true}}}
+	}
+	oldInstall := installOpenShell
+	installOpenShell = func(ctx context.Context, in io.Reader, out, errw io.Writer) error {
+		installed = true
+		if written != "" {
+			// With the setting in place the installer's own start works.
+			ready = true
+			return nil
+		}
+		return oldInstall(ctx, in, out, errw)
+	}
+	oldRestart := restartGateway
+	restartGateway = func(ctx context.Context) error { ready = true; return oldRestart(ctx) }
+
+	var out bytes.Buffer
+	code, err := setupRuntime(env{ctx: context.Background(), stdout: &out, stderr: &out})
+	if err != nil || code != 0 {
+		t.Fatalf("code %d, %v:\n%s", code, err, out.String())
+	}
+	text := strings.Join(strings.Fields(out.String()), " ")
+	if !installed || written != "/Users/ana/.colima/default/docker.sock" {
+		t.Fatalf("installed %v, config for %q:\n%s", installed, written, out.String())
+	}
+	for _, want := range []string{"before the install", "Gateway connected"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestUpdateRefusesTheAppsOwnCopy(t *testing.T) {
+	if !inAppBundle("/Applications/Fenzi.app/Contents/Resources/fenzi") {
+		t.Error("the app's copy is not recognised")
+	}
+	if inAppBundle("/Users/ana/.local/bin/fenzi") || inAppBundle("/usr/local/bin/fenzi") {
+		t.Error("an installed copy is taken for the app's")
+	}
+	// The link the app makes for Terminal resolves to the app's copy.
+	dir := t.TempDir()
+	app := filepath.Join(dir, "Fenzi.app", "Contents", "Helpers")
+	if err := os.MkdirAll(app, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "fenzi"), nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "fenzi")
+	if err := os.Symlink(filepath.Join(app, "fenzi"), link); err != nil {
+		t.Fatal(err)
+	}
+	if !inAppBundle(resolved(link)) {
+		t.Error("the Terminal link is not followed to the app's copy")
+	}
+}
+
+// A runtime that is installed and stopped ends setup --runtime at once with
+// its name, instead of an install and a minute's wait for the gateway.
+func TestSetupRuntimeNamesAStoppedRuntime(t *testing.T) {
+	old := diagnoseRuntime
+	t.Cleanup(func() { diagnoseRuntime = old })
+	diagnoseRuntime = func() openshell.Diagnosis {
+		return openshell.Diagnosis{Stopped: []openshell.Runtime{{Name: "colima"}}}
+	}
+	var out bytes.Buffer
+	code, err := setupRuntime(env{ctx: context.Background(), stdout: &out, stderr: &out})
+	if code != 3 || err == nil || !strings.Contains(err.Error(), "colima is installed but not running") || !strings.Contains(err.Error(), "Start it and try again") {
+		t.Fatalf("code %d, %v", code, err)
+	}
+}

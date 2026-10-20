@@ -81,7 +81,12 @@ func (d *Document) Validate() error {
 
 	seenHost := map[string]int{}
 	for i, h := range d.Hosts {
+		// Named by host: the document is merged over developer-default, so
+		// an index would not match the line in the person's file.
 		f := fmt.Sprintf("hosts[%d]", i)
+		if h.Host != "" {
+			f = "hosts[" + h.Host + "]"
+		}
 		if err := checkHost(h.Host); err != nil {
 			add("%s.host: %v", f, err)
 		}
@@ -95,8 +100,8 @@ func (d *Document) Validate() error {
 			add("%s.port: %d is a cluster control-plane port that OpenShell blocks", f, port)
 		}
 		key := fmt.Sprintf("%s:%d", h.Host, port)
-		if j, ok := seenHost[key]; ok {
-			add("%s: %s is already listed at hosts[%d]", f, key, j)
+		if _, ok := seenHost[key]; ok {
+			add("%s: %s is listed twice", f, key)
 		}
 		seenHost[key] = i
 

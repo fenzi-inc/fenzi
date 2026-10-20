@@ -79,6 +79,10 @@ type jsonSandbox struct {
 	// container runtime restarts. It is not running; fenzi stop starts it
 	// again when OpenShell can, or deletes it.
 	Lost bool `json:"lost,omitempty"`
+	// Applied is a finished sandbox whose changes fenzi apply wrote into
+	// the folder: nothing is staged for it any more. fenzi diff says the
+	// same as an error, "its changes were applied".
+	Applied bool `json:"applied,omitempty"`
 	// Git is the folder's repository as recorded when the sandbox started,
 	// and where the agent's commits landed; absent when the folder is not a
 	// repository.
