@@ -24,6 +24,9 @@ func Merge(base, project *Document) (*Document, error) {
 	if len(project.Agents) > 0 {
 		p = append(p, "agents: set in the base policy, not in a project file")
 	}
+	if project.MemberMCP != "" {
+		p = append(p, "member_mcp: set in a team's policy, not in a project file")
+	}
 	if project.Approvals != "" && project.Approvals != ApprovalsPerson {
 		p = append(p, fmt.Sprintf("approvals: the only accepted value is %q", ApprovalsPerson))
 	}

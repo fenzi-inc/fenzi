@@ -617,6 +617,85 @@ func ForProverYAML(policyYAML []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// The values of a team policy's member_mcp.
+const (
+	// MemberMCPAllow lets each member add their own servers, within the
+	// team's limits (MergeMemberMCP). It is the default.
+	MemberMCPAllow = "allow"
+	// MemberMCPTeamOnly gives agents the team's servers and nothing else.
+	MemberMCPTeamOnly = "team-only"
+)
+
+// MembersMayAddMCP reports whether a team's members may add their own
+// servers: every value but team-only.
+func (d *Document) MembersMayAddMCP() bool { return d.MemberMCP != MemberMCPTeamOnly }
+
+// MergeMemberMCP adds a member's own servers (the mcp section of their
+// machine file) to a team's policy, within the team's limits:
+//
+//   - the team's member_mcp is not team-only;
+//   - a server with a team server's name keeps the team's URL or command and
+//     may only narrow it (fewer tools, more denied), as a project narrows;
+//   - with a team boundary, every other server must be one the boundary
+//     allows, as CheckMCP says;
+//   - the policy with the server must still be valid.
+//
+// A server outside those limits is left out, never the run: refused maps
+// its name to the reason, in the words fenzi shows the member. team is not
+// changed.
+func MergeMemberMCP(team, member, boundary *Document) (out *Document, refused map[string]string) {
+	out = team.clone()
+	refused = map[string]string{}
+	if member == nil || len(member.MCP) == 0 {
+		return out, refused
+	}
+	if !team.MembersMayAddMCP() {
+		for _, name := range member.MCPNames() {
+			refused[name] = "the team's policy gives agents the team's MCP servers only"
+		}
+		return out, refused
+	}
+	baseValid := team.WithDefaults().Validate() == nil
+	for _, name := range member.MCPNames() {
+		s := member.MCP[name].clone()
+		one := &Document{MCP: map[string]MCPServer{name: s}}
+		if t, ok := team.MCP[name]; ok {
+			if err := checkMCP(one, &Document{MCP: map[string]MCPServer{name: t}}, "the team", ""); err != nil {
+				refused[name] = problemsLine(err) + "; the team has a server of that name, which a member can only narrow"
+				continue
+			}
+			s.Token = s.Token || t.Token
+		} else if boundary != nil {
+			if err := CheckMCP(one, boundary); err != nil {
+				refused[name] = problemsLine(err)
+				continue
+			}
+		}
+		candidate := out.clone()
+		if candidate.MCP == nil {
+			candidate.MCP = map[string]MCPServer{}
+		}
+		candidate.MCP[name] = s
+		if baseValid {
+			if err := candidate.WithDefaults().Validate(); err != nil {
+				refused[name] = problemsLine(err)
+				continue
+			}
+		}
+		out = candidate
+	}
+	return out, refused
+}
+
+// problemsLine is a validation error as one line.
+func problemsLine(err error) string {
+	var ve *ValidationError
+	if errors.As(err, &ve) {
+		return strings.Join(ve.Problems, "; ")
+	}
+	return err.Error()
+}
+
 // CheckMCP checks a document's MCP servers against a team boundary's, the
 // check the prover cannot do. A remote server must be one the boundary
 // lists, at the same URL; it may allow only tools the boundary allows and

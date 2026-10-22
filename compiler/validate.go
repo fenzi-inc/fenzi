@@ -55,6 +55,11 @@ func (d *Document) Validate() error {
 	default:
 		add("workspace: must be %q or %q, got %q", WorkspaceReadWrite, WorkspaceReadOnly, d.Workspace)
 	}
+	switch d.MemberMCP {
+	case "", MemberMCPAllow, MemberMCPTeamOnly:
+	default:
+		add("member_mcp: must be %q or %q, got %q", MemberMCPAllow, MemberMCPTeamOnly, d.MemberMCP)
+	}
 	switch d.Approvals {
 	case "", ApprovalsPerson:
 	default:

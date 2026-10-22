@@ -300,6 +300,12 @@ func cmdStatus(e env, args []string) (int, error) {
 		if note != "" {
 			doc.Notes = append(doc.Notes, note)
 		}
+		if teamDoc, _, _, err := teamMCPLimits(); err == nil && teamDoc != nil {
+			doc.MemberMCP = compiler.MemberMCPAllow
+			if !teamDoc.MembersMayAddMCP() {
+				doc.MemberMCP = compiler.MemberMCPTeamOnly
+			}
+		}
 		if err := writeJSON(e.stdout, doc); err != nil {
 			return 1, err
 		}
@@ -466,6 +472,15 @@ func resolvePolicy(e env, dirs config.Dirs, repo, file string) (run.Resolved, er
 	if _, err := os.Stat(filepath.Join(repo, run.ProjectFile)); err == nil {
 		screen.New(e.stderr).Label("policy", "project file not used; the team policy applies")
 	}
-	res := run.Resolved{Doc: doc, Sources: fmt.Sprintf("%s r%d (signed)", en.Tenant, en.Revision), TeamRevision: en.Revision}
-	return res.WithTeamBoundary(b.Boundary, en.Tenant, en.Revision)
+	res, err := run.Resolved{Doc: doc, Sources: fmt.Sprintf("%s r%d (signed)", en.Tenant, en.Revision), TeamRevision: en.Revision}.WithTeamBoundary(b.Boundary, en.Tenant, en.Revision)
+	if err != nil {
+		return run.Resolved{}, err
+	}
+	if res, err = res.WithMemberMCP(); err != nil {
+		return run.Resolved{}, err
+	}
+	for _, name := range sortedKeys(res.MemberRefused) {
+		screen.New(e.stderr).Label("mcp", name+" from "+run.MachineMCPSource+" not used: "+res.MemberRefused[name])
+	}
+	return res, nil
 }

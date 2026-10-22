@@ -225,6 +225,13 @@ func (p *pass) sync(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// This machine's own MCP servers, as run gave them to the sandbox, so a
+	// new revision loaded on a running sandbox keeps their rules.
+	if withMember, err := resolved.WithMemberMCP(); err != nil {
+		rep.Notes = append(rep.Notes, "MCP servers of this machine left out: "+err.Error())
+	} else {
+		resolved = withMember
+	}
 	state, err := opt.Dirs.LoadState()
 	if err != nil {
 		return err

@@ -28,6 +28,9 @@ type Resolved struct {
 	// derived from Doc. BoundarySource names it for people.
 	Boundary       *compiler.Document
 	BoundarySource string
+	// MemberRefused names this machine's own MCP servers a team's policy
+	// left out, each with why (WithMemberMCP). Nil off a team.
+	MemberRefused map[string]string
 }
 
 // MachineMCP returns the path of this machine's MCP file, which holds the
@@ -58,7 +61,7 @@ func LoadMachineMCP() (*compiler.Document, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	if d.Workspace != "" || d.Approvals != "" || d.Name != "" || len(d.Agents) > 0 || len(d.Hosts) > 0 || len(d.Paths.ReadOnly) > 0 || len(d.Paths.ReadWrite) > 0 {
+	if d.Workspace != "" || d.Approvals != "" || d.Name != "" || d.MemberMCP != "" || len(d.Agents) > 0 || len(d.Hosts) > 0 || len(d.Paths.ReadOnly) > 0 || len(d.Paths.ReadWrite) > 0 {
 		return nil, fmt.Errorf("%s: holds only version and mcp; hosts and paths go in a project's fenzi.yaml", path)
 	}
 	return d, nil
@@ -116,6 +119,26 @@ func (r Resolved) WithTeamBoundary(raw []byte, tenant string, revision int) (Res
 	}
 	r.Boundary = b
 	r.BoundarySource = fmt.Sprintf("the %s boundary in r%d (signed)", tenant, revision)
+	return r, nil
+}
+
+// WithMemberMCP adds this machine's own MCP servers, from the machine
+// file, to a team's policy, within the team's limits: not when the policy
+// says team-only, a team server only narrowed, the rest inside the team
+// boundary when there is one (compiler.MergeMemberMCP). Call it after
+// WithTeamBoundary. A server left out is in MemberRefused, not an error;
+// a machine file that cannot be read is.
+func (r Resolved) WithMemberMCP() (Resolved, error) {
+	machine, err := LoadMachineMCP()
+	if err != nil {
+		return Resolved{}, err
+	}
+	doc, refused := compiler.MergeMemberMCP(r.Doc, machine, r.Boundary)
+	r.Doc = doc
+	r.MemberRefused = refused
+	if machine != nil && len(machine.MCP) > len(refused) {
+		r.Sources += " + " + MachineMCPSource
+	}
 	return r, nil
 }
 

@@ -54,7 +54,7 @@ func cmdMCP(e env, args []string) (int, error) {
 			{"mcp token <name> --env <VAR>", "Store the secret a local server reads from VAR; every server that lists VAR shares it"},
 			{"mcp import", "Copy the servers in .mcp.json or .cursor/mcp.json into fenzi.yaml"},
 			{"mcp import --dry-run", "Show the servers an import would add, and write nothing; --json for a program"},
-		}, "--machine on add and remove edits ~/.config/fenzi/mcp.yaml instead of ./fenzi.yaml. A change applies to the next fenzi run: agents read their servers when they start.")
+		}, "--machine on add and remove edits ~/.config/fenzi/mcp.yaml instead of ./fenzi.yaml. On a machine signed in to a team, agents get the team's servers and, unless the team's policy says team-only, the ones in ~/.config/fenzi/mcp.yaml within the team's limits; ./fenzi.yaml is not used. A change applies to the next fenzi run: agents read their servers when they start.")
 		return 0, nil
 	case "list":
 		return mcpList(e, args[1:])
@@ -87,8 +87,13 @@ type jsonMCP struct {
 	TokenHeader string `json:"token_header,omitempty"`
 	// TokenStored is nil when the runtime could not be asked.
 	TokenStored *bool `json:"token_stored,omitempty"`
-	// Source is project, machine, project over machine, or team.
+	// Source is project, machine, project over machine, or team. On a team,
+	// machine is a server of this machine's own, and team a server of the
+	// team's policy, narrowed or not by this machine's file.
 	Source string `json:"source"`
+	// Refused says why a team's policy leaves this machine's server out; it
+	// is then not given to agents. Empty when it is used.
+	Refused string `json:"refused,omitempty"`
 	// Secrets and Hosts are a local server's; see compiler.MCPServer.
 	Secrets []jsonMCPSecret `json:"secrets,omitempty"`
 	Hosts   []string        `json:"hosts,omitempty"`
@@ -123,8 +128,10 @@ func mcpList(e env, args []string) (int, error) {
 	if err := resolved.Doc.WithDefaults().Validate(); err != nil {
 		return 1, err
 	}
-	_, enrolledErr := team.Load(dirs)
-	onTeam := enrolledErr == nil
+	teamDoc, _, onTeam, err := teamMCPLimits()
+	if err != nil {
+		return 1, err
+	}
 	machine, _ := run.LoadMachineMCP()
 	project, _ := readProjectDoc(repo)
 
@@ -135,9 +142,12 @@ func mcpList(e env, args []string) (int, error) {
 		d := jsonMCP{Name: n, URL: s.URL, Account: s.Account, Command: s.Command, Allow: nonNilStrings(s.Tools.Allow), Deny: nonNilStrings(s.Tools.Deny), Token: s.Token, TokenHeader: s.TokenHeader}
 		_, inMachine := mcpOf(machine)[n]
 		_, inProject := mcpOf(project)[n]
+		_, inTeam := mcpOf(teamDoc)[n]
 		switch {
-		case onTeam:
+		case onTeam && inTeam:
 			d.Source = "team"
+		case onTeam:
+			d.Source = "machine"
 		case inMachine && inProject:
 			d.Source = "project over machine"
 		case inProject:
@@ -160,6 +170,11 @@ func mcpList(e env, args []string) (int, error) {
 		d.Hosts = s.Hosts
 		docs = append(docs, d)
 	}
+	for _, n := range sortedKeys(resolved.MemberRefused) {
+		s := machine.MCP[n]
+		docs = append(docs, jsonMCP{Name: n, URL: s.URL, Account: s.Account, Command: s.Command, Allow: nonNilStrings(s.Tools.Allow), Deny: nonNilStrings(s.Tools.Deny),
+			Token: s.Token, TokenHeader: s.TokenHeader, Source: "machine", Refused: resolved.MemberRefused[n], Hosts: s.Hosts})
+	}
 	if *asJSON {
 		return 0, writeJSON(e.stdout, docs)
 	}
@@ -179,8 +194,13 @@ func mcpList(e env, args []string) (int, error) {
 		case where == "":
 			where = strings.Join(d.Command, " ")
 		}
+		if d.Refused != "" {
+			u.Skip(d.Name, where)
+			u.Println("    " + u.Deny("not used: "+d.Refused))
+			continue
+		}
 		u.Done(d.Name, where)
-		u.Println("    " + u.Dim(mcpToolsLine(d)+", from "+d.Source))
+		u.Println("    " + u.Dim(mcpToolsLine(d)+", from "+mcpSourceLabel(d.Source, onTeam)))
 		if d.Token {
 			switch {
 			case d.TokenStored == nil:
@@ -206,6 +226,9 @@ func mcpList(e env, args []string) (int, error) {
 		}
 	}
 	u.Blank()
+	if onTeam && !teamDoc.MembersMayAddMCP() {
+		u.Note("The team's policy gives agents the team's servers only; " + run.MachineMCPSource + " is not used.")
+	}
 	if remoteMCP(resolved.Doc) > 0 {
 		u.Note("Each remote server's calls are checked per tool by the sandbox, and recorded in fenzi log. Its rules are checked by Fenzi, not by the policy prover.")
 	}
@@ -228,6 +251,72 @@ func mcpToolsLine(d jsonMCP) string {
 		allow += "; denied: " + strings.Join(d.Deny, ", ")
 	}
 	return allow
+}
+
+// mcpSourceLabel says where a server comes from, for people.
+func mcpSourceLabel(source string, onTeam bool) string {
+	switch {
+	case source == "team":
+		return "the team's policy"
+	case onTeam && source == "machine":
+		return "this machine (" + run.MachineMCPSource + ")"
+	}
+	return source
+}
+
+// teamMCPLimits reads the team's policy and boundary from the signed
+// revision this machine holds, without asking the server. onTeam is false,
+// with no error, on a machine that is not signed in; team is nil before the
+// first revision.
+func teamMCPLimits() (teamDoc, boundary *compiler.Document, onTeam bool, err error) {
+	dirs, err := config.Default()
+	if err != nil {
+		return nil, nil, false, err
+	}
+	en, err := team.Load(dirs)
+	if errors.Is(err, team.ErrNotEnrolled) {
+		return nil, nil, false, nil
+	}
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if en.Revision == 0 {
+		return nil, nil, true, nil
+	}
+	b, err := en.Bundle()
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if teamDoc, err = compiler.Parse(b.Document); err != nil {
+		return nil, nil, true, err
+	}
+	if len(b.Boundary) > 0 {
+		if boundary, err = compiler.Parse(b.Boundary); err != nil {
+			return nil, nil, true, fmt.Errorf("team boundary: %w", err)
+		}
+	}
+	return teamDoc, boundary, true, nil
+}
+
+// checkMemberServer refuses, on a team, a server this machine is about to
+// write: anywhere but the machine file, or outside the team's limits. Off
+// a team it says nothing.
+func checkMemberServer(name string, s compiler.MCPServer, machine bool) error {
+	teamDoc, boundary, onTeam, err := teamMCPLimits()
+	if err != nil || !onTeam {
+		return err
+	}
+	if !machine {
+		return fmt.Errorf("this machine is signed in to a team, so ./%s is not used. Add it for this machine with --machine", run.ProjectFile)
+	}
+	if teamDoc == nil {
+		return errors.New("the team has no policy yet; an admin publishes one in the console, then this machine can add its own servers")
+	}
+	_, refused := compiler.MergeMemberMCP(teamDoc, &compiler.Document{Version: 1, MCP: map[string]compiler.MCPServer{name: s}}, boundary)
+	if why := refused[name]; why != "" {
+		return fmt.Errorf("the team would not give agents %s: %s. An admin changes the team's servers in the team console", name, why)
+	}
+	return nil
 }
 
 func mcpOf(d *compiler.Document) map[string]compiler.MCPServer {
@@ -316,6 +405,9 @@ func mcpAdd(e env, args []string) (int, error) {
 			return 1, fmt.Errorf("say which tools agents may call: --tool <name> for each, or --all-tools. fenzi checks every call to %s against that list", name)
 		}
 	}
+	if err := checkMemberServer(name, s, *machine); err != nil {
+		return 1, err
+	}
 	file, label := mcpFile(*machine)
 	if file == "" {
 		return 1, errors.New("no config folder on this machine")
@@ -375,6 +467,9 @@ func mcpAddAccount(e env, pos []string, local, all bool, tools, deny []string, e
 		return 1, errors.New("say which tools Claude Code may call on its connectors: --tool <name> for each, as the connector names it (list_issues, not mcp__claude_ai_Linear__list_issues), or --all-tools")
 	}
 	name := pos[0]
+	if err := checkMemberServer(name, s, machine); err != nil {
+		return 1, err
+	}
 	file, label := mcpFile(machine)
 	if file == "" {
 		return 1, errors.New("no config folder on this machine")
@@ -416,14 +511,14 @@ func mcpAllow(e env, args []string) (int, error) {
 	if len(pos) < 2 {
 		return 1, errors.New("name the server and the tools: fenzi mcp allow claude-ai api_request")
 	}
-	if dirs, err := config.Default(); err == nil {
-		if _, err := team.Load(dirs); err == nil {
-			return 1, errors.New("this machine is signed in to a team, so its MCP servers come from the team's policy. An admin adds the tool in the team console")
-		}
-	}
 	name, tools := pos[0], pos[1:]
-	// This folder's entry first: it is the one that applies here.
-	useMachine := *machine
+	_, _, onTeam, err := teamMCPLimits()
+	if err != nil {
+		return 1, err
+	}
+	// This folder's entry first: it is the one that applies here. On a
+	// team only the machine file is used.
+	useMachine := *machine || onTeam
 	if !useMachine {
 		file, _ := mcpFile(false)
 		f, err := loadMCPFile(file)
@@ -439,6 +534,9 @@ func mcpAllow(e env, args []string) (int, error) {
 	}
 	node := value(f.mcpNode(), name)
 	if node == nil {
+		if onTeam {
+			return 1, fmt.Errorf("%s is not in %s. A team server's tools are changed by an admin in the team console", name, run.MachineMCPSource)
+		}
 		return 1, fmt.Errorf("%s is not in ./%s or %s; fenzi mcp list shows the servers agents get here", name, run.ProjectFile, run.MachineMCPSource)
 	}
 	var s compiler.MCPServer
@@ -471,6 +569,9 @@ func mcpAllow(e env, args []string) (int, error) {
 		return 0, nil
 	}
 	s.Tools.Allow = append(s.Tools.Allow, added...)
+	if err := checkMemberServer(name, s, useMachine); err != nil {
+		return 1, err
+	}
 	f.put(name, s)
 	if err := f.writeMCP(useMachine); err != nil {
 		return 1, err
@@ -491,7 +592,13 @@ func mcpRemove(e env, args []string) (int, error) {
 	if len(pos) != 1 {
 		return 1, errors.New("name the server: fenzi mcp remove <name>")
 	}
-	file, label := mcpFile(*machine)
+	// On a team only the machine file is used.
+	_, _, onTeam, err := teamMCPLimits()
+	if err != nil {
+		return 1, err
+	}
+	useMachine := *machine || onTeam
+	file, label := mcpFile(useMachine)
 	f, err := loadMCPFile(file)
 	if err != nil {
 		return 1, err
@@ -500,10 +607,13 @@ func mcpRemove(e env, args []string) (int, error) {
 	u.Blank()
 	if !f.remove(pos[0]) {
 		u.Skip("Nothing to remove", pos[0]+" is not in "+label)
+		if onTeam {
+			u.Note("A team server is removed by an admin in the team console.")
+		}
 		u.Blank()
 		return 0, nil
 	}
-	if err := f.writeMCP(*machine); err != nil {
+	if err := f.writeMCP(useMachine); err != nil {
 		return 1, err
 	}
 	u.Done("Removed", pos[0]+" from "+label)
@@ -739,6 +849,11 @@ func mcpImport(e env, args []string) (int, error) {
 	repo, err := cwd()
 	if err != nil {
 		return 1, err
+	}
+	if _, _, onTeam, err := teamMCPLimits(); err != nil {
+		return 1, err
+	} else if onTeam && !*dryRun {
+		return 1, fmt.Errorf("this machine is signed in to a team, so ./%s is not used. Add each server for this machine with fenzi mcp add --machine", run.ProjectFile)
 	}
 	sources := pos
 	if len(sources) == 0 {

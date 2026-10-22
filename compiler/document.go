@@ -36,6 +36,10 @@ type Document struct {
 	Approvals string   `yaml:"approvals,omitempty"`
 	// MCP lists the MCP servers every agent is given, by name.
 	MCP map[string]MCPServer `yaml:"mcp,omitempty"`
+	// MemberMCP is a team policy's word on its members' own MCP servers,
+	// the ones in each machine's ~/.config/fenzi/mcp.yaml: "allow" (the
+	// default when empty) or "team-only". See MergeMemberMCP.
+	MemberMCP string `yaml:"member_mcp,omitempty"`
 }
 
 type Paths struct {

@@ -218,8 +218,11 @@ type jsonStatus struct {
 	// PolicyPublished is when the revision this machine holds was published,
 	// RFC 3339, from the signed bundle. Empty with no revision. The bundle
 	// does not carry who published it; the console shows that.
-	PolicyPublished string   `json:"policy_published,omitempty"`
-	Notes           []string `json:"notes"`
+	PolicyPublished string `json:"policy_published,omitempty"`
+	// MemberMCP is the team policy's member_mcp: "allow" when members may
+	// add their own MCP servers, "team-only" when not. Empty with no revision.
+	MemberMCP string   `json:"member_mcp,omitempty"`
+	Notes     []string `json:"notes"`
 	// Forwarder is the background forwarder. Only on a signed-in machine.
 	Forwarder *jsonForwarder `json:"forwarder,omitempty"`
 }

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ import (
 
 	"fenzi/cli/internal/config"
 	"fenzi/cli/internal/openshell"
+	"fenzi/cli/internal/run"
 	"fenzi/cli/internal/team"
 	"fenzi/controlplane"
 )
@@ -416,5 +418,24 @@ func TestConsoleApprovalOfAnMCPRequestIsRejected(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(rep.Notes, " "), "MCP request") {
 		t.Errorf("notes %v", rep.Notes)
+	}
+}
+
+// A new revision loaded on a running sandbox keeps the rules of this
+// machine's own MCP servers, which run gave it beside the team's.
+func TestPushKeepsTheMachinesOwnMCPServers(t *testing.T) {
+	_, opt, gw := teamFixture(t)
+	file := filepath.Join(t.TempDir(), "mcp.yaml")
+	if err := os.WriteFile(file, []byte("version: 1\nmcp:\n  deepwiki:\n    url: https://mcp.deepwiki.com/mcp\n    tools:\n      allow: [read_wiki_structure]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := run.MachineMCP
+	run.MachineMCP = func() string { return file }
+	t.Cleanup(func() { run.MachineMCP = old })
+	if _, err := Pass(context.Background(), opt); err != nil {
+		t.Fatal(err)
+	}
+	if !gw.set || !strings.Contains(string(gw.policy), "mcp_deepwiki") || !strings.Contains(string(gw.policy), "read_wiki_structure") {
+		t.Fatalf("loaded policy:\n%s", gw.policy)
 	}
 }

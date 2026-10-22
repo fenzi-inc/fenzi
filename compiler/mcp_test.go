@@ -476,3 +476,103 @@ func TestAccountConnectorsBoundary(t *testing.T) {
 		t.Errorf("widening the connectors: %v", err)
 	}
 }
+
+// A team member's own servers join the team's within its limits: a team
+// server can only be narrowed, a new one must be inside the boundary when
+// there is one, and team-only keeps them all out. A server outside is left
+// out with its reason; the rest still join.
+func TestMergeMemberMCP(t *testing.T) {
+	team := mcpDocument(t, `version: 1
+agents: [claude]
+mcp:
+  linear:
+    url: https://mcp.linear.app/mcp
+    tools:
+      allow: [list_issues, get_issue]
+`)
+	member, err := Parse([]byte(`version: 1
+mcp:
+  linear:
+    url: https://mcp.linear.app/mcp
+    tools:
+      allow: [list_issues]
+  deepwiki:
+    url: https://mcp.deepwiki.com/mcp
+    tools:
+      allow: [read_wiki_structure]
+  wide:
+    url: https://mcp.example.com/mcp
+    tools:
+      allow: [a]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, refused := MergeMemberMCP(team, member, nil)
+	if len(refused) != 0 || len(out.MCP) != 3 || !sameStrings(out.MCP["linear"].Tools.Allow, []string{"list_issues"}) {
+		t.Fatalf("refused %v servers %v", refused, out.MCP)
+	}
+	if len(team.MCP) != 1 {
+		t.Fatal("the team's document must not change")
+	}
+
+	// Widening a team server is refused, the others still join.
+	member.MCP["linear"] = MCPServer{URL: "https://mcp.linear.app/mcp", Tools: MCPTools{Allow: []string{"delete_issue"}}}
+	out, refused = MergeMemberMCP(team, member, nil)
+	if !strings.Contains(refused["linear"], "delete_issue is not a tool the team allows") || !strings.Contains(refused["linear"], "can only narrow") {
+		t.Fatalf("refused %v", refused)
+	}
+	if !sameStrings(out.MCP["linear"].Tools.Allow, []string{"list_issues", "get_issue"}) || len(out.MCP) != 3 {
+		t.Fatalf("the team's linear stays as it is: %v", out.MCP)
+	}
+
+	// With a boundary, a new server must be one it allows.
+	boundary := mcpDocument(t, `version: 1
+agents: [claude]
+mcp:
+  linear:
+    url: https://mcp.linear.app/mcp
+    tools:
+      allow: [list_issues, get_issue]
+  deepwiki:
+    url: https://mcp.deepwiki.com/mcp
+    tools:
+      allow: ["*"]
+`)
+	delete(member.MCP, "linear")
+	out, refused = MergeMemberMCP(team, member, boundary)
+	if _, ok := out.MCP["deepwiki"]; !ok || !strings.Contains(refused["wide"], "not an MCP server the team allows") {
+		t.Fatalf("refused %v servers %v", refused, out.MCP)
+	}
+
+	// A server that makes the policy invalid is left out.
+	member.MCP = map[string]MCPServer{"bad": {URL: "http://plain.example.com/mcp", Tools: MCPTools{Allow: []string{"a"}}}}
+	if _, refused = MergeMemberMCP(team, member, nil); refused["bad"] == "" {
+		t.Fatal("an invalid server must be refused")
+	}
+
+	// team-only: the team's servers and nothing else.
+	team.MemberMCP = MemberMCPTeamOnly
+	out, refused = MergeMemberMCP(team, member, nil)
+	if len(out.MCP) != 1 || !strings.Contains(refused["bad"], "team's MCP servers only") {
+		t.Fatalf("refused %v servers %v", refused, out.MCP)
+	}
+}
+
+func TestMemberMCPSetting(t *testing.T) {
+	d := mcpDocument(t, "version: 1\nmember_mcp: maybe\n")
+	if err := d.Validate(); err == nil || !strings.Contains(err.Error(), "member_mcp: must be") {
+		t.Fatalf("err %v", err)
+	}
+	allow := mcpDocument(t, "version: 1\nmember_mcp: allow\n")
+	if err := allow.Validate(); err != nil || !allow.MembersMayAddMCP() || !(&Document{}).MembersMayAddMCP() {
+		t.Fatal("allow and empty let members add servers")
+	}
+	only := mcpDocument(t, "version: 1\nmember_mcp: team-only\n")
+	if Effect(allow, only) != EffectWall || Effect(&Document{Version: 1}, allow) != EffectSame {
+		t.Fatal("team-only is a wall change; allow is the default")
+	}
+	if _, err := Merge(allow, only); err == nil || !strings.Contains(err.Error(), "member_mcp: set in a team's policy") {
+		t.Fatalf("a project cannot set member_mcp: %v", err)
+	}
+}
