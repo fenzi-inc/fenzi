@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -272,6 +273,9 @@ func TestSetupRuntimeUpgradesOnlyWithNothingRunning(t *testing.T) {
 // gateway start finds a driver instead of waiting 30 s and failing, as it
 // did on a clean Mac on 19 October 2026.
 func TestSetupRuntimeFinishesTheColimaGateway(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("setup writes the colima setting before the install on macOS only")
+	}
 	fake, _, _ := upgradeFake(t, openshell.InstallVersion, errors.New("the OpenShell installer failed: exit status 1"))
 	ready := false
 	fake.Replies = map[string]openshell.Reply{
