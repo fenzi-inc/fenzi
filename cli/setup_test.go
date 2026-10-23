@@ -371,17 +371,88 @@ func TestUpdateRefusesTheAppsOwnCopy(t *testing.T) {
 	}
 }
 
-// A runtime that is installed and stopped ends setup --runtime at once with
-// its name, instead of an install and a minute's wait for the gateway.
-func TestSetupRuntimeNamesAStoppedRuntime(t *testing.T) {
-	old := diagnoseRuntime
-	t.Cleanup(func() { diagnoseRuntime = old })
+// A runtime that is installed and stopped is started by setup --runtime,
+// colima before Docker Desktop, with no question.
+func TestSetupRuntimeStartsAStoppedRuntime(t *testing.T) {
+	old, oldStart := diagnoseRuntime, startContainer
+	t.Cleanup(func() { diagnoseRuntime, startContainer = old, oldStart })
 	diagnoseRuntime = func() openshell.Diagnosis {
-		return openshell.Diagnosis{Stopped: []openshell.Runtime{{Name: "colima"}}}
+		return openshell.Diagnosis{Stopped: []openshell.Runtime{
+			{Name: "Docker Desktop", Start: []string{"open", "-a", "Docker"}},
+			{Name: "colima", Start: []string{"colima", "start"}},
+		}}
+	}
+	var got string
+	startContainer = func(_ context.Context, r openshell.Runtime, _ io.Reader, _, _ io.Writer) error {
+		got = r.Name
+		return errors.New("colima start: exit status 1")
 	}
 	var out bytes.Buffer
 	code, err := setupRuntime(env{ctx: context.Background(), stdout: &out, stderr: &out})
-	if code != 3 || err == nil || !strings.Contains(err.Error(), "colima is installed but not running") || !strings.Contains(err.Error(), "Start it and try again") {
+	if got != "colima" {
+		t.Fatalf("started %q:\n%s", got, out.String())
+	}
+	if code != 3 || err == nil || !strings.Contains(err.Error(), "colima start") {
+		t.Fatalf("a failed start ends setup with its error: code %d, %v", code, err)
+	}
+	if !strings.Contains(out.String(), "colima is not running. Starting it for the sandboxes:") {
+		t.Errorf("no note before the start:\n%s", out.String())
+	}
+}
+
+// A start that asks for a password is left to the person.
+func TestSetupRuntimeLeavesASudoStart(t *testing.T) {
+	old, oldStart := diagnoseRuntime, startContainer
+	t.Cleanup(func() { diagnoseRuntime, startContainer = old, oldStart })
+	diagnoseRuntime = func() openshell.Diagnosis {
+		return openshell.Diagnosis{Stopped: []openshell.Runtime{{Name: "Docker Engine", Start: []string{"sudo", "systemctl", "start", "docker"}, Attach: true}}}
+	}
+	startContainer = func(context.Context, openshell.Runtime, io.Reader, io.Writer, io.Writer) error {
+		t.Fatal("setup --runtime ran sudo")
+		return nil
+	}
+	var out bytes.Buffer
+	code, err := setupRuntime(env{ctx: context.Background(), stdout: &out, stderr: &out})
+	if code != 3 || err == nil || !strings.Contains(err.Error(), "Start it with sudo systemctl start docker and try again") {
+		t.Fatalf("code %d, %v", code, err)
+	}
+}
+
+// A Mac with no container runtime gets colima from Homebrew, then starts it.
+func TestSetupRuntimeInstallsColima(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("setup installs colima on macOS only")
+	}
+	old, oldStart, oldCan, oldInstall := diagnoseRuntime, startContainer, canInstallColima, installColima
+	t.Cleanup(func() {
+		diagnoseRuntime, startContainer, canInstallColima, installColima = old, oldStart, oldCan, oldInstall
+	})
+	installed, started := false, ""
+	diagnoseRuntime = func() openshell.Diagnosis {
+		if !installed {
+			return openshell.Diagnosis{None: true}
+		}
+		return openshell.Diagnosis{Stopped: []openshell.Runtime{{Name: "colima", Start: []string{"colima", "start"}}}}
+	}
+	canInstallColima = func() bool { return true }
+	installColima = func(context.Context, io.Reader, io.Writer, io.Writer) error { installed = true; return nil }
+	startContainer = func(_ context.Context, r openshell.Runtime, _ io.Reader, _, _ io.Writer) error {
+		started = r.Name
+		return errors.New("stop here")
+	}
+	var out bytes.Buffer
+	if _, err := setupRuntime(env{ctx: context.Background(), stdout: &out, stderr: &out}); err == nil || !installed || started != "colima" {
+		t.Fatalf("installed %v, started %q, %v:\n%s", installed, started, err, out.String())
+	}
+
+	// No Homebrew: the error names it, so the app shows its Homebrew step.
+	installed = false
+	canInstallColima = func() bool { return false }
+	installColima = func(context.Context, io.Reader, io.Writer, io.Writer) error {
+		t.Fatal("installed with no Homebrew")
+		return nil
+	}
+	if code, err := setupRuntime(env{ctx: context.Background(), stdout: &out, stderr: &out}); code != 3 || err == nil || !strings.Contains(err.Error(), "Homebrew") {
 		t.Fatalf("code %d, %v", code, err)
 	}
 }

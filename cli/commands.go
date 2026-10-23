@@ -697,8 +697,16 @@ func cmdRequests(e env, args []string) (int, error) {
 	}
 	draftNote()
 	list = shown
+	// On the Free plan the first answer keeps the approval in fenzi.yaml, so
+	// the next sandbox in this folder does not ask again. On a team the
+	// policy is the team's, and an admin adds the host in the console.
+	_, enrolled := team.Load(dirs)
+	canSave := errors.Is(enrolled, team.ErrNotEnrolled)
 	if !u.Interactive() {
 		hints := [][2]string{{"fenzi approve <id>" + flag, "let it through"}, {`fenzi deny <id> --reason "..."` + flag, "refuse; the agent sees the reason"}}
+		if canSave {
+			hints = append([][2]string{{"fenzi approve <id> --save" + flag, "let it through, and keep it in " + run.ProjectFile + " for the next sandbox here"}, {"fenzi approve <id>" + flag, "let it through for this sandbox only"}}, hints[1:]...)
+		}
 		if hidden {
 			hints = append(hints, allHint)
 		}
@@ -713,16 +721,48 @@ func cmdRequests(e env, args []string) (int, error) {
 		id := shortID(p.Chunk)
 		for {
 			u.Blank()
-			i, err := u.Select(id+"  "+p.Destination(), []tui.Option{
+			options := []tui.Option{
 				{Label: "Approve", Hint: "the agent can retry in about 10 seconds"},
 				{Label: "Deny", Hint: "you give a reason; the agent sees it"},
 				{Label: "Decide later"},
-			}, 0)
+			}
+			// save is the option that also writes fenzi.yaml, first when offered.
+			save := -1
+			if canSave && !p.MCP() {
+				save = 0
+				options = append([]tui.Option{
+					{Label: "Approve and save", Hint: "also in " + run.ProjectFile + ", so the next sandbox here has it"},
+					{Label: "Approve once", Hint: "this sandbox only"},
+				}, options[1:]...)
+			}
+			i, err := u.Select(id+"  "+p.Destination(), options, 0)
 			if errors.Is(err, tui.ErrCancelled) {
 				return 0, nil
 			}
 			if err != nil {
 				return 1, err
+			}
+			if save == 0 {
+				// Shift so the rest reads as without the save option.
+				if i == 0 {
+					repo, file, host, err := prepareSave(sb, p)
+					if err != nil {
+						u.Problem("Not approved", id+" "+p.Destination())
+						u.Note(err.Error())
+						continue
+					}
+					if err := approveOne(e, u, sb, p); err != nil {
+						return 1, err
+					}
+					// A failed check is printed with the save; the next
+					// request is still asked.
+					var failed *run.PolicyError
+					if _, err := saveApproved(e, u, sb, repo, file, host); err != nil && !errors.As(err, &failed) {
+						return 1, err
+					}
+					break
+				}
+				i--
 			}
 			if i == 0 {
 				if err := checkTeamBoundary(sb, p.Destination()); err != nil {
@@ -901,32 +941,48 @@ func cmdApprove(e env, args []string) (int, error) {
 		}
 		return 0, writeJSON(e.stdout, jsonAnswer{ID: id, Sandbox: sb.Name, Result: "approved", Note: note, SameKind: r.Loaded, AlsoApproved: r.Also, Skipped: r.Skipped})
 	}
-	// With --save, everything that could stop the save is checked before
-	// the approval, so a refusal leaves nothing half done.
-	var host savedHost
-	var file *projectFile
-	repo := sb.Repo
-	if *save {
-		if host, err = requestHost(p.Endpoints); err != nil {
-			return 1, fmt.Errorf("not approved: %v. Approve it without --save and add the host to %s by hand", err, run.ProjectFile)
-		}
-		if repo == "" {
-			if repo, err = cwd(); err != nil {
-				return 1, err
-			}
-		}
-		if file, err = loadProject(filepath.Join(repo, run.ProjectFile)); err != nil {
-			return 1, fmt.Errorf("not approved: %w", err)
-		}
-	}
 	u := tui.New(e.stdin, e.stdout)
+	if *save {
+		return approveAndSave(e, u, sb, p)
+	}
 	if err := approveOne(e, u, sb, p); err != nil {
 		return 1, err
 	}
-	if !*save {
-		return 0, nil
+	return 0, nil
+}
+
+// approveAndSave approves p and adds its host to the project's fenzi.yaml.
+// Everything that could stop the save is checked before the approval, so a
+// refusal leaves nothing half done.
+func approveAndSave(e env, u *tui.UI, sb config.Sandbox, p openshell.Proposal) (int, error) {
+	repo, file, host, err := prepareSave(sb, p)
+	if err != nil {
+		return 1, err
+	}
+	if err := approveOne(e, u, sb, p); err != nil {
+		return 1, err
 	}
 	return saveApproved(e, u, sb, repo, file, host)
+}
+
+// prepareSave reads what approveAndSave needs before it approves: the
+// request as a hosts entry and the project file it goes in.
+func prepareSave(sb config.Sandbox, p openshell.Proposal) (string, *projectFile, savedHost, error) {
+	host, err := requestHost(p.Endpoints)
+	if err != nil {
+		return "", nil, host, fmt.Errorf("not approved: %v. Approve it without --save and add the host to %s by hand", err, run.ProjectFile)
+	}
+	repo := sb.Repo
+	if repo == "" {
+		if repo, err = cwd(); err != nil {
+			return "", nil, host, err
+		}
+	}
+	file, err := loadProject(filepath.Join(repo, run.ProjectFile))
+	if err != nil {
+		return "", nil, host, fmt.Errorf("not approved: %w", err)
+	}
+	return repo, file, host, nil
 }
 
 // approveFromPreview is approve --save with --dry-run or --policy-from. The

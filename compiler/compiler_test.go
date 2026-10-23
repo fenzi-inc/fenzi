@@ -381,8 +381,8 @@ func TestMerge(t *testing.T) {
 	if gh == nil || gh.Access != AccessReadWrite || len(gh.Allow) != 2 {
 		t.Fatalf("project entry should replace the base entry for api.github.com, got %+v", gh)
 	}
-	if len(merged.Hosts) != 5 {
-		t.Errorf("want 5 hosts after merge, got %d", len(merged.Hosts))
+	if want := len(base.Hosts) + 1; len(merged.Hosts) != want {
+		t.Errorf("want %d hosts after merge, got %d", want, len(merged.Hosts))
 	}
 	if base.Hosts[0].Access != AccessReadOnly {
 		t.Error("Merge modified the base document")

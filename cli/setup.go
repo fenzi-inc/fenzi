@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -452,7 +453,51 @@ var (
 	colimaConfigDue  = needsColimaConfig
 	writeColima      = openshell.WriteColimaConfig
 	diagnoseRuntime  = openshell.Diagnose
+	canInstallColima = openshell.CanInstallColima
+	installColima    = openshell.InstallColima
+	startContainer   = openshell.StartRuntime
 )
+
+// containerRuntime gets a container runtime running for setup --runtime,
+// with no questions. A stopped one is started (Diagnosis.ToStart). On a Mac
+// with none, colima and the docker CLI are installed with Homebrew, then
+// colima is started. A runtime whose start asks for a password (sudo on
+// Linux) is left to the person, since nobody may be there to type it. It
+// reports whether it started one.
+func containerRuntime(e env, u *tui.UI) (bool, error) {
+	d := diagnoseRuntime()
+	if d.None && runtime.GOOS == "darwin" {
+		if !canInstallColima() {
+			return false, errors.New("No container runtime is installed. colima installs with Homebrew, whose installer asks for a password. Install Homebrew from https://brew.sh first")
+		}
+		u.Note("No container runtime is installed. Installing colima, which runs the sandboxes, and the docker CLI, which builds agent images:")
+		u.Command(strings.Join(openshell.InstallColimaCommand, " "), "")
+		u.Blank()
+		if err := installColima(e.ctx, strings.NewReader(""), e.stdout, e.stderr); err != nil {
+			return false, err
+		}
+		u.Blank()
+		d = diagnoseRuntime()
+	}
+	r, ok := d.ToStart()
+	if !ok {
+		return false, nil
+	}
+	if r.Attach {
+		return false, errors.New(strings.TrimSuffix(d.Summary(), " This is normal after a restart.") + " Start it with " + r.StartLine() + " and try again.")
+	}
+	u.Note(r.Name + " is not running. Starting it for the sandboxes:")
+	u.Command(r.StartLine(), "")
+	u.Blank()
+	// Attached so its output reaches the terminal, or the app's Details.
+	// Standard input is empty: nothing can wait on a prompt.
+	r.Attach = true
+	if err := startContainer(e.ctx, r, strings.NewReader(""), e.stdout, e.stderr); err != nil {
+		return false, err
+	}
+	u.Done(r.Name, "running")
+	return true, nil
+}
 
 // colimaGateway is the gateway step of setup --runtime with no questions:
 // on a Mac whose runtime is colima and whose gateway has no config yet, it
@@ -880,16 +925,27 @@ func readyPolicy(e env, u *tui.UI, dirs config.Dirs, a agents.Entry, project str
 		if h.Port != 443 {
 			host += fmt.Sprintf(":%d", h.Port)
 		}
-		access := h.Access
-		if len(h.Allow) > 0 {
-			access += ": " + strings.Join(h.Allow, ", ")
-		}
-		lines = append(lines, strings.Repeat(" ", 10)+host+", "+access)
+		lines = append(lines, strings.Repeat(" ", 10)+host+", "+accessLine(h))
 	}
 	return append(lines,
 		u.Deny(fmt.Sprintf("%-9s", "Waits"))+" any other host, until you approve it",
 		u.Dim(fmt.Sprintf("%-9s", "Never"))+" your home folder or the real key",
 	)
+}
+
+// accessLine says what a host allows in a few words: github.com's fetch
+// rule reads "read-only, and git fetch" rather than its four lines.
+func accessLine(h compiler.Host) string {
+	if len(h.Allow) == 0 {
+		return h.Access
+	}
+	rest := slices.DeleteFunc(slices.Clone(h.Allow), func(l string) bool {
+		return l == "GET /**" || l == "HEAD /**" || l == "OPTIONS /**"
+	})
+	if readsOnly(h.Allow) && len(rest) == 1 && rest[0] == "POST /**/git-upload-pack" {
+		return "read-only, and git fetch"
+	}
+	return h.Access + ": " + strings.Join(h.Allow, ", ")
 }
 
 func setupFinish(e env, u *tui.UI, a agents.Entry, project string, start bool, release func()) error {
@@ -1065,12 +1121,15 @@ var runtimeWait = 60 * time.Second
 func setupRuntime(e env) (int, error) {
 	u := tui.ForOutput(e.stdout)
 	u.Title("Sandbox runtime", "")
-	// A container runtime that is installed and stopped: say so now, rather
-	// than install and then wait a minute for a gateway that cannot start.
-	if d := diagnoseRuntime(); len(d.Running) == 0 && len(d.Stopped) > 0 {
-		return 3, errors.New(strings.TrimSuffix(d.Summary(), " This is normal after a restart.") + " Start it and try again.")
+	// The container runtime comes first: without one the gateway cannot
+	// start, and colima's socket, which the gateway config below needs,
+	// exists only while colima runs.
+	had := runtimeInstalled()
+	started, err := containerRuntime(e, u)
+	if err != nil {
+		return 3, err
 	}
-	if !runtimeInstalled() {
+	if !had {
 		if openshell.NeedsHomebrew() {
 			return 3, errors.New("OpenShell needs Homebrew on a Mac, and its installer asks for a password. Install Homebrew from https://brew.sh first")
 		}
@@ -1117,6 +1176,13 @@ func setupRuntime(e env) (int, error) {
 			return 3, err
 		} else if done {
 			u.Done("Gateway", "set up for colima")
+		} else if started && had && gatewayService("restart") != nil {
+			// The gateway started before its runtime did. The interactive
+			// setup restarts it after starting a runtime too.
+			if err := restartGateway(e.ctx); err != nil {
+				return 3, err
+			}
+			u.Done("Gateway", "restarted")
 		}
 	}
 	deadline := time.Now().Add(runtimeWait)

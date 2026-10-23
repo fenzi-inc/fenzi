@@ -81,6 +81,16 @@ func fakeRuntime(t *testing.T, replies map[string]reply, prover string) {
 	diagnoseRuntime = func() openshell.Diagnosis {
 		return openshell.Diagnosis{Running: []openshell.Runtime{{Name: "Docker Desktop", Running: true}}}
 	}
+	oldStart, oldInstallColima := startContainer, installColima
+	t.Cleanup(func() { startContainer, installColima = oldStart, oldInstallColima })
+	startContainer = func(context.Context, openshell.Runtime, io.Reader, io.Writer, io.Writer) error {
+		t.Fatal("a test tried to start the container runtime")
+		return nil
+	}
+	installColima = func(context.Context, io.Reader, io.Writer, io.Writer) error {
+		t.Fatal("a test tried to install colima")
+		return nil
+	}
 	writeColima = func(string) error { t.Fatal("a test tried to write the gateway config"); return nil }
 	restartGateway = func(context.Context) error { t.Fatal("a test tried to restart the gateway"); return nil }
 	installOpenShell = func(context.Context, io.Reader, io.Writer, io.Writer) error {

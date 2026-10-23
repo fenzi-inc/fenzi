@@ -1,10 +1,15 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"fenzi/teamapi"
 )
 
 // fakeOpenShell puts an openshell on PATH that prints rules for `rule get`
@@ -79,5 +84,34 @@ func TestRequestsOnlyDrafts(t *testing.T) {
 	out, code := runCLI(t, "", "requests", "--sandbox", "fenzi-web-1a2b")
 	if code != 0 || !strings.Contains(out, "No requests from the agent") || !strings.Contains(out, "2 more were drafted") {
 		t.Errorf("exit %d:\n%s", code, out)
+	}
+}
+
+// On the Free plan the first answer offered keeps the approval in
+// fenzi.yaml; approving for this sandbox only comes second.
+func TestRequestsOffersSaveFirst(t *testing.T) {
+	fakeOpenShell(t, mixedRules)
+	out, code := runCLI(t, "", "requests", "--sandbox", "fenzi-web-1a2b")
+	if code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	save := strings.Index(out, "fenzi approve <id> --save --sandbox fenzi-web-1a2b")
+	once := strings.Index(out, "for this sandbox only")
+	if save < 0 || once < 0 || save > once || !strings.Contains(out, "keep it in fenzi.yaml") {
+		t.Errorf("save is not the first answer:\n%s", out)
+	}
+}
+
+// A signed-in machine runs the team's policy, which a project file does
+// not change, so no save is offered.
+func TestRequestsOnATeamOfferNoSave(t *testing.T) {
+	fakeRuntime(t, map[string]reply{"rule get": {out: mixedRules}}, "")
+	_, key, _ := ed25519.GenerateKey(rand.Reader)
+	srv := httptest.NewServer(&refusingConsole{bundle: teamapi.ToWire(signed(key, 2))})
+	t.Cleanup(srv.Close)
+	enrollCached(t, srv.URL, key)
+	out, _ := runCLI(t, "", "requests", "--sandbox", "fenzi-web-1a2b")
+	if strings.Contains(out, "--save") || !strings.Contains(out, "fenzi approve <id> --sandbox fenzi-web-1a2b") {
+		t.Errorf("a team machine was offered a save:\n%s", out)
 	}
 }

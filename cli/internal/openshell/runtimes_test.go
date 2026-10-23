@@ -92,6 +92,30 @@ func TestDiagnose(t *testing.T) {
 	}
 }
 
+// With Docker Desktop and colima both stopped, setup starts colima.
+func TestToStartPrefersColima(t *testing.T) {
+	desktop := Runtime{Name: "Docker Desktop", Socket: "/d.sock"}
+	colima := Runtime{Name: "colima", Socket: "/c.sock"}
+	if r, ok := diagnose([]Runtime{desktop, colima}, gatewayConfig{}).ToStart(); !ok || r.Name != "colima" {
+		t.Errorf("both stopped: %+v %v", r, ok)
+	}
+	if r, ok := diagnose([]Runtime{desktop}, gatewayConfig{}).ToStart(); !ok || r.Name != "Docker Desktop" {
+		t.Errorf("Docker Desktop alone: %+v %v", r, ok)
+	}
+	// The config names Docker Desktop's socket: colima is not a choice.
+	if r, ok := diagnose([]Runtime{desktop, colima}, gatewayConfig{socket: "/d.sock"}).ToStart(); !ok || r.Name != "Docker Desktop" {
+		t.Errorf("configured for Docker Desktop: %+v %v", r, ok)
+	}
+	running := colima
+	running.Running = true
+	if _, ok := diagnose([]Runtime{desktop, running}, gatewayConfig{}).ToStart(); ok {
+		t.Error("a runtime is running; nothing to start")
+	}
+	if _, ok := diagnose(nil, gatewayConfig{}).ToStart(); ok {
+		t.Error("nothing installed; nothing to start")
+	}
+}
+
 func TestReadGatewayConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gateway.toml")
 	if err := os.WriteFile(path, []byte(ColimaConfig("/Users/you/.colima/default/docker.sock")), 0o600); err != nil {

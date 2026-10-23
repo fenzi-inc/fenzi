@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -219,18 +220,26 @@ func (p *projectFile) add(h savedHost) saveOutcome {
 			return saveOutcome{Detail: fmt.Sprintf("%s is %s in %s; saving %s there would change what it allows. Edit that entry by hand", h.Host, access, projectName, describe(h))}
 		}
 	}
-	for _, b := range policies.DeveloperDefault().Hosts {
-		port := b.Port
-		if port == 0 {
-			port = 443
+	var allow []string
+	if b, from, ok := baseHost(filepath.Dir(p.path), h); ok {
+		switch {
+		case b.Access == h.Access && h.Access == compiler.AccessReadOnly:
+			return saveOutcome{Already: true, Detail: h.Host + " is already read-only in " + from}
+		case b.Access == compiler.AccessReadWrite && !h.L4 && readsOnly(b.Allow) && h.Access == compiler.AccessReadOnly:
+			return saveOutcome{Already: true, Detail: h.Host + " already allows GET, HEAD and OPTIONS in " + from}
+		case b.Access == compiler.AccessReadWrite && h.Access == compiler.AccessReadWrite:
+			// A project entry replaces the base's, so it carries the base's
+			// lines and the new one.
+			if slices.Contains(b.Allow, h.Allow[0]) {
+				return saveOutcome{Already: true, Detail: h.Host + " already allows " + h.Allow[0] + " in " + from}
+			}
+			allow = append(append(allow, b.Allow...), h.Allow...)
+		default:
+			return saveOutcome{Detail: fmt.Sprintf("%s makes %s %s, and a project entry would replace that. Add %s to %s by hand, with the requests you still need", from, h.Host, b.Access, describe(h), projectName)}
 		}
-		if b.Host != h.Host || port != h.Port {
-			continue
-		}
-		if b.Access == h.Access && h.Access == compiler.AccessReadOnly {
-			return saveOutcome{Already: true, Detail: h.Host + " is already read-only in developer-default"}
-		}
-		return saveOutcome{Detail: fmt.Sprintf("developer-default makes %s %s, and a project entry would replace that. Add %s to %s by hand, with the requests you still need", h.Host, b.Access, describe(h), projectName)}
+	}
+	if allow == nil {
+		allow = h.Allow
 	}
 	entry := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	entry.Content = append(entry.Content, scalar("host"), scalar(h.Host))
@@ -238,15 +247,54 @@ func (p *projectFile) add(h savedHost) saveOutcome {
 		entry.Content = append(entry.Content, scalar("port"), &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: strconv.Itoa(h.Port)})
 	}
 	entry.Content = append(entry.Content, scalar("access"), scalar(h.Access))
-	if len(h.Allow) > 0 {
-		allow := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
-		for _, l := range h.Allow {
-			allow.Content = append(allow.Content, scalar(l))
+	if len(allow) > 0 {
+		lines := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		for _, l := range allow {
+			lines.Content = append(lines.Content, scalar(l))
 		}
-		entry.Content = append(entry.Content, scalar("allow"), allow)
+		entry.Content = append(entry.Content, scalar("allow"), lines)
 	}
 	seq.Content = append(seq.Content, entry)
+	if len(allow) > len(h.Allow) {
+		return saveOutcome{Saved: true, Detail: h.Host + ", read-write, developer-default's lines and " + h.Allow[0]}
+	}
 	return saveOutcome{Saved: true, Detail: h.Host + ", " + describe(h)}
+}
+
+// baseHost finds h's host and port in developer-default or in a stack the
+// project's folder selects, and names where it is from.
+func baseHost(dir string, h savedHost) (compiler.Host, string, bool) {
+	match := func(b compiler.Host) bool {
+		port := b.Port
+		if port == 0 {
+			port = 443
+		}
+		return b.Host == h.Host && port == h.Port
+	}
+	for _, b := range policies.DeveloperDefault().Hosts {
+		if match(b) {
+			return b, "developer-default", true
+		}
+	}
+	for _, st := range policies.DetectStacks(dir) {
+		for _, b := range st.Hosts {
+			if match(b) {
+				return b, "the " + st.Name + " stack", true
+			}
+		}
+	}
+	return compiler.Host{}, "", false
+}
+
+// readsOnly says whether allow lines open GET, HEAD and OPTIONS on every
+// path, as the read-only level does.
+func readsOnly(allow []string) bool {
+	for _, m := range []string{"GET", "HEAD", "OPTIONS"} {
+		if !slices.Contains(allow, m+" /**") {
+			return false
+		}
+	}
+	return true
 }
 
 // projectName is how messages name the project file.
@@ -403,7 +451,7 @@ func previewSave(e env, sb config.Sandbox, p openshell.Proposal, from string) (*
 			return nil, err
 		}
 	}
-	resolved, err := run.ResolveFree(tmp, "")
+	resolved, err := run.ResolveFreeAs(tmp, "", repo)
 	if err != nil {
 		return nil, err
 	}

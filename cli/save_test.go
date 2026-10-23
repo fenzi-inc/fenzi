@@ -57,7 +57,7 @@ func TestSaveKeepsCommentsInAStarterFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out := p.add(savedHost{Host: "github.com", Port: 443, Access: compiler.AccessReadOnly}); !out.Saved {
+	if out := p.add(savedHost{Host: "gitlab.com", Port: 443, Access: compiler.AccessReadOnly}); !out.Saved {
 		t.Fatalf("not saved: %+v", out)
 	}
 	if out := p.add(savedHost{Host: "api.example.com", Port: 8443, Access: compiler.AccessReadWrite, Allow: []string{"POST /v1/things"}}); !out.Saved {
@@ -74,7 +74,7 @@ func TestSaveKeepsCommentsInAStarterFile(t *testing.T) {
 		"#      - POST /repos/acme/web/pulls",
 		"# Extra paths inside the sandbox.",
 		"#   read_only: [/opt/fixtures]",
-		"  - host: github.com\n    access: read-only\n",
+		"  - host: gitlab.com\n    access: read-only\n",
 		"  - host: api.example.com\n    port: 8443\n    access: read-write\n    allow:\n      - POST /v1/things\n",
 	} {
 		if !strings.Contains(string(raw), want) {
@@ -137,12 +137,12 @@ func TestSaveIntoAFileOfComments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.add(savedHost{Host: "github.com", Port: 443, Access: compiler.AccessReadOnly})
+	p.add(savedHost{Host: "gitlab.com", Port: 443, Access: compiler.AccessReadOnly})
 	if err := p.write(); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(path)
-	if want := "# Hosts for the web app.\n# Ask Ana first.\n\nversion: 1\nhosts:\n  - host: github.com\n    access: read-only\n"; string(raw) != want {
+	if want := "# Hosts for the web app.\n# Ask Ana first.\n\nversion: 1\nhosts:\n  - host: gitlab.com\n    access: read-only\n"; string(raw) != want {
 		t.Errorf("got:\n%s", raw)
 	}
 }
@@ -161,7 +161,10 @@ func TestSaveRefusesABrokenFile(t *testing.T) {
 // the recorded requests, and a prover that passes.
 func saveFixture(t *testing.T) string {
 	t.Helper()
-	fakeRuntime(t, map[string]reply{"rule get": {out: mixedRules}}, proverWithin)
+	// git's draft for github.com, moved to a host developer-default does
+	// not list, since developer-default opens github.com for fetches.
+	rules := strings.NewReplacer("github.com", "gitlab.com", "github_com", "gitlab_com").Replace(mixedRules)
+	fakeRuntime(t, map[string]reply{"rule get": {out: rules}}, proverWithin)
 	repo := t.TempDir()
 	seedState(t, config.Sandbox{Name: "fenzi-web-1a2b", Agent: "claude", Repo: repo, Created: time.Now(), Running: true})
 	return repo
@@ -174,7 +177,7 @@ func TestApproveSaveWritesTheHost(t *testing.T) {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
 	out = strings.Join(strings.Fields(out), " ")
-	for _, want := range []string{"Approved", "Saved", "github.com, read-only", "lets any traffic through to github.com:443", "GET, HEAD, and OPTIONS", "Policy check", "inside the boundary", "developer-default (built in) + ./fenzi.yaml"} {
+	for _, want := range []string{"Approved", "Saved", "gitlab.com, read-only", "lets any traffic through to gitlab.com:443", "GET, HEAD, and OPTIONS", "Policy check", "inside the boundary", "developer-default (built in) + ./fenzi.yaml"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
@@ -183,7 +186,7 @@ func TestApproveSaveWritesTheHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(raw) != "version: 1\nhosts:\n  - host: github.com\n    access: read-only\n" {
+	if string(raw) != "version: 1\nhosts:\n  - host: gitlab.com\n    access: read-only\n" {
 		t.Errorf("file:\n%s", raw)
 	}
 
@@ -193,7 +196,7 @@ func TestApproveSaveWritesTheHost(t *testing.T) {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
 	raw, _ = os.ReadFile(filepath.Join(repo, "fenzi.yaml"))
-	if !strings.Contains(string(raw), "- host: github.com") || !strings.Contains(string(raw), "- host: www.example.com") {
+	if !strings.Contains(string(raw), "- host: gitlab.com") || !strings.Contains(string(raw), "- host: www.example.com") {
 		t.Errorf("file:\n%s", raw)
 	}
 }
@@ -264,9 +267,9 @@ func TestApproveSaveDryRunChangesNothing(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Preview of approve --save", "nothing is approved or written",
-		"fenzi.yaml, exists", "Adds  github.com, read-only",
+		"fenzi.yaml, exists", "Adds  gitlab.com, read-only",
 		"--- a/fenzi.yaml\n", "+++ b/fenzi.yaml\n", "@@ -3,3 +3,5 @@\n",
-		"      access: read-only\n    +  - host: github.com\n    +    access: read-only\n",
+		"      access: read-only\n    +  - host: gitlab.com\n    +    access: read-only\n",
 		"Policy check", "inside the boundary", "developer-default (built in) + ./fenzi.yaml",
 		"fenzi approve 59b83e6d --save",
 	} {
@@ -286,11 +289,11 @@ func TestApproveSaveDryRunChangesNothing(t *testing.T) {
 	if code != 0 || stderr != "" {
 		t.Fatalf("exit %d stderr %q", code, stderr)
 	}
-	after := before + "  - host: github.com\n    access: read-only\n"
-	if doc.File != path || !doc.Exists || doc.Before != before || doc.After != after || doc.Host != "github.com" || doc.Port != 443 || doc.Access != "read-only" || doc.Already || len(doc.Allow) != 0 || doc.Allow == nil {
+	after := before + "  - host: gitlab.com\n    access: read-only\n"
+	if doc.File != path || !doc.Exists || doc.Before != before || doc.After != after || doc.Host != "gitlab.com" || doc.Port != 443 || doc.Access != "read-only" || doc.Already || len(doc.Allow) != 0 || doc.Allow == nil {
 		t.Errorf("preview = %+v", doc)
 	}
-	if !strings.Contains(doc.Note, "lets any traffic through") || !strings.HasPrefix(doc.Diff, "--- a/fenzi.yaml\n+++ b/fenzi.yaml\n@@ -3,3 +3,5 @@\n") || !strings.HasSuffix(doc.Diff, "+  - host: github.com\n+    access: read-only\n") {
+	if !strings.Contains(doc.Note, "lets any traffic through") || !strings.HasPrefix(doc.Diff, "--- a/fenzi.yaml\n+++ b/fenzi.yaml\n@@ -3,3 +3,5 @@\n") || !strings.HasSuffix(doc.Diff, "+  - host: gitlab.com\n+    access: read-only\n") {
 		t.Errorf("note %q diff:\n%s", doc.Note, doc.Diff)
 	}
 	if want := (jsonSaveCheck{Passed: true, Result: "within_boundary", Checked: "developer-default (built in) + ./fenzi.yaml", Agent: "Claude Code"}); doc.Check != want {
@@ -317,7 +320,7 @@ func TestApproveSaveDryRunNewFileAndAlreadyThere(t *testing.T) {
 		t.Fatal("a dry run wrote fenzi.yaml")
 	}
 
-	if err := os.WriteFile(filepath.Join(repo, "fenzi.yaml"), []byte("version: 1\nhosts:\n  - host: github.com\n    access: read-only\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, "fenzi.yaml"), []byte("version: 1\nhosts:\n  - host: gitlab.com\n    access: read-only\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	doc = jsonSavePreview{}
@@ -378,7 +381,7 @@ func TestApproveSavePolicyFrom(t *testing.T) {
 	if doc.From != edited || doc.Before != "version: 1\n" || doc.After != text || !strings.Contains(doc.Diff, "+  # Docs the agent reads.\n") || !doc.Check.Passed {
 		t.Errorf("preview = %+v", doc)
 	}
-	if !strings.Contains(doc.Note, "does not list github.com, read-only") {
+	if !strings.Contains(doc.Note, "does not list gitlab.com, read-only") {
 		t.Errorf("note %q", doc.Note)
 	}
 	if raw, _ := os.ReadFile(path); string(raw) != "version: 1\n" || called(t, "rule approve") {
@@ -410,7 +413,7 @@ func TestApproveSavePolicyFromRefusesAFailingFile(t *testing.T) {
 	repo := t.TempDir()
 	seedState(t, config.Sandbox{Name: "fenzi-web-1a2b", Agent: "claude", Repo: repo, Created: time.Now(), Running: true})
 	edited := filepath.Join(t.TempDir(), "edited.yaml")
-	if err := os.WriteFile(edited, []byte("version: 1\nhosts:\n  - host: github.com\n    access: read-only\n"), 0o644); err != nil {
+	if err := os.WriteFile(edited, []byte("version: 1\nhosts:\n  - host: gitlab.com\n    access: read-only\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	out, code := runCLI(t, "", "approve", "59b83e6d", "--save", "--policy-from", edited, "--sandbox", "fenzi-web-1a2b")
@@ -446,5 +449,54 @@ func TestApproveSaveFlagsGoTogether(t *testing.T) {
 		if code != 1 || !strings.Contains(out, want) {
 			t.Errorf("%s: exit %d:\n%s", args, code, out)
 		}
+	}
+}
+
+// developer-default opens github.com for fetches with allow lines. A read is
+// already there; a write is saved with those lines, since the project's
+// entry replaces developer-default's.
+func TestSaveOnAHostDeveloperDefaultOpensForFetches(t *testing.T) {
+	p, err := loadProject(filepath.Join(t.TempDir(), "fenzi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := p.add(savedHost{Host: "github.com", Port: 443, Access: compiler.AccessReadOnly, Widened: true}); out.Saved || !out.Already {
+		t.Errorf("read: %+v", out)
+	}
+	if out := p.add(savedHost{Host: "github.com", Port: 443, Access: compiler.AccessReadOnly, L4: true}); out.Saved || out.Already || !strings.Contains(out.Detail, "by hand") {
+		t.Errorf("L4: %+v", out)
+	}
+	if out := p.add(savedHost{Host: "github.com", Port: 443, Access: compiler.AccessReadWrite, Allow: []string{"POST /**/git-upload-pack"}}); out.Saved || !out.Already {
+		t.Errorf("a line developer-default has: %+v", out)
+	}
+	out := p.add(savedHost{Host: "github.com", Port: 443, Access: compiler.AccessReadWrite, Allow: []string{"POST /acme/web.git/git-receive-pack"}})
+	if !out.Saved {
+		t.Fatalf("push: %+v", out)
+	}
+	raw, err := p.bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "version: 1\nhosts:\n  - host: github.com\n    access: read-write\n    allow:\n      - GET /**\n      - HEAD /**\n      - OPTIONS /**\n      - POST /**/git-upload-pack\n      - POST /acme/web.git/git-receive-pack\n"
+	if string(raw) != want {
+		t.Errorf("file:\n%s", raw)
+	}
+	if err := checkProject(raw); err != nil {
+		t.Error(err)
+	}
+}
+
+// A host a stack opens for the project's folder is already there.
+func TestSaveOnAStackHost(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := loadProject(filepath.Join(dir, "fenzi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := p.add(savedHost{Host: "proxy.golang.org", Port: 443, Access: compiler.AccessReadOnly}); out.Saved || !out.Already || !strings.Contains(out.Detail, "the go stack") {
+		t.Errorf("%+v", out)
 	}
 }

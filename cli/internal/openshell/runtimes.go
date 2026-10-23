@@ -151,6 +151,23 @@ func diagnose(rts []Runtime, cfg gatewayConfig) Diagnosis {
 	return d
 }
 
+// ToStart is the stopped runtime setup starts when none is running. colima
+// comes first when it is installed: it starts with no window and no licence
+// prompt, Fenzi has run on it, and `colima start` points the docker CLI at
+// colima, so images build where the gateway starts sandboxes. Otherwise the
+// first installed one, in the order Runtimes lists them.
+func (d Diagnosis) ToStart() (Runtime, bool) {
+	if len(d.Running) > 0 || len(d.Stopped) == 0 {
+		return Runtime{}, false
+	}
+	for _, r := range d.Stopped {
+		if r.Name == "colima" {
+			return r, true
+		}
+	}
+	return d.Stopped[0], true
+}
+
 // Summary is one line for doctor and for the note above setup's choices.
 func (d Diagnosis) Summary() string {
 	switch {

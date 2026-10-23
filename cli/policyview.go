@@ -67,6 +67,9 @@ type jsonPolicyHost struct {
 	// Project marks a host this folder's fenzi.yaml lists, which
 	// fenzi policy host can change or remove.
 	Project bool `json:"project,omitempty"`
+	// Stack names the stack a host From "policy" came with, such as "go"
+	// for proxy.golang.org in a folder with a go.mod. Free plan only.
+	Stack string `json:"stack,omitempty"`
 	// Server names the local MCP server for a host From "mcp".
 	Server string `json:"server,omitempty"`
 	// Secret is the variable whose stored value the sandbox puts on requests
@@ -148,9 +151,15 @@ func policyView(resolved run.Resolved, entry agents.Entry) (*jsonPolicyView, err
 
 	// Who asked for each host: the document first, then the agent's own
 	// needs, then the hosts local MCP servers call.
+	stackOf := map[string]string{}
+	for _, st := range resolved.Stacks {
+		for _, h := range st.Hosts {
+			stackOf[hostKey(h.Host, 443)] = st.Name
+		}
+	}
 	from := map[string]jsonPolicyHost{}
 	for _, h := range d.Hosts {
-		from[hostKey(h.Host, h.Port)] = jsonPolicyHost{From: "policy"}
+		from[hostKey(h.Host, h.Port)] = jsonPolicyHost{From: "policy", Stack: stackOf[hostKey(h.Host, h.Port)]}
 	}
 	for _, h := range entry.Hosts {
 		port := h.Port
@@ -295,6 +304,9 @@ func markProject(v *jsonPolicyView, project *compiler.Document) {
 	}
 	for i := range v.Hosts {
 		v.Hosts[i].Project = hosts[hostKey(v.Hosts[i].Host, v.Hosts[i].Port)]
+		if v.Hosts[i].Project {
+			v.Hosts[i].Stack = ""
+		}
 	}
 	paths := map[string]bool{}
 	for _, p := range append(append([]string{}, project.Paths.ReadOnly...), project.Paths.ReadWrite...) {

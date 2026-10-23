@@ -34,7 +34,8 @@ hosts:
       - POST /v1/oauth/token
 # Documented in code.claude.com/docs/en/env-vars: turns off auto-updates,
 # telemetry, error reporting, and the release notes fetch from
-# raw.githubusercontent.com, which would otherwise file a request every run.
+# raw.githubusercontent.com. developer-default reads that host; the other
+# calls would file a request every run.
 env:
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
 # code.claude.com/docs/en/cli-reference: "Append custom text to the end of the

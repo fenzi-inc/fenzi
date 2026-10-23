@@ -5,6 +5,24 @@ workspace: read-write
 hosts:
   - host: api.github.com
     access: read-only
+  # git over HTTPS: fetch and clone. The rule is upstream's own
+  # (providers/github.yaml); push, git-receive-pack, stays refused.
+  - host: github.com
+    access: read-write
+    allow:
+      - GET /**
+      - HEAD /**
+      - OPTIONS /**
+      - POST /**/git-upload-pack
+  # Archives, raw files and release downloads.
+  - host: codeload.github.com
+    access: read-only
+  - host: raw.githubusercontent.com
+    access: read-only
+  - host: objects.githubusercontent.com
+    access: read-only
+  - host: release-assets.githubusercontent.com
+    access: read-only
   - host: registry.npmjs.org
     access: read-only
   - host: pypi.org

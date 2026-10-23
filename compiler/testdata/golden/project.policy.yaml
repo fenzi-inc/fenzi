@@ -49,10 +49,54 @@ network_policies:
         allow_encoded_slash: true
     binaries:
       - path: /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
+  codeload_github_com:
+    name: codeload.github.com
+    endpoints:
+      - host: codeload.github.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-only
+        allow_encoded_slash: true
+    binaries:
+      - path: /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
   files_pythonhosted_org:
     name: files.pythonhosted.org
     endpoints:
       - host: files.pythonhosted.org
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-only
+        allow_encoded_slash: true
+    binaries:
+      - path: /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
+  github_com:
+    name: github.com
+    endpoints:
+      - host: github.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: GET
+              path: /**
+          - allow:
+              method: HEAD
+              path: /**
+          - allow:
+              method: OPTIONS
+              path: /**
+          - allow:
+              method: POST
+              path: /**/git-upload-pack
+    binaries:
+      - path: /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
+  objects_githubusercontent_com:
+    name: objects.githubusercontent.com
+    endpoints:
+      - host: objects.githubusercontent.com
         port: 443
         protocol: rest
         enforcement: enforce
@@ -71,10 +115,32 @@ network_policies:
         allow_encoded_slash: true
     binaries:
       - path: /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
+  raw_githubusercontent_com:
+    name: raw.githubusercontent.com
+    endpoints:
+      - host: raw.githubusercontent.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-only
+        allow_encoded_slash: true
+    binaries:
+      - path: /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
   registry_npmjs_org:
     name: registry.npmjs.org
     endpoints:
       - host: registry.npmjs.org
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-only
+        allow_encoded_slash: true
+    binaries:
+      - path: /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
+  release_assets_githubusercontent_com:
+    name: release-assets.githubusercontent.com
+    endpoints:
+      - host: release-assets.githubusercontent.com
         port: 443
         protocol: rest
         enforcement: enforce

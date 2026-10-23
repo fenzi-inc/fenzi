@@ -120,7 +120,7 @@ The compiler does not start a process and does not import the CLI. The policy la
 
 ### `policies/`
 
-`developer-default.yaml` is the policy a Free machine uses when the folder has no `fenzi.yaml`. The workspace is read-write. A few hosts, including the GitHub API and the package registries, are read-only. Anything else waits for a person. The compiler also adds the model hosts for the agent you run. [Default access](https://fenzi.dev/docs/default-access) is the readable form of the result.
+`developer-default.yaml` is the policy a Free machine uses when the folder has no `fenzi.yaml`. The workspace is read-write. GitHub, npm and PyPI are read-only, and `git` can clone and fetch from GitHub but not push. `stacks.go` adds the package hosts of other languages, read-only, when the project has their files: `go.mod`, `Cargo.toml`, `Gemfile` and the like. Anything else waits for a person. The compiler also adds the model hosts for the agent you run. [Default access](https://fenzi.dev/docs/default-access) is the readable form of the result.
 
 ### `agents/`
 

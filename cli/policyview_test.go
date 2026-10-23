@@ -169,7 +169,7 @@ func TestPolicyViewWithTheBuiltInPolicyAlone(t *testing.T) {
 	for _, h := range v.Hosts {
 		names = append(names, h.Host+":"+h.From)
 	}
-	want := "api.github.com:policy files.pythonhosted.org:policy platform.claude.com:agent pypi.org:policy registry.npmjs.org:policy"
+	want := "api.github.com:policy codeload.github.com:policy files.pythonhosted.org:policy github.com:policy objects.githubusercontent.com:policy platform.claude.com:agent pypi.org:policy raw.githubusercontent.com:policy registry.npmjs.org:policy release-assets.githubusercontent.com:policy"
 	if got := strings.Join(names, " "); got != want {
 		t.Errorf("hosts = %s", got)
 	}

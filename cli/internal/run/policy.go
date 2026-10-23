@@ -31,6 +31,10 @@ type Resolved struct {
 	// MemberRefused names this machine's own MCP servers a team's policy
 	// left out, each with why (WithMemberMCP). Nil off a team.
 	MemberRefused map[string]string
+	// Stacks are the package hosts the Free plan added for the files in
+	// the folder (policies.DetectStacks). Nil on a team: its policy is the
+	// team's alone.
+	Stacks []policies.Stack
 }
 
 // MachineMCP returns the path of this machine's MCP file, which holds the
@@ -68,11 +72,23 @@ func LoadMachineMCP() (*compiler.Document, error) {
 }
 
 // ResolveFree layers ./fenzi.yaml (or the file given) over developer-default,
-// with the machine's MCP servers in between, so a project can add servers
-// and narrow the machine's.
+// with the stacks the folder's files select and the machine's MCP servers in
+// between, so a project can add servers and narrow the machine's, and
+// replace a stack's host.
 func ResolveFree(repo, file string) (Resolved, error) {
+	return ResolveFreeAs(repo, file, repo)
+}
+
+// ResolveFreeAs is ResolveFree with the stacks of another folder, for a
+// preview that writes the project file somewhere else.
+func ResolveFreeAs(repo, file, stacksFrom string) (Resolved, error) {
 	base := policies.DeveloperDefault()
 	sources := "developer-default (built in)"
+	stacks := policies.DetectStacks(stacksFrom)
+	if len(stacks) > 0 {
+		base = policies.WithStacks(base, stacks)
+		sources += " + stacks " + policies.StackNames(stacks)
+	}
 	machine, err := LoadMachineMCP()
 	if err != nil {
 		return Resolved{}, err
@@ -86,7 +102,7 @@ func ResolveFree(repo, file string) (Resolved, error) {
 	if file == "" {
 		file = filepath.Join(repo, ProjectFile)
 		if _, err := os.Stat(file); errors.Is(err, fs.ErrNotExist) {
-			return Resolved{Doc: base, Sources: sources}, nil
+			return Resolved{Doc: base, Sources: sources, Stacks: stacks}, nil
 		}
 	}
 	raw, err := os.ReadFile(file)
@@ -101,7 +117,7 @@ func ResolveFree(repo, file string) (Resolved, error) {
 	if err != nil {
 		return Resolved{}, fmt.Errorf("%s: %w", file, err)
 	}
-	return Resolved{Doc: merged, Sources: sources + " + " + relTo(repo, file)}, nil
+	return Resolved{Doc: merged, Sources: sources + " + " + relTo(repo, file), Stacks: stacks}, nil
 }
 
 // WithTeamBoundary adds the boundary document from a team's signed bundle.

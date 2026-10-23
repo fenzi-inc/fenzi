@@ -27,8 +27,10 @@ const providerClaude = `
 // trailing newline, with one added _provider_fenzi_claude entry under
 // network_policies. allow_encoded_slash on the read-only rules is printed
 // right after access, as OpenShell 0.1.2 printed it on 17 October 2026.
-// The rest is compiler/testdata/golden/default.policy.yaml
-// as written; TestEffectiveFixtureIsTheGoldenPolicy keeps the two together.
+// The rest is testdata/default-0.1.2.policy.yaml as written, the golden
+// policy of developer-default when it was recorded, kept here because the
+// golden file moved on with developer-default; TestEffectiveFixtureIsTheGoldenPolicy
+// keeps the two together.
 const effectiveDefault = `version: 1
 filesystem_policy:
   include_workdir: false
@@ -98,7 +100,7 @@ network_policies:
 
 func goldenDefault(t *testing.T) []byte {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "..", "..", "compiler", "testdata", "golden", "default.policy.yaml"))
+	b, err := os.ReadFile(filepath.Join("testdata", "default-0.1.2.policy.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
