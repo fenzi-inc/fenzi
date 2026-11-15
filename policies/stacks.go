@@ -23,16 +23,26 @@ type Stack struct {
 	Hosts []compiler.Host
 }
 
-// stacks are read-only on purpose: installing reads, publishing writes.
+// stacks are read-only on purpose: installing reads, publishing writes. The
+// one write is Composer's security-advisory lookup, below.
 var stacks = []Stack{
 	{Name: "go", Files: []string{"go.mod"}, Hosts: readOnly("proxy.golang.org", "sum.golang.org")},
 	{Name: "rust", Files: []string{"Cargo.toml"}, Hosts: readOnly("index.crates.io", "static.crates.io", "crates.io")},
 	{Name: "ruby", Files: []string{"Gemfile"}, Hosts: readOnly("rubygems.org", "index.rubygems.org")},
-	{Name: "php", Files: []string{"composer.json"}, Hosts: readOnly("repo.packagist.org")},
+	// Composer 2.5's `composer audit` posts the project's package names to
+	// the api-url repo.packagist.org/packages.json names, read 25 October
+	// 2026 with Composer's source (Repository/ComposerRepository.php). The
+	// same file names notify-batch, packagist.org/downloads/, where Composer
+	// posts install statistics and ignores a failure; that stays closed.
+	{Name: "php", Files: []string{"composer.json"}, Hosts: append(readOnly("repo.packagist.org"),
+		compiler.Host{Host: "packagist.org", Access: compiler.AccessReadWrite, Allow: []string{advisoryPost}})},
 	{Name: "java", Files: []string{"pom.xml", "build.gradle", "build.gradle.kts"}, Hosts: readOnly("repo.maven.apache.org", "plugins.gradle.org")},
 	{Name: "dotnet", Files: []string{"*.csproj", "*.fsproj", "*.sln"}, Hosts: readOnly("api.nuget.org")},
 	{Name: "yarn", Files: []string{"yarn.lock"}, Hosts: readOnly("registry.yarnpkg.com")},
 }
+
+// advisoryPost is the only write a stack allows.
+const advisoryPost = "POST /api/security-advisories/"
 
 func readOnly(hosts ...string) []compiler.Host {
 	out := make([]compiler.Host, len(hosts))
@@ -58,8 +68,35 @@ var skipDirs = map[string]bool{"node_modules": true, "vendor": true, "target": t
 
 // DetectStacks returns the stacks whose files are in dir or in a folder one
 // level down, in the order of Stacks. A folder it cannot read adds nothing.
+// The home folder is never read: it is not a project, and on macOS listing
+// its Desktop, Documents and Downloads folders makes the system ask the
+// person about each one (seen on 24 October 2026 from the Mac app's MCP
+// Servers screen, which runs fenzi mcp list in the home folder while no
+// project is chosen).
 func DetectStacks(dir string) []Stack {
+	home, _ := os.UserHomeDir()
+	return detectStacks(dir, home)
+}
+
+func detectStacks(dir, home string) []Stack {
+	names := folderFiles(dir, home)
+	var out []Stack
+	for _, s := range Stacks() {
+		if matchFiles(s.Files, names) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// folderFiles names the files in dir and in the folders one level down,
+// leaving out hidden folders and skipDirs. Nil for no folder or the home
+// folder.
+func folderFiles(dir, home string) map[string]bool {
 	if dir == "" {
+		return nil
+	}
+	if home != "" && filepath.Clean(dir) == filepath.Clean(home) {
 		return nil
 	}
 	names := map[string]bool{}
@@ -82,17 +119,13 @@ func DetectStacks(dir string) []Stack {
 			}
 		}
 	}
-	var out []Stack
-	for _, s := range Stacks() {
-		if s.matches(names) {
-			out = append(out, s)
-		}
-	}
-	return out
+	return names
 }
 
-func (s Stack) matches(names map[string]bool) bool {
-	for _, f := range s.Files {
+// matchFiles reports whether any of files is in names; "*.csproj" matches
+// by extension.
+func matchFiles(files []string, names map[string]bool) bool {
+	for _, f := range files {
 		if ext, ok := strings.CutPrefix(f, "*"); ok {
 			for n := range names {
 				if strings.HasSuffix(n, ext) {

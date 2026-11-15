@@ -48,3 +48,13 @@ func TestRecordCarriesNoSecrets(t *testing.T) {
 		}
 	}
 }
+
+// From OpenShell 0.1.8 supervisor events name the sandbox under
+// device.container (the release note for #5048). Synthetic, like the events
+// above: only the place of the id is taken from upstream.
+func TestSandboxFromDeviceContainer(t *testing.T) {
+	r, err := FromOCSF([]byte(`{"time":1794498703934,"class_name":"HTTP Activity","action":"Allowed","device":{"container":{"uid":"c9","name":"fenzi-web-4f2a"}},"http_request":{"http_method":"GET","url":{"url_string":"https://www.iana.org/"}}}`), "")
+	if err != nil || r.Sandbox != "c9" || r.Destination != "GET www.iana.org/" {
+		t.Errorf("%v, %+v", err, r)
+	}
+}

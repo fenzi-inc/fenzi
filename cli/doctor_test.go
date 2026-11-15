@@ -1,7 +1,11 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"fenzi/cli/internal/engine"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -79,7 +83,7 @@ func TestDoctorNotesAnOlderPatch(t *testing.T) {
 	if c.Status != "ok" {
 		t.Errorf("an older patch is a note, not a failure: %+v", c)
 	}
-	for _, want := range []string{"0.1.0, older than " + openshell.InstallVersion, "run fenzi setup to upgrade", "restarts the gateway. No sandbox is running, so nothing is interrupted."} {
+	for _, want := range []string{"0.1.0, older than " + openshell.InstallVersion, "run fenzi setup to upgrade", "restarts the gateway. There is no sandbox on this machine, so nothing is lost."} {
 		if !strings.Contains(c.Detail, want) {
 			t.Errorf("missing %q in %q", want, c.Detail)
 		}
@@ -89,5 +93,59 @@ func TestDoctorNotesAnOlderPatch(t *testing.T) {
 	}
 	if c := runtime(openshell.InstallVersion); c.Status != "ok" || c.Detail != openshell.InstallVersion {
 		t.Errorf("the installed release is InstallVersion: %+v", c)
+	}
+}
+
+// A docker on PATH says nothing about the runtime behind it: doctor asks the
+// builder where it will build, and fails with docker's own words when
+// nothing answers. Seen on 15 November 2026: the docker CLI's context
+// pointed at Docker Desktop, which was not running, and doctor said docker
+// was available.
+func TestDoctorAsksTheImageBuilder(t *testing.T) {
+	check := func() jsonCheck {
+		t.Helper()
+		fakeRuntime(t, doctorReplies(t, ""), "")
+		// A docker that is only a name on PATH.
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "docker"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		var doc jsonDoctor
+		runJSON(t, &doc, "doctor", "--json")
+		for _, c := range doc.Checks {
+			if c.Name == "Image builds" {
+				return c
+			}
+		}
+		t.Fatalf("no Image builds check: %+v", doc.Checks)
+		return jsonCheck{}
+	}
+	oldSocket, oldAnswers := gatewaySocket, builderAnswers
+	t.Cleanup(func() { gatewaySocket, builderAnswers = oldSocket, oldAnswers })
+
+	var asked engine.Builder
+	gatewaySocket = func() string { return "/Users/you/.colima/default/docker.sock" }
+	builderAnswers = func(_ context.Context, b engine.Builder) error { asked = b; return nil }
+	if c := check(); c.Status != "ok" || c.Detail != "docker builds on the gateway's socket, /Users/you/.colima/default/docker.sock" {
+		t.Errorf("the gateway's socket answers: %+v", c)
+	}
+	if asked.Bin != "docker" || asked.Socket != "/Users/you/.colima/default/docker.sock" {
+		t.Errorf("asked %+v", asked)
+	}
+
+	builderAnswers = func(context.Context, engine.Builder) error {
+		return errors.New("Cannot connect to the Docker daemon at unix:///Users/you/.colima/default/docker.sock. Is the docker daemon running?")
+	}
+	c := check()
+	if c.Status != "fail" || !strings.Contains(c.Detail, "docker does not answer on the gateway's socket, /Users/you/.colima/default/docker.sock: Cannot connect to the Docker daemon") || !strings.HasSuffix(c.Detail, "The container runtime behind it is not running.") || strings.Contains(c.Detail, "fenzi ") {
+		t.Errorf("nothing answers: %+v", c)
+	}
+
+	// No socket in the gateway's config: docker's own context, and the old words.
+	gatewaySocket = func() string { return "" }
+	builderAnswers = func(context.Context, engine.Builder) error { return nil }
+	if c := check(); c.Status != "ok" || c.Detail != "docker is available" {
+		t.Errorf("no socket named: %+v", c)
 	}
 }

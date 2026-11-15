@@ -124,7 +124,7 @@ func TestDefaultFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := claude.CommandLine(nil); !reflect.DeepEqual(got, []string{"claude", "--permission-mode", "manual"}) {
+	if got := claude.CommandLine(nil); !reflect.DeepEqual(got, []string{"claude", "--permission-mode", "bypassPermissions"}) {
 		t.Errorf("default: %q", got)
 	}
 	for _, args := range [][]string{{"--permission-mode", "auto"}, {"--permission-mode=auto"}} {
@@ -360,7 +360,7 @@ func TestHeadlessKeepsTheUsersFlag(t *testing.T) {
 		t.Errorf("the catalog's flag went in beside the user's: %q", got)
 	}
 	// The interactive command is unchanged.
-	if argv := e.Argv(nil); argv[1] != "--permission-mode" || argv[2] != "manual" {
+	if argv := e.Argv(nil); argv[1] != "--permission-mode" || argv[2] != "bypassPermissions" {
 		t.Errorf("Argv = %q", argv[:3])
 	}
 }
@@ -384,6 +384,17 @@ func TestCleanTask(t *testing.T) {
 	}
 	if _, err := CleanTask(strings.Repeat("x", MaxTask)); err != nil {
 		t.Error(err)
+	}
+	// OpenShell 0.1.8 takes 32768 bytes in one argument, the dash's newline
+	// included.
+	if MaxTask != 32768 {
+		t.Errorf("MaxTask is %d", MaxTask)
+	}
+	if _, err := CleanTask("-" + strings.Repeat("x", MaxTask-1)); err == nil {
+		t.Error("a task that reaches the limit with its newline passed")
+	}
+	if got, err := CleanTask("-" + strings.Repeat("x", MaxTask-2)); err != nil || len(got) != MaxTask {
+		t.Errorf("%d bytes, %v", len(got), err)
 	}
 }
 
@@ -413,5 +424,36 @@ func TestHeadlessCheck(t *testing.T) {
 		if err := h.check(); err != nil {
 			t.Errorf("%+v: %v", h, err)
 		}
+	}
+}
+
+func TestToolsImage(t *testing.T) {
+	claude, err := Get("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tag, df := claude.ToolsImage([]string{"php", "go"}, []string{"php-cli", "composer"}, []string{"golang-go"})
+	if !strings.HasPrefix(tag, claude.Tag()+"-php-go-") || len(tag) != len(claude.Tag()+"-php-go-")+6 {
+		t.Errorf("tag %q", tag)
+	}
+	for _, want := range []string{
+		"FROM " + claude.Tag() + "\n",
+		"USER root\n",
+		"bookworm-backports main",
+		"apt-get install -y --no-install-recommends php-cli composer \\\n",
+		"apt-get install -y --no-install-recommends -t bookworm-backports golang-go \\\n",
+		"USER sandbox\n",
+	} {
+		if !strings.Contains(string(df), want) {
+			t.Errorf("Dockerfile lacks %q:\n%s", want, df)
+		}
+	}
+	// Another package list is another image.
+	other, df2 := claude.ToolsImage([]string{"php", "go"}, []string{"php-cli"}, []string{"golang-go"})
+	if other == tag {
+		t.Error("a different recipe kept the tag")
+	}
+	if _, df3 := claude.ToolsImage([]string{"php"}, []string{"php-cli"}, nil); strings.Contains(string(df3), "backports") || !strings.Contains(string(df2), "backports") {
+		t.Errorf("backports only when asked:\n%s", df3)
 	}
 }

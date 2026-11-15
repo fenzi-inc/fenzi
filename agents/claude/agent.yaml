@@ -51,22 +51,30 @@ resume: [--continue]
 # continue" and exits 1, and on a first start it can take longer than the
 # time fallback allows; so connect looks for the file first.
 resume_when: ls "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(pwd | sed 's/[^A-Za-z0-9]/-/g')"/*.jsonl >/dev/null 2>&1
-# claude --help in 2.1.288 lists "auto" and "manual" among the modes. In auto,
-# Claude's own check can refuse a command before it reaches the sandbox; in
-# manual a person approves each action and the policy decides the rest.
-# `fenzi run claude --permission-mode auto` still picks auto.
+# claude --help in 2.1.288 lists "auto", "manual" and "bypassPermissions"
+# among the modes. In auto, Claude's own check can refuse a command before it
+# reaches the sandbox, so the log has no line and no request is filed; in
+# manual Claude asks before every command. In bypassPermissions Claude asks
+# nothing and refuses nothing itself, and the sandbox's policy decides every
+# command. Run interactively on 25 October 2026 as the sandbox user: edits,
+# tests and commits ran without a question, a refused host was refused by
+# the sandbox and the agent filed its request, and a write to /etc was
+# refused. Claude asks once per sandbox to accept the mode, with "No, exit"
+# preselected; the answer is kept in the sandbox's ~/.claude/settings.json,
+# so the notes below say to accept it.
+# `fenzi run claude --permission-mode manual` asks before each command.
 default_flags:
-  --permission-mode: manual
+  --permission-mode: bypassPermissions
 # Claude asks whether to use the API key it finds in the environment, with No
 # marked as recommended. The value is the sandbox placeholder; No leaves Claude
 # without a key, which is what a subscription user wants before /login.
-start_note: "Claude may ask whether to use the API key it found. Choose Yes for the key you stored: Claude sees a placeholder, not your key. To use your Claude subscription instead, choose No, then type /login, or start with fenzi run --sign-in claude."
+start_note: "Claude may ask whether to use the API key it found. Choose Yes for the key you stored: Claude sees a placeholder, not your key. To use your Claude subscription instead, choose No, then type /login, or start with fenzi run --sign-in claude. Claude then warns that it will not ask before commands: choose Yes, I accept. The sandbox's policy decides what every command can reach."
 # With no key stored, run starts Claude Code without a provider and the model
 # API rule is compiled into the sandbox's policy, in the same form. Claude
 # then asks how to sign in; a subscription sign-in posts its code to
 # platform.claude.com (hosts above). The token is kept in ~/.claude inside the
 # sandbox, outside the project copy, and goes when the sandbox is deleted.
-sign_in_note: "Claude asks you to sign in. Choose your Claude subscription and paste back the code your browser shows. To use a key instead, run fenzi key set claude, then fenzi run without --sign-in."
+sign_in_note: "Claude asks you to sign in. Choose your Claude subscription and paste back the code your browser shows. To use a key instead, run fenzi key set claude, then fenzi run without --sign-in. Claude also warns that it will not ask before commands: choose Yes, I accept. The sandbox's policy decides what every command can reach."
 # fenzi run --headless. `claude --help` in 2.1.288: "-p, --print  Print
 # response and exit"; the prompt is the last argument. In -p mode nobody
 # answers Claude's own prompts, so manual would refuse every tool; with

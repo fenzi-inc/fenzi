@@ -50,7 +50,12 @@ func (r Record) What() string {
 }
 
 // ocsf holds the OCSF fields the contract reads. Which of them OpenShell
-// fills is not documented; missing fields stay empty.
+// fills is not documented; missing fields stay empty. The sandbox was the
+// top-level container.uid until OpenShell 0.1.8, whose release note moves it
+// to device.container.uid for supervisor events (to pass OCSF 1.8.0
+// validation); both are read. No JSONL file was read from a 0.1.8 sandbox:
+// on the Docker driver the supervisor runs in its own container there, and
+// the file was not found (12 November 2026).
 type ocsf struct {
 	Time      json.Number `json:"time"`
 	ClassName string      `json:"class_name"`
@@ -58,6 +63,11 @@ type ocsf struct {
 	Container struct {
 		UID string `json:"uid"`
 	} `json:"container"`
+	Device struct {
+		Container struct {
+			UID string `json:"uid"`
+		} `json:"container"`
+	} `json:"device"`
 	DstEndpoint struct {
 		Domain   string      `json:"domain"`
 		Hostname string      `json:"hostname"`
@@ -89,7 +99,7 @@ func FromOCSF(line []byte, sandbox string) (Record, error) {
 		return Record{}, err
 	}
 	r := Record{
-		Sandbox: firstNonEmpty(sandbox, e.Container.UID),
+		Sandbox: firstNonEmpty(sandbox, e.Container.UID, e.Device.Container.UID),
 		Class:   e.ClassName,
 		Action:  e.Action,
 		Process: e.Actor.Process.Name,

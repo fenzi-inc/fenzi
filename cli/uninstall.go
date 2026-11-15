@@ -407,7 +407,9 @@ func removeAgentImages(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, nil // no Docker or Podman: no images
 	}
-	out, err := exec.CommandContext(ctx, b.Bin, "images", "--format", "{{.Repository}}:{{.Tag}}").Output()
+	// Where fenzi built them: on the gateway's socket when its config names one.
+	b.Socket = gatewaySocket()
+	out, err := b.Command(ctx, "images", "--format", "{{.Repository}}:{{.Tag}}").Output()
 	if err != nil {
 		return nil, fmt.Errorf("could not list the images: %w", err)
 	}
@@ -420,7 +422,7 @@ func removeAgentImages(ctx context.Context) ([]string, error) {
 	if len(tags) == 0 {
 		return nil, nil
 	}
-	if msg, err := exec.CommandContext(ctx, b.Bin, append([]string{"rmi", "--force"}, tags...)...).CombinedOutput(); err != nil {
+	if msg, err := b.Command(ctx, append([]string{"rmi", "--force"}, tags...)...).CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("could not delete the images: %s", strings.TrimSpace(string(msg)))
 	}
 	return tags, nil

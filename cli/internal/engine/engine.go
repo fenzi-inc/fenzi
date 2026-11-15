@@ -8,13 +8,83 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type Builder struct {
 	Bin string
 	Out io.Writer
+	// Socket is the Docker socket the gateway starts sandboxes from, when its
+	// config names one. docker is then run with DOCKER_HOST set to it, so an
+	// image lands where the gateway looks for it, whatever context the
+	// docker CLI is on. Recorded on 12 and 15 November 2026 with docker
+	// 29.2.1: the CLI's context pointed at a runtime that was not running,
+	// the gateway's config named colima's socket, and with DOCKER_HOST set
+	// to that socket the build landed where the gateway started the sandbox
+	// from it. With DOCKER_CONTEXT set as well, DOCKER_HOST still won there;
+	// Docker's reference says the opposite, so the variable is taken out.
+	// Podman's way to name a socket was not recorded, so podman keeps its
+	// own default.
+	Socket string
+}
+
+// Command is the builder's CLI with args, pointed at Socket when there is one.
+func (b Builder) Command(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, b.Bin, args...)
+	if b.Socket == "" || b.Bin != "docker" {
+		return cmd
+	}
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "DOCKER_HOST=") && !strings.HasPrefix(kv, "DOCKER_CONTEXT=") {
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
+	cmd.Env = append(cmd.Env, "DOCKER_HOST=unix://"+b.Socket)
+	return cmd
+}
+
+// pingWait bounds Ping: a docker CLI whose socket has nobody behind it can
+// wait for a minute and more (seen on 15 November 2026).
+var pingWait = 5 * time.Second
+
+// Ping reports whether docker's daemon answers where the builder will
+// build, with docker's own words when it does not. It lists the images of
+// one name, which needs the daemon and changes nothing. Recorded on 15
+// November 2026 with docker 29.2.1: exit 0 on a running runtime; exit 1 and
+// "failed to connect to the docker API at unix://…; check if the path is
+// correct and if the daemon is running: …" for a socket that is not there;
+// exit 1 and "request returned 500 Internal Server Error for API route and
+// version …" for Docker Desktop's socket with Docker Desktop stopped.
+// `docker version --format` was not used: with a socket path too long for a
+// unix socket it crashed instead of answering. Podman is not asked: what it
+// prints with no service was not recorded.
+func (b Builder) Ping(ctx context.Context) error {
+	if b.Bin != "docker" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, pingWait)
+	defer cancel()
+	out, err := b.Command(ctx, "image", "ls", "-q", "fenzi/claude").CombinedOutput()
+	switch {
+	case ctx.Err() != nil:
+		return fmt.Errorf("no answer in %s", pingWait)
+	case err != nil:
+		return errors.New(firstLine(string(out), err.Error()))
+	}
+	return nil
+}
+
+// firstLine is the first line of s that says something, or fallback.
+func firstLine(s, fallback string) string {
+	for _, l := range strings.Split(s, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			return l
+		}
+	}
+	return fallback
 }
 
 // lookPath finds a builder on PATH; tests replace it.
@@ -29,10 +99,7 @@ func Detect(out io.Writer) (Builder, error) { return DetectFor(out, "") }
 // keeps docker first. When the preferred one is not installed, the other is
 // used, as before.
 //
-// Pointing the builder at the socket the gateway uses (for example colima's,
-// from socket_path) is not done: how docker and podman would be pointed at it
-// has not been recorded against a gateway, so the builder uses its own
-// default context.
+// The caller sets Socket when the gateway's config names one.
 func DetectFor(out io.Writer, driver string) (Builder, error) {
 	order := []string{"docker", "podman"}
 	if driver == "podman" {
@@ -67,13 +134,13 @@ func Driver(names []string) string {
 }
 
 func (b Builder) Exists(ctx context.Context, tag string) bool {
-	return exec.CommandContext(ctx, b.Bin, "image", "inspect", tag).Run() == nil
+	return b.Command(ctx, "image", "inspect", tag).Run() == nil
 }
 
 // Build builds from a Dockerfile on stdin, with no build context. Our
 // Dockerfiles copy nothing from the host.
 func (b Builder) Build(ctx context.Context, tag string, dockerfile []byte) error {
-	cmd := exec.CommandContext(ctx, b.Bin, "build", "-t", tag, "-")
+	cmd := b.Command(ctx, "build", "-t", tag, "-")
 	cmd.Stdin = bytes.NewReader(dockerfile)
 	cmd.Stdout = b.Out
 	cmd.Stderr = b.Out

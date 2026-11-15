@@ -18,7 +18,8 @@ func gitRepo(t *testing.T) (string, func(args ...string) string) {
 		t.Skip("git is not installed")
 	}
 	cfg := filepath.Join(t.TempDir(), "gitconfig")
-	os.WriteFile(cfg, []byte("[user]\n\tname = Michael Host\n\temail = m@host.invalid\n[init]\n\tdefaultBranch = main\n"), 0o600)
+	// No background maintenance: git 2.56 on Linux can still be writing to .git when the test removes it.
+	os.WriteFile(cfg, []byte("[user]\n\tname = Michael Host\n\temail = m@host.invalid\n[init]\n\tdefaultBranch = main\n[maintenance]\n\tauto = false\n"), 0o600)
 	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("GIT_AUTHOR_DATE", "2026-10-17T10:00:00Z")

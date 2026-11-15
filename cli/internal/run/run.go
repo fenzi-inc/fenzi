@@ -27,6 +27,7 @@ import (
 	"fenzi/cli/internal/screen"
 	"fenzi/cli/internal/workspace"
 	"fenzi/compiler"
+	"fenzi/policies"
 )
 
 // PolicyError means the prover did not return within_boundary. Nothing starts.
@@ -348,6 +349,10 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 		}
 	}
 	say("image", "%s", a.Tag())
+	// The commands the project's languages need: added to a copy of the
+	// image when the agent's own lacks them, and checked once it runs.
+	chains := policies.DetectToolchains(o.Repo)
+	image := toolsImage(ctx, d, a, chains, say)
 
 	// 4. Ensure the reviewed profile and the provider. The key is read by
 	// openshell from this process's environment, once. A sandbox started
@@ -407,7 +412,7 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 	}
 	if _, err := d.OpenShell.SandboxCreate(ctx, openshell.CreateOptions{
 		Name:      name,
-		From:      a.Tag(),
+		From:      image,
 		Policy:    c.Policy,
 		Provider:  provider,
 		Providers: mcpProviders,
@@ -527,6 +532,8 @@ func Run(ctx context.Context, d Deps, o Options) (res Result, err error) {
 			a = a.WithNote(unattendedFree)
 		}
 	}
+
+	a = checkTools(ctx, d, name, a, chains, say)
 
 	if !settingsLoaded(ctx, d, name) {
 		say("settings", "waiting for the sandbox to load them")
@@ -743,18 +750,37 @@ func stoppedByOther(d Deps, o Options, res Result, say func(label, format string
 // directory so it stays out of the diff. Agents that read instruction files
 // (OpenCode's config `instructions`) are pointed at it.
 func writeGuide(ctx context.Context, d Deps, sandbox, dest, text string) error {
-	dest = path.Clean(dest)
-	if !strings.HasPrefix(dest, compiler.DefaultWorkdir+"/") {
-		return fmt.Errorf("guide file %q is outside the sandbox workdir", dest)
-	}
-	script := "import base64, pathlib\n" +
-		"p = pathlib.Path(" + strconv.Quote(dest) + ")\n" +
-		"p.parent.mkdir(parents=True, exist_ok=True)\n" +
-		"p.write_bytes(base64.b64decode(" + strconv.Quote(base64.StdEncoding.EncodeToString([]byte(text))) + "))\n"
-	if _, err := d.OpenShell.ExecOutput(ctx, sandbox, "python3", "-c", script); err != nil {
+	if err := writeFile(ctx, d, sandbox, dest, text); err != nil {
 		return fmt.Errorf("writing the request guide: %w", err)
 	}
 	return nil
+}
+
+// argChunk is the most base64 text writeFile puts in one argument. OpenShell
+// 0.1.8 refuses a `sandbox exec` argument over 32768 bytes ("command
+// argument 4 exceeds 32768 byte limit", recorded 12 November 2026; 32768
+// bytes passed). Whether 0.1.4 had the limit was not recorded.
+const argChunk = 24 << 10
+
+// writeFile writes content to dest in the sandbox with the image's python3.
+// dest must be under the workdir. The content travels base64, in as many
+// arguments as it needs, so a long file is not one argument.
+func writeFile(ctx context.Context, d Deps, sandbox, dest, content string) error {
+	dest = path.Clean(dest)
+	if !strings.HasPrefix(dest, compiler.DefaultWorkdir+"/") {
+		return fmt.Errorf("file %q is outside the sandbox workdir", dest)
+	}
+	const script = "import base64, pathlib, sys\n" +
+		"p = pathlib.Path(sys.argv[1])\n" +
+		"p.parent.mkdir(parents=True, exist_ok=True)\n" +
+		"p.write_bytes(base64.b64decode(''.join(sys.argv[2:])))\n"
+	args := []string{"python3", "-c", script, dest}
+	for enc := base64.StdEncoding.EncodeToString([]byte(content)); len(enc) > 0; {
+		n := min(len(enc), argChunk)
+		args, enc = append(args, enc[:n]), enc[n:]
+	}
+	_, err := d.OpenShell.ExecOutput(ctx, sandbox, args...)
+	return err
 }
 
 // warnSecrets names files that look like secrets: the first shownSecrets,

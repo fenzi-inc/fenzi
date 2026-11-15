@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -136,11 +137,17 @@ func (c Client) Version(ctx context.Context) (string, error) {
 	return string(out), err
 }
 
-// profileAccess is the part of a provider profile that decides access.
+// profileAccess is the part of a provider profile that decides access: the
+// variables, where each credential may be placed in a request (which
+// OpenShell enforces from 0.1.8), the endpoints and the binaries. `profile
+// export -o json` writes auth_style and header_name as they were imported
+// (0.1.4 and 0.1.8, recorded 12 November 2026).
 type profileAccess struct {
 	ResourceVersion int64 `yaml:"resource_version" json:"resource_version"`
 	Credentials     []struct {
-		EnvVars []string `yaml:"env_vars" json:"env_vars"`
+		EnvVars    []string `yaml:"env_vars" json:"env_vars"`
+		AuthStyle  string   `yaml:"auth_style" json:"auth_style"`
+		HeaderName string   `yaml:"header_name" json:"header_name"`
 	} `yaml:"credentials" json:"credentials"`
 	Endpoints []struct {
 		Host        string `yaml:"host" json:"host"`
@@ -153,16 +160,32 @@ type profileAccess struct {
 }
 
 func (p profileAccess) same(o profileAccess) bool {
-	p.ResourceVersion, o.ResourceVersion = 0, 0
-	a, _ := json.Marshal(p)
-	b, _ := json.Marshal(o)
-	return string(a) == string(b)
+	// Header names do not differ by case; the resource version is not
+	// access; and a profile with no endpoints or binaries leaves the keys
+	// out of its file, where the export writes empty lists.
+	key := func(x profileAccess) string {
+		x.ResourceVersion = 0
+		x.Credentials = slices.Clone(x.Credentials)
+		for i := range x.Credentials {
+			x.Credentials[i].HeaderName = strings.ToLower(x.Credentials[i].HeaderName)
+		}
+		if len(x.Endpoints) == 0 {
+			x.Endpoints = nil
+		}
+		if len(x.Binaries) == 0 {
+			x.Binaries = nil
+		}
+		raw, _ := json.Marshal(x)
+		return string(raw)
+	}
+	return key(p) == key(o)
 }
 
 // EnsureProfile makes the gateway hold this provider profile. In 0.1.2 and
 // 0.1.4 a second `profile import` fails with "already exists", and `profile
 // update` needs the current resource_version from `profile export`. The update
-// runs only when endpoints, binaries, or credential variables differ.
+// runs only when endpoints, binaries, credential variables, or where a
+// credential is placed differ.
 func (c Client) EnsureProfile(ctx context.Context, id, file string) error {
 	_, err := c.R.Output(ctx, "profile", "import", "-f", file)
 	var oe *Error
@@ -470,6 +493,12 @@ func (c Client) Delete(ctx context.Context, name string) error {
 // 0.1.4 have no structured output; the text is printed as given.
 func (c Client) PendingRules(ctx context.Context, name string) ([]byte, error) {
 	return c.R.Output(ctx, "rule", "get", name, "--status", "pending")
+}
+
+// Rules: `openshell rule get <name>`, every chunk with its status, in the
+// same text as PendingRules (0.1.4, recorded 25 October 2026).
+func (c Client) Rules(ctx context.Context, name string) ([]byte, error) {
+	return c.R.Output(ctx, "rule", "get", name)
 }
 
 // RuleApprove: `openshell rule approve <name> --chunk-id <id>`. The new

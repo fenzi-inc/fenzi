@@ -3,6 +3,7 @@ package openshell
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -29,6 +30,11 @@ type Proposal struct {
 	Prover    string
 	Endpoints string
 	Hits      string
+	// Candidate is the hash of the policy the chunk would make.
+	Candidate string
+	// Absorbed is the chunk the agent filed that this draft superseded;
+	// Rationale is then the agent's (WithAbsorbed).
+	Absorbed string
 }
 
 // MCP reports whether the request is for an MCP server. `rule get` prints
@@ -82,6 +88,8 @@ func ParseRules(out []byte) []Proposal {
 			cur.Endpoints = val
 		case "Hits":
 			cur.Hits = val
+		case "Candidate":
+			cur.Candidate = val
 		}
 	}
 	return list
@@ -139,7 +147,88 @@ func (p Proposal) Drafted() bool {
 // not a generated one. Everything else was drafted from a refused connection.
 // filed comes from AgentFiled and may be nil when the log could not be read.
 func (p Proposal) IsDraft(filed map[string]bool) bool {
-	return !filed[p.Chunk] && p.Drafted()
+	return p.Absorbed == "" && !filed[p.Chunk] && p.Drafted()
+}
+
+// For one program and host, OpenShell 0.1.4 keeps the newest pending chunk
+// and rejects the older with "superseded by chunk <id>" (recorded 25
+// October 2026, read from policy.local's GET /v1/proposals/<id>). When the
+// agent files within the 20 seconds before the sandbox flushes its own
+// draft of the same refusal, the draft wins: it takes the agent's rule, so
+// the same Rule and Candidate, with the generated rationale, and the
+// agent's chunk is rejected. `rule get` shows only "Status: rejected", the
+// same as a person's refusal, and the agent waits on the draft:
+//
+//	Chunk: a3516572-6552-4d50-9719-b2140b7068a7
+//	Status: pending
+//	Rule: example_net_read
+//	Rationale: Allow curl to connect to example.net:443 (HTTPS).
+//	Candidate: 424afa010498
+//
+//	Chunk: 01c4511d-de0a-413b-a447-87485c33b275
+//	Status: rejected
+//	Rule: example_net_read
+//	Rationale: Read the example.net home page for a test.
+//	Candidate: 424afa010498
+
+// Absorb returns pending with each draft that superseded a chunk the agent
+// filed marked as that request: Absorbed is the agent's chunk and Rationale
+// its reason. all is every chunk of the sandbox (Rules), filed is AgentFiled.
+func Absorb(pending, all []Proposal, filed map[string]bool) []Proposal {
+	out := append([]Proposal(nil), pending...)
+	for i, p := range out {
+		if !p.IsDraft(filed) || p.Candidate == "" {
+			continue
+		}
+		for _, a := range all {
+			if filed[a.Chunk] && a.Status == "rejected" && a.Rule == p.Rule && a.Candidate == p.Candidate && a.Binary == p.Binary {
+				out[i].Absorbed, out[i].Rationale = a.Chunk, a.Rationale
+				break
+			}
+		}
+	}
+	return out
+}
+
+// mayHaveAbsorbed reports whether a pending draft could hold a request the
+// agent filed: the log names a chunk of the agent's that is not pending.
+func mayHaveAbsorbed(pending []Proposal, filed map[string]bool) bool {
+	if len(filed) == 0 {
+		return false
+	}
+	listed := map[string]bool{}
+	drafts := false
+	for _, p := range pending {
+		listed[p.Chunk] = true
+		drafts = drafts || p.IsDraft(filed)
+	}
+	if !drafts {
+		return false
+	}
+	for c := range filed {
+		if !listed[c] {
+			return true
+		}
+	}
+	return false
+}
+
+// RuleReader reads every chunk of a sandbox; Client implements it.
+type RuleReader interface {
+	Rules(ctx context.Context, name string) ([]byte, error)
+}
+
+// WithAbsorbed is Absorb with the extra read only when it can matter. A
+// failed read leaves pending as it is.
+func WithAbsorbed(ctx context.Context, r RuleReader, name string, pending []Proposal, filed map[string]bool) []Proposal {
+	if !mayHaveAbsorbed(pending, filed) {
+		return pending
+	}
+	out, err := r.Rules(ctx, name)
+	if err != nil {
+		return pending
+	}
+	return Absorb(pending, ParseRules(out), filed)
 }
 
 // RequestLogWindow is how many log lines are read to find the requests the

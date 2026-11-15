@@ -208,6 +208,17 @@ type gatewayConfig struct{ driver, socket string }
 // ConfiguredDriver is compute_driver from the local gateway config, or "".
 func ConfiguredDriver() string { return readGatewayConfig(GatewayConfig()).driver }
 
+// ConfiguredSocket is the Docker socket the local gateway config names
+// (socket_path), or "" when it names none or picks another driver. The
+// gateway starts sandboxes from that runtime, so images are built there.
+func ConfiguredSocket() string {
+	c := readGatewayConfig(GatewayConfig())
+	if c.driver != "" && c.driver != "docker" {
+		return ""
+	}
+	return c.socket
+}
+
 // readGatewayConfig reads the two keys setup cares about from gateway.toml.
 // It is not a TOML parser; it only reads `key = "value"` lines.
 func readGatewayConfig(path string) gatewayConfig {

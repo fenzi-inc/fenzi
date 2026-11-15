@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"fenzi/cli/internal/engine"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +23,10 @@ func TestMain(m *testing.M) {
 	os.Setenv("XDG_CACHE_HOME", cache)
 	// The DNS check asks colima only where a test says the runtime is colima.
 	onColima = func() bool { return false }
+	// Image builds read no gateway config of this machine and ask no docker
+	// daemon, except where a test says so.
+	gatewaySocket = func() string { return "" }
+	builderAnswers = func(context.Context, engine.Builder) error { return nil }
 	code := m.Run()
 	os.RemoveAll(cfg)
 	os.RemoveAll(cache)

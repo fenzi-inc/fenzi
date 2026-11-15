@@ -16,10 +16,12 @@ import (
 )
 
 // InstallVersion is the release setup installs. It must stay inside Pinned.
-// 0.1.4 is the release the recorded test output was checked against; older
-// 0.1 releases still pass doctor, and the code keeps what 0.1.2 printed
-// where 0.1.4 differs.
-const InstallVersion = "0.1.4"
+// 0.1.8 is the release the recorded test output was checked against, on 12
+// November 2026; older 0.1 releases still pass doctor, and the code keeps
+// what 0.1.2 and 0.1.4 printed where 0.1.8 differs. An upgrade to it loses
+// the sandboxes an older release made (LosesSandboxes), so setup upgrades
+// only when none is left.
+const InstallVersion = "0.1.8"
 
 // upstreamInstaller is the upstream install script at the release tag for
 // InstallVersion, so the script is as fixed as the binaries it installs. On
@@ -29,7 +31,7 @@ const upstreamInstaller = "https://raw.githubusercontent.com/NVIDIA/OpenShell/v"
 // upstreamInstallerSHA256 is the sha256 of upstreamInstaller. Tags can move,
 // so Install refuses a script that does not match. Change it together with
 // InstallVersion.
-const upstreamInstallerSHA256 = "21bd8739dc3c9b16da258590d30fa2e5647489fa998fe4ed68d0f065ea693df1"
+const upstreamInstallerSHA256 = "6f64d77d289f7859868119bcb7d0617804b8687dd43010b0a3cadf95e2f44cd4"
 
 // InstallCommand is the shell line setup shows before it runs it: download
 // the installer, check its sha256, run it for InstallVersion.
@@ -80,6 +82,15 @@ func Behind(out string) (string, bool) {
 	}
 	return have, older(have, InstallVersion)
 }
+
+// LosesSandboxes reports whether an upgrade from release have to
+// InstallVersion is known to leave the sandboxes made before it unable to
+// start. Recorded on 12 November 2026: a gateway moved from 0.1.4 to 0.1.8
+// refused every earlier sandbox with "decode Docker sandbox bootstrap for
+// authentication rotation: unknown field `outer_fence`". Upstream renamed
+// that field in 0.1.5 (its note names external drivers only), so releases
+// before 0.1.5 are known; from 0.1.5 on it was not tried.
+func LosesSandboxes(have string) bool { return older(have, "0.1.5") }
 
 // older reports whether release a (x.y.z) comes before release b.
 func older(a, b string) bool {
@@ -158,7 +169,9 @@ func HomebrewInstallCommand() string {
 }
 
 // InstallHomebrew downloads Homebrew's installer and runs it with the
-// terminal attached; it asks for the password and to confirm.
+// terminal attached. The password is the one question: sudo asks for it
+// first, then the installer runs with NONINTERACTIVE=1, which skips its
+// "Press RETURN" prompt and uses the sudo ticket of the same terminal.
 func InstallHomebrew(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) error {
 	dir, err := os.MkdirTemp("", "fenzi-homebrew-")
 	if err != nil {
@@ -171,7 +184,13 @@ func InstallHomebrew(ctx context.Context, stdin io.Reader, stdout, stderr io.Wri
 	if err := get.Run(); err != nil {
 		return fmt.Errorf("downloading the Homebrew installer: %w", err)
 	}
+	sudo := exec.CommandContext(ctx, "/usr/bin/sudo", "-v", "-p", "Password for Homebrew's installer: ")
+	sudo.Stdin, sudo.Stdout, sudo.Stderr = stdin, stdout, stderr
+	if err := sudo.Run(); err != nil {
+		return fmt.Errorf("the password was not accepted: %w", err)
+	}
 	cmd := exec.CommandContext(ctx, "/bin/bash", script)
+	cmd.Env = append(os.Environ(), "NONINTERACTIVE=1")
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("the Homebrew installer failed: %w", err)

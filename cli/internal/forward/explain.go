@@ -4,7 +4,7 @@ import "strings"
 
 // Explained is a deny's reason in plain words, for the places that show a
 // person why a call was refused. Every phrase maps a reason recorded from
-// OpenShell 0.1.2 or 0.1.4; a reason that has not been recorded gets no phrase, and
+// OpenShell 0.1.2, 0.1.4 or 0.1.8; a reason that has not been recorded gets no phrase, and
 // the caller shows the runtime's own words instead. Allows have no reason.
 func (r Record) Explained() string {
 	if !r.Denied() {
@@ -21,6 +21,10 @@ func (r Record) Explained() string {
 		return "the DNS answer expired before the connection"
 	case r.Reason == "credential_endpoint_mismatch":
 		return "the credential is bound to another host"
+	case r.Reason == "credential_placement_mismatch":
+		// From 0.1.8: a key or token outside the header its profile names,
+		// such as in the query or in another header.
+		return "the credential was sent where its profile does not allow it"
 	case strings.HasSuffix(r.Reason, "not permitted by policy"):
 		if r.MCPTool != "" {
 			return "tool not in the server's list"

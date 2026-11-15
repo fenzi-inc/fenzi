@@ -16,7 +16,7 @@ The installer is for macOS and Linux, arm64 and amd64. It checks the download's 
 ```text
   ■ This machine  1 of 5
 
-  ✓ Runtime           OpenShell 0.1.2
+  ✓ Runtime           OpenShell 0.1.8
   ✓ Gateway           connected
   ✓ Sandbox driver    docker
   ✓ Approvals         a person approves each request
@@ -70,7 +70,7 @@ The site also has the [argument](https://fenzi.dev/beliefs), the [price](https:/
 
 ### A team
 
-Free is this CLI on one machine, with the default policy and the log on that machine. No account. Team is one signed policy, one decision log, and approvals in one console across many machines. The console is hosted at https://fenzi.dev and is opened by invitation; [request access](https://fenzi.dev/request-access) for a new team. License is that control plane in your own network. See [Price](https://fenzi.dev/price).
+Free is this CLI on one machine, with the default policy and the log on that machine. No account. Team is one signed policy, one decision log, and approvals in one console across many machines. The console is hosted at https://fenzi.dev and is opened by invitation; [request a demo](https://fenzi.dev/request-demo) for a new team. License is that control plane in your own network. See [Price](https://fenzi.dev/price).
 
 The Team client is in this repository: `fenzi login` signs a machine in, `status` shows the sign-in, `sync` and `forward` keep it in step with the console, and `policy publish` publishes from an admin's machine. The control plane itself is not in this repository.
 

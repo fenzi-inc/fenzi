@@ -30,6 +30,8 @@ type fakeGW struct {
 	logs         []byte
 	logErr       error
 	rules        []byte
+	all          []byte
+	allCalls     int
 	list         []byte
 	set          bool
 	policy       []byte
@@ -94,6 +96,10 @@ func (g *fakeGW) LogLines(context.Context, string, int) ([]byte, error) {
 func (g *fakeGW) PendingRules(context.Context, string) ([]byte, error) {
 	g.pendingCalls++
 	return g.rules, nil
+}
+func (g *fakeGW) Rules(context.Context, string) ([]byte, error) {
+	g.allCalls++
+	return g.all, nil
 }
 func (g *fakeGW) RuleApprove(_ context.Context, _, chunk string) error {
 	g.approveCalls++

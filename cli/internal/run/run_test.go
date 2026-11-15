@@ -128,7 +128,7 @@ func TestRunSequence(t *testing.T) {
 		"settings set fenzi-test-0001 --key agent_policy_proposals_enabled --value true",
 		"sandbox upload fenzi-test-0001 " + h.opts.Repo,
 		"logs fenzi-test-0001 --source sandbox -n 1000",
-		"sandbox exec -n fenzi-test-0001 --tty --workdir " + project + " --env CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 -- claude --permission-mode manual --append-system-prompt " + agents.Guide + " --model x",
+		"sandbox exec -n fenzi-test-0001 --tty --workdir " + project + " --env CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 -- claude --permission-mode bypassPermissions --append-system-prompt " + agents.Guide + " --model x",
 		"logs fenzi-test-0001 --source sandbox -n 100000",
 		"sandbox download fenzi-test-0001 " + project + " ",
 		"sandbox delete fenzi-test-0001",
@@ -227,9 +227,10 @@ func TestExistingProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Recorded from OpenShell 0.1.2: a second import, and the export shape.
+	// Recorded from OpenShell 0.1.2: a second import. The export is the
+	// shape 0.1.4 and 0.1.8 print (12 November 2026), with where the key goes.
 	exists := openshell.Reply{Exit: 1, Stderr: "error profile=fenzi-claude-code field=id custom provider profile 'fenzi-claude-code' already exists"}
-	same := `{"id":"fenzi-claude-code","resource_version":3,"credentials":[{"env_vars":["ANTHROPIC_API_KEY","CLAUDE_API_KEY"]}],"endpoints":[{"host":"api.anthropic.com","port":443,"protocol":"rest","access":"read-write","enforcement":"enforce"}],"binaries":["/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"]}`
+	same := `{"id":"fenzi-claude-code","resource_version":3,"credentials":[{"name":"api_key","env_vars":["ANTHROPIC_API_KEY","CLAUDE_API_KEY"],"required":true,"auth_style":"header","header_name":"x-api-key","query_param":""}],"endpoints":[{"host":"api.anthropic.com","port":443,"protocol":"rest","access":"read-write","enforcement":"enforce"}],"binaries":["/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"]}`
 	if !strings.Contains(string(profile), "api.anthropic.com") {
 		t.Fatal("fixture assumes the claude profile")
 	}
@@ -638,15 +639,12 @@ func TestWriteGuide(t *testing.T) {
 	if len(fake.Calls) != 1 || !strings.Contains(fake.Calls[0], "python3 -c") {
 		t.Fatalf("call = %q", fake.Calls)
 	}
-	_, payload, ok := strings.Cut(fake.Calls[0], `base64.b64decode("`)
+	// The path and the base64 text are arguments after the script.
+	_, payload, ok := strings.Cut(fake.Calls[0], " "+dest+" ")
 	if !ok {
 		t.Fatalf("script has no payload: %s", fake.Calls[0])
 	}
-	payload, _, ok = strings.Cut(payload, `"`)
-	if !ok {
-		t.Fatal("payload is not quoted")
-	}
-	raw, err := base64.StdEncoding.DecodeString(payload)
+	raw, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(payload), ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -780,6 +778,88 @@ func TestRunWithMCPNeedsTheToken(t *testing.T) {
 	}
 }
 
+// OpenShell 0.1.8 puts a token only where its profile says: a bearer
+// profile's token in a custom header got 403 credential_placement_mismatch,
+// and a profile naming the header was accepted (recorded 12 November 2026).
+// So a server with token_header gets a profile for that header, and one an
+// earlier fenzi stored as a bearer token is replaced before the sandbox is
+// made.
+func TestRunNamesTheTokenHeaderInTheProfile(t *testing.T) {
+	if p := string(MCPProfile("acme", "X-Api-Key")); !strings.Contains(p, "    auth_style: header\n    header_name: X-Api-Key\n") {
+		t.Fatalf("a custom header:\n%s", p)
+	}
+	if p := string(MCPProfile("acme", "")); !strings.Contains(p, "    auth_style: bearer\n    header_name: authorization\n") {
+		t.Fatalf("the default:\n%s", p)
+	}
+
+	h := setup(t)
+	project, err := compiler.Parse([]byte("version: 1\nmcp:\n  acme:\n    url: https://mcp.acme.example/mcp\n    token: true\n    token_header: X-Api-Key\n    tools: {allow: [search]}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := compiler.Merge(h.opts.Policy.Doc, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.opts.Policy.Doc = doc
+	claude, err := agents.Get("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.os.Replies["provider get fenzi-mcp-acme"] = openshell.Reply{}
+	h.os.Replies["profile import"] = openshell.Reply{Exit: 1, Stderr: "error field=id custom provider profile already exists"}
+	h.os.Replies["profile export fenzi-claude-code"] = openshell.Reply{Out: `{"id":"fenzi-claude-code","resource_version":3,"credentials":[{"name":"api_key","env_vars":["ANTHROPIC_API_KEY","CLAUDE_API_KEY"],"required":true,"auth_style":"header","header_name":"x-api-key","query_param":""}],"endpoints":[{"host":"api.anthropic.com","port":443,"protocol":"rest","access":"read-write","enforcement":"enforce"}],"binaries":["` + claude.Binaries[0] + `"]}`}
+	// What `profile export` prints for the profile fenzi wrote before: bearer.
+	h.os.Replies["profile export fenzi-mcp-acme"] = openshell.Reply{Out: `{"id":"fenzi-mcp-acme","resource_version":4,"credentials":[{"name":"token","env_vars":["FENZI_MCP_ACME_TOKEN"],"required":true,"auth_style":"bearer","header_name":"authorization","query_param":""}],"endpoints":[],"binaries":[]}`}
+	var updated []string
+	var body []byte
+	before := h.os.Hook
+	h.os.Hook = func(args []string) {
+		if before != nil {
+			before(args)
+		}
+		if len(args) == 5 && args[0] == "profile" && args[1] == "update" {
+			updated = append(updated, args[4])
+			body, _ = os.ReadFile(args[3])
+		}
+	}
+	if _, err := Run(context.Background(), h.deps, h.opts); err != nil {
+		t.Fatalf("%v\n%s", err, h.out)
+	}
+	if len(updated) != 1 || updated[0] != "fenzi-mcp-acme" {
+		t.Fatalf("only the token profile is replaced, got %v\n%s", updated, strings.Join(h.os.Calls, "\n"))
+	}
+	if b := string(body); !strings.HasPrefix(b, "resource_version: 4\n") || !strings.Contains(b, "    auth_style: header\n    header_name: X-Api-Key\n") {
+		t.Errorf("the update:\n%s", b)
+	}
+	update, create := -1, -1
+	for i, c := range h.os.Calls {
+		switch {
+		case strings.HasPrefix(c, "profile update"):
+			update = i
+		case strings.HasPrefix(c, "sandbox create"):
+			create = i
+		}
+	}
+	if update < 0 || create < update {
+		t.Errorf("the profile is replaced before the sandbox is made: update %d, create %d", update, create)
+	}
+
+	// The same header in another case is the same header: nothing is replaced.
+	h = setup(t)
+	h.opts.Policy.Doc = doc
+	h.os.Replies["provider get fenzi-mcp-acme"] = openshell.Reply{}
+	h.os.Replies["profile import"] = openshell.Reply{Exit: 1, Stderr: "error field=id custom provider profile already exists"}
+	h.os.Replies["profile export fenzi-claude-code"] = openshell.Reply{Out: `{"id":"fenzi-claude-code","resource_version":3,"credentials":[{"name":"api_key","env_vars":["ANTHROPIC_API_KEY","CLAUDE_API_KEY"],"required":true,"auth_style":"header","header_name":"x-api-key","query_param":""}],"endpoints":[{"host":"api.anthropic.com","port":443,"protocol":"rest","access":"read-write","enforcement":"enforce"}],"binaries":["` + claude.Binaries[0] + `"]}`}
+	h.os.Replies["profile export fenzi-mcp-acme"] = openshell.Reply{Out: `{"id":"fenzi-mcp-acme","resource_version":5,"credentials":[{"name":"token","env_vars":["FENZI_MCP_ACME_TOKEN"],"required":true,"auth_style":"header","header_name":"x-api-key","query_param":""}],"endpoints":[],"binaries":[]}`}
+	if _, err := Run(context.Background(), h.deps, h.opts); err != nil {
+		t.Fatalf("%v\n%s", err, h.out)
+	}
+	if h.called("profile update") {
+		t.Errorf("a profile that already names the header was replaced:\n%s", strings.Join(h.os.Calls, "\n"))
+	}
+}
+
 func withSecrets(t *testing.T, h *harness) {
 	t.Helper()
 	project, err := compiler.Parse([]byte("version: 1\nmcp:\n  droplets:\n    command: [npx, -y, \"@digitalocean/mcp\", --services, droplets]\n    secrets: [DIGITALOCEAN_API_TOKEN]\n    hosts: [api.digitalocean.com]\n"))
@@ -907,5 +987,42 @@ func TestSandboxNameKeepsAccentedLetters(t *testing.T) {
 	name := SandboxName("/Users/ana/Été projet")
 	if !strings.HasPrefix(name, "fenzi-ete-proj") {
 		t.Errorf("got %q", name)
+	}
+}
+
+// OpenShell 0.1.8 refuses a `sandbox exec` argument over 32768 bytes
+// (recorded 12 November 2026), so a file written into the sandbox travels in
+// arguments below that, and the script puts them together again.
+func TestWriteFileSplitsALongFile(t *testing.T) {
+	h := setup(t)
+	content := strings.Repeat("0123456789abcdef", 5000) // 80 KiB
+	if err := writeFile(context.Background(), h.deps, "fenzi-test-0001", "/sandbox/.fenzi/mcp.json", content); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFile(context.Background(), h.deps, "fenzi-test-0001", "/etc/passwd", "x"); err == nil {
+		t.Error("a path outside the workdir was written")
+	}
+	var call string
+	for _, c := range h.os.Calls {
+		if strings.HasPrefix(c, "sandbox exec") && strings.Contains(c, "python3") {
+			call = c
+		}
+	}
+	_, after, ok := strings.Cut(call, " /sandbox/.fenzi/mcp.json ")
+	if !ok {
+		t.Fatalf("the path is not an argument of its own: %.200s", call)
+	}
+	chunks := strings.Fields(after)
+	if len(chunks) < 4 {
+		t.Fatalf("%d chunks for 80 KiB", len(chunks))
+	}
+	for _, c := range chunks {
+		if len(c) > 32768 {
+			t.Errorf("an argument of %d bytes", len(c))
+		}
+	}
+	got, err := base64.StdEncoding.DecodeString(strings.Join(chunks, ""))
+	if err != nil || string(got) != content {
+		t.Errorf("the chunks do not make the file again: %v", err)
 	}
 }

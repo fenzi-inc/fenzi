@@ -21,6 +21,18 @@ var (
 	decision  = regexp.MustCompile(`^(NET|HTTP):(\S+) \[\w+\] (ALLOWED|DENIED) (.*)$`)
 	shortNet  = regexp.MustCompile(`^(\S+?)\(\d+\) -> (\S+)`)
 	shortHTTP = regexp.MustCompile(`^([A-Z]+) (\S+)`)
+	// A refusal by the credential check carries no address. OpenShell 0.1.2
+	// (recorded 17 October 2026) and 0.1.8 (12 November 2026) write two
+	// spaces where it would be, right after the line that allowed the same
+	// request at the HTTP layer:
+	//
+	//	HTTP:GET [INFO] ALLOWED GET https://httpbin.org/headers [policy:_provider_echo engine:l7]
+	//	HTTP:GET [HIGH] DENIED GET  [policy:_provider_echo engine:credential-binding] [reason:credential_placement_mismatch]
+	//
+	// FromStream keeps the method alone; Addressed fills in the address.
+	// 0.1.8 writes http and https URLs without the port (0.1.2 and 0.1.4:
+	// http://host:443/path); hostPath reads both.
+	shortBare = regexp.MustCompile(`^([A-Z]+)\s+\[`)
 	shortRule = regexp.MustCompile(`\[policy:(\S+)`)
 	// The reason runs to the line's last bracket; it can hold nested ones:
 	// [reason:L7 tunnel closed before inspection because policy changed: policy generation is stale [captured_generation:1 current_generation:2]]
@@ -129,6 +141,8 @@ func FromStream(t time.Time, level, message, sandbox string) (Record, bool) {
 		r.Class = "HTTP Activity"
 		if hm := shortHTTP.FindStringSubmatch(rest); hm != nil {
 			r.Destination = hm[1] + " " + hostPath(hm[2])
+		} else if bm := shortBare.FindStringSubmatch(rest); bm != nil && strings.Contains(rest, "engine:credential-binding") {
+			r.Destination = bm[1]
 		}
 		if strings.Contains(rest, "engine:l7-mcp") {
 			mcpFields(&r, rest)
@@ -249,7 +263,32 @@ func read(rd io.Reader, sandbox string, from func(string, string) (Record, bool)
 			out = append(out, r)
 		}
 	}
+	Addressed(out)
 	return out, sc.Err()
+}
+
+// Addressed gives each refusal by the credential check, which the runtime
+// logs with no address, the address of the request it refused: the one the
+// same rule allowed at the HTTP layer just before it, with the same method.
+// The records are in log order. A refusal with no such line before it keeps
+// the method alone; its rule still names the host.
+func Addressed(recs []Record) {
+	for i := range recs {
+		r := &recs[i]
+		if r.Class != "HTTP Activity" || !r.Denied() || strings.Contains(r.Destination, " ") {
+			continue
+		}
+		for j := i - 1; j >= 0; j-- {
+			p := recs[j]
+			if r.Time.Sub(p.Time) > time.Second {
+				break
+			}
+			if p.Class == r.Class && p.Sandbox == r.Sandbox && p.Rule == r.Rule && !p.Denied() && strings.HasPrefix(p.Destination, r.Destination+" ") {
+				r.Destination = p.Destination
+				break
+			}
+		}
+	}
 }
 
 // Span counts the lines of a shorthand log and returns the times of the

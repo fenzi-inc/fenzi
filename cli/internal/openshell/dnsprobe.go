@@ -12,7 +12,8 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// How long the sandbox keeps an allowed name's address. In 0.1.2 and 0.1.4
+// How long the sandbox keeps an allowed name's address. In 0.1.2, 0.1.4 and
+// 0.1.8 (the constants read in its source on 15 November 2026)
 // the supervisor asks the first nameserver in its own /etc/resolv.conf, keeps
 // the answer for its TTL clamped to 1 to 30 seconds, and answers the sandbox
 // with that clamped TTL (policy_dns/mod.rs MIN_MAPPING_TTL, MAX_MAPPING_TTL,

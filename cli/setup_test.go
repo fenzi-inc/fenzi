@@ -131,7 +131,7 @@ func TestSetupOffersTheUpgrade(t *testing.T) {
 	flat := strings.Join(strings.Fields(out), " ")
 	for _, want := range []string{
 		"OpenShell 0.1.0 is installed",
-		"The upgrade restarts the gateway. No sandbox is running, so nothing is interrupted.",
+		"The upgrade restarts the gateway. There is no sandbox on this machine, so nothing is lost.",
 		"Upgrade OpenShell to " + openshell.InstallVersion + " now?",
 		"OpenShell " + openshell.InstallVersion,
 		"service restarted",
@@ -177,45 +177,65 @@ func TestSetupOffersTheUpgrade(t *testing.T) {
 	}
 }
 
-func TestRestartWarningNamesRunningSandboxes(t *testing.T) {
-	// The table `sandbox list --selector fenzi=1` printed in 0.1.2. A sandbox
-	// in phase Error is not running, so a restart interrupts nothing in it.
+// An upgrade loses the sandboxes made before it (recorded from 0.1.4 to
+// 0.1.8 on 12 November 2026), so setup holds it while any exists, running,
+// stopped or lost, and says how to end them.
+func TestUpgradeWaitsForSandboxesToEnd(t *testing.T) {
+	// The table `sandbox list --selector fenzi=1` printed in 0.1.2.
 	const header = "NAME                 CREATED              PHASE\n"
 	for _, c := range []struct {
-		name  string
-		reply openshell.Reply
-		want  string
+		name    string
+		have    string
+		reply   openshell.Reply
+		holding int
+		want    string
 	}{
-		{"none", openshell.Reply{Out: "No sandboxes found.\n"}, "No sandbox is running, so nothing is interrupted."},
-		{"only lost", openshell.Reply{Out: header + "fenzi-rs-brain-8a52  2026-10-17 19:20:02  Error\n"}, "No sandbox is running, so nothing is interrupted."},
-		{"one", openshell.Reply{Out: header + "fenzi-rs-brain-8a52  2026-10-17 19:20:02  Error\nfenzi-web-1a2b       2026-10-17 19:32:52  Ready\n"},
-			"This sandbox keeps its files but its open session ends: fenzi-web-1a2b. Resume it afterwards with fenzi connect."},
-		{"several", openshell.Reply{Out: header + "fenzi-web-1a2b       2026-10-17 19:32:52  Ready\nfenzi-api-3c4d       2026-10-17 19:40:11  Ready\n"},
-			"These sandboxes keep their files but their open sessions end: fenzi-web-1a2b, fenzi-api-3c4d. Resume them afterwards with fenzi connect."},
-		{"no gateway", openshell.Reply{Exit: 1, Stderr: "connection refused"}, "The upgrade restarts the gateway, which ends the sessions in running sandboxes."},
+		{"none", "0.1.4", openshell.Reply{Out: "No sandboxes found.\n"}, 0, "There is no sandbox on this machine, so nothing is lost."},
+		{"a lost one", "0.1.4", openshell.Reply{Out: header + "fenzi-rs-brain-8a52  2026-10-17 19:20:02  Error\n"}, 1,
+			"sandboxes made by it do not start on " + openshell.InstallVersion + ", and their changes cannot be brought back afterwards. End each one first with fenzi stop <sandbox>, which brings its changes back, then run fenzi setup again. On this machine: fenzi-rs-brain-8a52."},
+		{"several", "0.1.4", openshell.Reply{Out: header + "fenzi-web-1a2b       2026-10-17 19:32:52  Ready\nfenzi-api-3c4d       2026-10-17 19:40:11  Stopped\n"}, 2,
+			"On this machine: fenzi-web-1a2b, fenzi-api-3c4d."},
+		// From 0.1.5 on the upgrade was not tried, and the note says no more than that.
+		{"not tried", "0.1.6", openshell.Reply{Out: header + "fenzi-web-1a2b       2026-10-17 19:32:52  Ready\n"}, 1,
+			"sandboxes made by it may not start on " + openshell.InstallVersion + ", and their changes cannot be brought back afterwards. End each one first with fenzi stop <sandbox>, which brings its changes back, then run fenzi setup again. On this machine: fenzi-web-1a2b."},
+		{"no gateway", "0.1.4", openshell.Reply{Exit: 1, Stderr: "connection refused"}, 0,
+			"Sandboxes made by OpenShell 0.1.4 do not start on " + openshell.InstallVersion + ", and their changes cannot be brought back afterwards. The sandboxes on this machine could not be listed."},
 	} {
 		oc := openshell.Client{R: &openshell.Fake{Replies: map[string]openshell.Reply{"sandbox list --selector fenzi=1": c.reply}}}
-		got := restartWarning(context.Background(), oc)
-		if !strings.HasPrefix(got, "The upgrade restarts the gateway") || !strings.HasSuffix(got, c.want) {
-			t.Errorf("%s: %q, want it to end %q", c.name, got, c.want)
+		got, holding, err := upgradeNote(context.Background(), oc, c.have)
+		if len(holding) != c.holding || !strings.HasSuffix(got, c.want) || (err != nil) != (c.name == "no gateway") {
+			t.Errorf("%s: holding %v, err %v, %q, want it to end %q", c.name, holding, err, got, c.want)
 		}
 	}
 
-	// setup shows the names before it asks.
-	fake, _, _ := upgradeFake(t, "0.1.0", nil)
+	// setup names the sandboxes and does not ask: there is nothing to agree to.
+	fake, installs, _ := upgradeFake(t, "0.1.0", nil)
 	fake.Replies = map[string]openshell.Reply{"sandbox list --selector fenzi=1": {Out: header + "fenzi-web-1a2b       2026-10-17 19:32:52  Ready\n"}}
 	var out bytes.Buffer
-	u := tui.New(strings.NewReader("2\n"), &out)
+	u := tui.New(strings.NewReader(""), &out)
 	if err := setupUpgrade(env{ctx: context.Background(), stdout: &out, stderr: &out}, u, openshell.Client{R: fake}); err != nil {
 		t.Fatal(err)
 	}
 	flat := strings.Join(strings.Fields(out.String()), " ")
-	if at, ask := strings.Index(flat, "open session ends: fenzi-web-1a2b"), strings.Index(flat, "Upgrade OpenShell to"); at < 0 || at > ask {
-		t.Errorf("the running sandbox is not named before the question:\n%s", out.String())
+	if *installs != 0 || strings.Contains(flat, "Upgrade OpenShell to") || !strings.Contains(flat, "fenzi stop <sandbox>") || !strings.Contains(flat, "On this machine: fenzi-web-1a2b.") {
+		t.Errorf("%d installs; the upgrade was not held back with the sandbox named:\n%s", *installs, out.String())
+	}
+
+	// A gateway that does not answer: the person is asked, with what is at stake.
+	fake, installs, _ = upgradeFake(t, "0.1.0", nil)
+	fake.Replies = map[string]openshell.Reply{"sandbox list --selector fenzi=1": {Exit: 1, Stderr: "connection refused"}}
+	out.Reset()
+	u = tui.New(strings.NewReader("1\n"), &out)
+	if err := setupUpgrade(env{ctx: context.Background(), stdout: &out, stderr: &out}, u, openshell.Client{R: fake}); err != nil {
+		t.Fatal(err)
+	}
+	flat = strings.Join(strings.Fields(out.String()), " ")
+	if at, ask := strings.Index(flat, "could not be listed"), strings.Index(flat, "Upgrade OpenShell to"); *installs != 1 || at < 0 || at > ask {
+		t.Errorf("%d installs; what is at stake is not said before the question:\n%s", *installs, out.String())
 	}
 }
 
-func TestSetupRuntimeUpgradesOnlyWithNothingRunning(t *testing.T) {
+func TestSetupRuntimeUpgradesOnlyWithNoSandbox(t *testing.T) {
 	const header = "NAME                 CREATED              PHASE\n"
 	upgrade := func(fake *openshell.Fake) (string, string, bool) {
 		t.Helper()
@@ -232,16 +252,19 @@ func TestSetupRuntimeUpgradesOnlyWithNothingRunning(t *testing.T) {
 	if !ok || v != openshell.InstallVersion || *installs != 1 || *restarts != 1 {
 		t.Fatalf("ok %v, version %q, %d installs, %d restarts:\n%s", ok, v, *installs, *restarts, out)
 	}
-	if !strings.Contains(out, "No sandbox is running, so nothing is interrupted") {
+	if !strings.Contains(out, "There is no sandbox on this machine, so nothing is lost") {
 		t.Errorf("the upgrade does not say why it is safe:\n%s", out)
 	}
 
-	// A sandbox running: it keeps the installed release and names the sandbox.
-	fake, installs, _ = upgradeFake(t, "0.1.0", nil)
-	fake.Replies = map[string]openshell.Reply{"sandbox list --selector fenzi=1": {Out: header + "fenzi-web-1a2b       2026-10-17 19:32:52  Ready\n"}}
-	out, _, ok = upgrade(fake)
-	if ok || *installs != 0 || !strings.Contains(out, "fenzi-web-1a2b") || !strings.Contains(out, "Setup keeps it") {
-		t.Fatalf("ok %v, %d installs:\n%s", ok, *installs, out)
+	// A sandbox exists, running, stopped or lost: it keeps the installed
+	// release and names the sandbox.
+	for _, phase := range []string{"Ready", "Stopped", "Error"} {
+		fake, installs, _ = upgradeFake(t, "0.1.0", nil)
+		fake.Replies = map[string]openshell.Reply{"sandbox list --selector fenzi=1": {Out: header + "fenzi-web-1a2b       2026-10-17 19:32:52  " + phase + "\n"}}
+		out, _, ok = upgrade(fake)
+		if ok || *installs != 0 || !strings.Contains(out, "On this machine: fenzi-web-1a2b.") || !strings.Contains(out, "Setup keeps OpenShell 0.1.0") {
+			t.Fatalf("%s: ok %v, %d installs:\n%s", phase, ok, *installs, out)
+		}
 	}
 
 	// The sandboxes cannot be listed: it keeps the installed release.
@@ -415,6 +438,45 @@ func TestSetupRuntimeLeavesASudoStart(t *testing.T) {
 	code, err := setupRuntime(env{ctx: context.Background(), stdout: &out, stderr: &out})
 	if code != 3 || err == nil || !strings.Contains(err.Error(), "Start it with sudo systemctl start docker and try again") {
 		t.Fatalf("code %d, %v", code, err)
+	}
+}
+
+// setup --homebrew installs Homebrew and nothing else, and does nothing on a
+// Mac that has it: the app's pane runs it, and setup --runtime does the rest.
+func TestSetupHomebrewInstallsOnlyHomebrew(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("setup --homebrew is for macOS")
+	}
+	oldHas, oldInstall, oldColima, oldOpenShell := hasHomebrew, installHomebrew, installColima, installOpenShell
+	t.Cleanup(func() {
+		hasHomebrew, installHomebrew, installColima, installOpenShell = oldHas, oldInstall, oldColima, oldOpenShell
+	})
+	have, installs := false, 0
+	hasHomebrew = func() bool { return have }
+	installHomebrew = func(context.Context, io.Reader, io.Writer, io.Writer) error { installs++; have = true; return nil }
+	installColima = func(context.Context, io.Reader, io.Writer, io.Writer) error {
+		t.Fatal("setup --homebrew installed colima")
+		return nil
+	}
+	installOpenShell = func(context.Context, io.Reader, io.Writer, io.Writer) error {
+		t.Fatal("setup --homebrew installed OpenShell")
+		return nil
+	}
+	var out bytes.Buffer
+	if code := cli([]string{"setup", "--homebrew"}, strings.NewReader(""), &out, &out); code != 0 || installs != 1 {
+		t.Fatalf("code %d, %d installs:\n%s", code, installs, out.String())
+	}
+	if code := cli([]string{"setup", "--homebrew"}, strings.NewReader(""), &out, &out); code != 0 || installs != 1 {
+		t.Fatalf("installed again on a Mac with Homebrew: code %d, %d installs", code, installs)
+	}
+
+	installHomebrew = func(context.Context, io.Reader, io.Writer, io.Writer) error {
+		return errors.New("the password was not accepted")
+	}
+	have = false
+	out.Reset()
+	if code := cli([]string{"setup", "--homebrew"}, strings.NewReader(""), &out, &out); code == 0 || !strings.Contains(out.String(), "the password was not accepted") {
+		t.Fatalf("code %d:\n%s", code, out.String())
 	}
 }
 

@@ -87,6 +87,7 @@ func cmdHome(e env, _ []string) (int, error) {
 	if len(live) > 0 {
 		add("connect", "Connect to a running sandbox", "fenzi connect")
 		add("requests", "Requests for more access", "fenzi requests")
+		add("branch", "The folder's branch, to switch or create before a sandbox", "fenzi branch")
 	}
 	add("doctor", "Check this machine", "fenzi doctor")
 	add("setup", "Change the agent, key, or folder", "fenzi setup")

@@ -4,6 +4,7 @@ package agents
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"embed"
 	"errors"
 	"fmt"
@@ -277,8 +278,11 @@ func (e Entry) headWith(defaults map[string]string, args []string) []string {
 }
 
 // MaxTask is the longest task fenzi run --headless passes. It goes to the
-// agent as one argument, and Linux takes at most 128 KiB in one.
-const MaxTask = 64 << 10
+// agent as one argument, and OpenShell 0.1.8 refuses a `sandbox exec`
+// argument over 32768 bytes (recorded 12 November 2026: 32768 bytes passed,
+// 32769 got "command argument 4 exceeds 32768 byte limit"). Whether 0.1.4
+// had that limit was not recorded; Linux itself takes 128 KiB in one.
+const MaxTask = 32 << 10
 
 // ErrNoHeadless means the catalog has no non-interactive mode for the agent.
 var ErrNoHeadless = errors.New("cannot run unattended")
@@ -349,6 +353,9 @@ func (e Entry) headlessHead(args []string) []string {
 // front, so the agent does not read it as a flag.
 func CleanTask(task string) (string, error) {
 	task = strings.TrimSpace(task)
+	if strings.HasPrefix(task, "-") {
+		task = "\n" + task
+	}
 	switch {
 	case task == "":
 		return "", errors.New("the task is empty")
@@ -356,8 +363,6 @@ func CleanTask(task string) (string, error) {
 		return "", fmt.Errorf("the task is %d KiB; at most %d KiB is passed to the agent", (len(task)+1023)>>10, MaxTask>>10)
 	case strings.ContainsRune(task, 0):
 		return "", errors.New("the task holds a NUL byte, which cannot be passed as an argument")
-	case strings.HasPrefix(task, "-"):
-		task = "\n" + task
 	}
 	return task, nil
 }
@@ -487,4 +492,30 @@ func (e Entry) CompilerAgent() compiler.Agent {
 		a.Hosts = append(a.Hosts, compiler.AgentHost{Host: h.Host, Port: h.Port, Allow: append([]string(nil), h.Allow...)})
 	}
 	return a
+}
+
+// ToolsImage is the agent's image with Debian packages added for the
+// project's languages: its tag and the Dockerfile that builds it on Tag.
+// The tag names the toolchains and ends with a hash of the recipe, so a
+// different package list builds a new image instead of reusing an old one:
+// fenzi/claude:2.1.288-php-go-3f9a1c.
+func (e Entry) ToolsImage(names, packages, backports []string) (string, []byte) {
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "FROM %s\n\n", e.Tag())
+	b.WriteString("USER root\n")
+	b.WriteString("RUN ")
+	if len(backports) > 0 {
+		b.WriteString(`echo "deb http://deb.debian.org/debian bookworm-backports main" > /etc/apt/sources.list.d/backports.list \` + "\n && ")
+	}
+	b.WriteString("apt-get update \\\n")
+	if len(packages) > 0 {
+		fmt.Fprintf(&b, " && apt-get install -y --no-install-recommends %s \\\n", strings.Join(packages, " "))
+	}
+	if len(backports) > 0 {
+		fmt.Fprintf(&b, " && apt-get install -y --no-install-recommends -t bookworm-backports %s \\\n", strings.Join(backports, " "))
+	}
+	b.WriteString(" && rm -rf /var/lib/apt/lists/*\n")
+	b.WriteString("USER sandbox\n")
+	sum := sha256.Sum256(b.Bytes())
+	return fmt.Sprintf("%s-%s-%x", e.Tag(), strings.Join(names, "-"), sum[:3]), b.Bytes()
 }

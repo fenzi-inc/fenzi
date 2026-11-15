@@ -35,8 +35,12 @@ const setupSteps = 5
 func cmdSetup(e env, args []string) (int, error) {
 	fs := newFlags("setup", e.stderr)
 	runtimeOnly := fs.Bool("runtime", false, "install OpenShell "+openshell.InstallVersion+" if it is missing, or upgrade an older patch when no sandbox is running, and wait for its gateway, with no questions, for a CI runner")
+	homebrewOnly := fs.Bool("homebrew", false, "install Homebrew on a Mac that lacks it, asking only for the password, then stop; setup --runtime does the rest with no questions")
 	if _, err := parse(fs, args); err != nil {
 		return 1, err
+	}
+	if *homebrewOnly {
+		return setupHomebrew(e)
 	}
 	if *runtimeOnly {
 		return setupRuntime(e)
@@ -174,7 +178,7 @@ func setupMachine(e env, u *tui.UI) error {
 				return quietExit(3)
 			case install:
 				u.Blank()
-				if err := openshell.InstallHomebrew(e.ctx, os.Stdin, e.stdout, e.stderr); err != nil {
+				if err := installHomebrew(e.ctx, os.Stdin, e.stdout, e.stderr); err != nil {
 					u.Blank()
 					u.Problem("Homebrew", err.Error())
 				}
@@ -456,7 +460,31 @@ var (
 	canInstallColima = openshell.CanInstallColima
 	installColima    = openshell.InstallColima
 	startContainer   = openshell.StartRuntime
+	hasHomebrew      = openshell.HasHomebrew
+	installHomebrew  = openshell.InstallHomebrew
 )
+
+// setupHomebrew is the Fenzi app's pane on a Mac without Homebrew. The
+// password is the one question; the app then runs setup --runtime, which
+// installs OpenShell and colima and starts them with no questions.
+func setupHomebrew(e env) (int, error) {
+	if runtime.GOOS != "darwin" {
+		return 1, errors.New("setup --homebrew is for macOS")
+	}
+	u := tui.New(e.stdin, e.stdout)
+	if hasHomebrew() {
+		u.Done("Homebrew", "installed")
+		return 0, nil
+	}
+	u.Note("The sandbox runtime installs with Homebrew. Its installer needs your password once. What you type goes to macOS and is not kept.")
+	u.Blank()
+	if err := installHomebrew(e.ctx, os.Stdin, e.stdout, e.stderr); err != nil {
+		return 1, err
+	}
+	u.Blank()
+	u.Done("Homebrew", "installed")
+	return 0, nil
+}
 
 // containerRuntime gets a container runtime running for setup --runtime,
 // with no questions. A stopped one is started (Diagnosis.ToStart). On a Mac
@@ -474,7 +502,7 @@ func containerRuntime(e env, u *tui.UI) (bool, error) {
 		u.Command(strings.Join(openshell.InstallColimaCommand, " "), "")
 		u.Blank()
 		if err := installColima(e.ctx, strings.NewReader(""), e.stdout, e.stderr); err != nil {
-			return false, err
+			return false, fmt.Errorf("Homebrew could not install colima, which runs the sandboxes. Check that this Mac can reach ghcr.io, where Homebrew downloads it, and try again (%w)", err)
 		}
 		u.Blank()
 		d = diagnoseRuntime()
@@ -493,7 +521,7 @@ func containerRuntime(e env, u *tui.UI) (bool, error) {
 	// Standard input is empty: nothing can wait on a prompt.
 	r.Attach = true
 	if err := startContainer(e.ctx, r, strings.NewReader(""), e.stdout, e.stderr); err != nil {
-		return false, err
+		return false, fmt.Errorf("%s did not start, so the sandboxes have nowhere to run (%w)", r.Name, err)
 	}
 	u.Done(r.Name, "running")
 	return true, nil
@@ -542,20 +570,31 @@ func runtimeVersion(e env, u *tui.UI, oc openshell.Client) (string, error) {
 	return out, nil
 }
 
-// restartWarning says what a gateway restart interrupts, naming the
-// sandboxes fenzi ps lists as running. When the gateway does not answer it
-// says what a restart does in general.
-func restartWarning(ctx context.Context, oc openshell.Client) string {
-	names, err := oc.Sandboxes(ctx)
+// upgradeNote says what an upgrade from the installed release costs, and
+// names the sandboxes that hold it back. Recorded on 12 November 2026 on a
+// gateway moved from OpenShell 0.1.4 to 0.1.8: it started none of the
+// sandboxes made before, running or stopped; their files could not be read;
+// and 0.1.4 did not start again on the upgraded state. So an upgrade waits
+// until every sandbox is ended, which brings its changes back. An upgrade
+// from 0.1.5 to 0.1.7 was not tried and is held to the same rule. err is
+// set when the sandboxes could not be listed; the note then says what an
+// upgrade does in general.
+func upgradeNote(ctx context.Context, oc openshell.Client, have string) (note string, holding []string, err error) {
+	lost := "do not start"
+	if !openshell.LosesSandboxes(have) {
+		lost = "may not start"
+	}
+	list, err := oc.List(ctx)
 	switch {
 	case err != nil:
-		return "The upgrade restarts the gateway, which ends the sessions in running sandboxes."
-	case len(names) == 0:
-		return "The upgrade restarts the gateway. No sandbox is running, so nothing is interrupted."
-	case len(names) == 1:
-		return "The upgrade restarts the gateway. This sandbox keeps its files but its open session ends: " + names[0] + ". Resume it afterwards with fenzi connect."
+		return "The upgrade restarts the gateway. Sandboxes made by OpenShell " + have + " " + lost + " on " + openshell.InstallVersion + ", and their changes cannot be brought back afterwards. The sandboxes on this machine could not be listed.", nil, err
+	case len(list) == 0:
+		return "The upgrade restarts the gateway. There is no sandbox on this machine, so nothing is lost.", nil, nil
 	}
-	return "The upgrade restarts the gateway. These sandboxes keep their files but their open sessions end: " + strings.Join(names, ", ") + ". Resume them afterwards with fenzi connect."
+	for _, l := range list {
+		holding = append(holding, l.Name)
+	}
+	return "Setup keeps OpenShell " + have + " while a sandbox exists: sandboxes made by it " + lost + " on " + openshell.InstallVersion + ", and their changes cannot be brought back afterwards. End each one first with fenzi stop <sandbox>, which brings its changes back, then run fenzi setup again. On this machine: " + strings.Join(holding, ", ") + ".", holding, nil
 }
 
 // setupUpgrade checks the installed release and offers InstallVersion when it
@@ -573,9 +612,17 @@ func setupUpgrade(e env, u *tui.UI, oc openshell.Client) error {
 		return nil
 	}
 	for {
+		// A gateway that does not answer blocks nothing: a person may be
+		// upgrading to repair it, and the note says what is at stake.
+		note, holding, _ := upgradeNote(e.ctx, oc, have)
+		if len(holding) > 0 {
+			u.Note("OpenShell " + have + " is installed, and " + openshell.InstallVersion + " is the release upstream still fixes. " + note)
+			u.Blank()
+			return nil
+		}
 		u.Note("OpenShell " + have + " is installed. Upstream fixes only the newest patch of each release line, so setup can upgrade it to " + openshell.InstallVersion + " with the upstream installer:")
 		u.Command(openshell.InstallCommand(), "")
-		u.Note(restartWarning(e.ctx, oc))
+		u.Note(note)
 		u.Blank()
 		ok, err := u.Confirm("Upgrade OpenShell to "+openshell.InstallVersion+" now?", "Yes, upgrade it", "Not now, keep "+have)
 		if err != nil {
@@ -1059,26 +1106,26 @@ func setupNeeded(e env) bool {
 }
 
 // runtimeUpgrade is setupUpgrade for a machine nobody sits at: an older
-// patch of Pinned is upgraded to InstallVersion only when no sandbox is
-// running, since the upgrade restarts the gateway and nobody is there to
-// agree to interrupting another job's sandbox. Otherwise, or when the
-// sandboxes cannot be listed, the installed release stays and setup says
+// patch of Pinned is upgraded to InstallVersion only when no sandbox exists,
+// running or stopped, since sandboxes made before an upgrade are lost
+// (upgradeNote) and nobody is there to end them first. Otherwise, or when
+// the sandboxes cannot be listed, the installed release stays and setup says
 // why. It reports the version now installed and whether it changed.
 func runtimeUpgrade(e env, u *tui.UI, oc openshell.Client, out string) (string, bool) {
 	have, behind := openshell.Behind(out)
 	if !behind {
 		return "", false
 	}
-	names, err := oc.Sandboxes(e.ctx)
+	note, holding, err := upgradeNote(e.ctx, oc, have)
 	switch {
 	case err != nil:
-		u.Note("OpenShell " + have + " is older than " + openshell.InstallVersion + ". Setup keeps it: the sandboxes an upgrade would interrupt could not be listed.")
+		u.Note("OpenShell " + have + " is older than " + openshell.InstallVersion + ". Setup keeps it: the sandboxes an upgrade would lose could not be listed.")
 		return "", false
-	case len(names) > 0:
-		u.Note("OpenShell " + have + " is older than " + openshell.InstallVersion + ". Setup keeps it, because the upgrade restarts the gateway and these sandboxes are running: " + strings.Join(names, ", ") + ".")
+	case len(holding) > 0:
+		u.Note("OpenShell " + have + " is older than " + openshell.InstallVersion + ". " + note)
 		return "", false
 	}
-	u.Note("Upgrading OpenShell " + have + " to " + openshell.InstallVersion + " with the upstream installer. No sandbox is running, so nothing is interrupted:")
+	u.Note("Upgrading OpenShell " + have + " to " + openshell.InstallVersion + " with the upstream installer. There is no sandbox on this machine, so nothing is lost:")
 	u.Command(openshell.InstallCommand(), "")
 	u.Blank()
 	if err := installOpenShell(e.ctx, strings.NewReader(""), e.stdout, e.stderr); err != nil {

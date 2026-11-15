@@ -25,6 +25,7 @@ var helpGroups = []struct {
 		{"setup", "Guided setup: checks, agent, key, folder"},
 		{"run", "Start an agent in a sandbox"},
 		{"connect", "Open the agent again in a running sandbox"},
+		{"tools", "The folder's languages and their commands in the sandbox"},
 	}},
 	{"While it runs", [][2]string{
 		{"ps", "List sandboxes"},
@@ -163,6 +164,8 @@ func cli(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		"update":    cmdUpdate,
 		"doctor":    cmdDoctor,
 		"init":      cmdInit,
+		"branch":    cmdBranch,
+		"tools":     cmdTools,
 		"run":       cmdRun,
 		"requests":  cmdRequests,
 		"approve":   cmdApprove,

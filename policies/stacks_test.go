@@ -30,6 +30,8 @@ func TestDeveloperDefaultKeepsPushClosed(t *testing.T) {
 	}
 }
 
+// Stacks read package hosts; the one write is Composer's advisory lookup,
+// on that one path only.
 func TestEveryStackIsReadOnlyAndValid(t *testing.T) {
 	for _, s := range Stacks() {
 		d := WithStacks(&compiler.Document{Version: 1}, []Stack{s})
@@ -37,8 +39,11 @@ func TestEveryStackIsReadOnlyAndValid(t *testing.T) {
 			t.Errorf("%s: %v", s.Name, err)
 		}
 		for _, h := range s.Hosts {
-			if h.Access != compiler.AccessReadOnly {
-				t.Errorf("%s: %s is %s", s.Name, h.Host, h.Access)
+			if h.Access == compiler.AccessReadOnly {
+				continue
+			}
+			if s.Name != "php" || h.Host != "packagist.org" || len(h.Allow) != 1 || h.Allow[0] != advisoryPost {
+				t.Errorf("%s: %s is %s %v", s.Name, h.Host, h.Access, h.Allow)
 			}
 		}
 	}
@@ -72,6 +77,28 @@ func TestDetectStacks(t *testing.T) {
 	}
 	if got := DetectStacks(""); got != nil {
 		t.Errorf("no folder has stacks: %v", got)
+	}
+}
+
+// The home folder is not a project: its files are not read, so macOS is
+// not asked about Desktop, Documents and Downloads.
+func TestDetectStacksSkipsTheHomeFolder(t *testing.T) {
+	home := t.TempDir()
+	touch(t, filepath.Join(home, "go.mod"))
+	touch(t, filepath.Join(home, "Desktop", "Cargo.toml"))
+	if got := detectStacks(home, home); got != nil {
+		t.Errorf("the home folder has stacks: %v", got)
+	}
+	if got := detectStacks(home+string(filepath.Separator), home); got != nil {
+		t.Errorf("the home folder with a slash has stacks: %v", got)
+	}
+	if got := StackNames(detectStacks(home, "")); got != "go, rust" {
+		t.Errorf("with no home known, stacks = %q", got)
+	}
+	project := filepath.Join(home, "code", "app")
+	touch(t, filepath.Join(project, "Gemfile"))
+	if got := StackNames(detectStacks(project, home)); got != "ruby" {
+		t.Errorf("a project under home, stacks = %q", got)
 	}
 }
 

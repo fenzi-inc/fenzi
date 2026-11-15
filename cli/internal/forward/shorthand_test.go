@@ -256,3 +256,73 @@ func TestEventsFromOpenShell014(t *testing.T) {
 		t.Errorf("refusal = %+v", r)
 	}
 }
+
+// Lines recorded from OpenShell 0.1.8 on 12 November 2026, with the rule
+// names shortened. HTTP lines carry
+// https URLs without the port, and a token outside the header its profile
+// names is refused by the credential check, on a line with no address,
+// followed by a FINDING line that is not a decision.
+const shorthand018 = `[1794498703.457] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] ALLOWED /usr/bin/curl(0) -> www.iana.org:443 [policy:pin_iana_read engine:opa]
+[1794498703.934] [sandbox] [OCSF ] [ocsf] HTTP:GET [INFO] ALLOWED GET https://www.iana.org/ [policy:pin_iana_read engine:l7]
+[1794498760.384] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] ALLOWED /usr/bin/curl(0) -> httpbin.org:443 [policy:_provider_echo engine:opa]
+[1794498760.606] [sandbox] [OCSF ] [ocsf] HTTP:GET [INFO] ALLOWED GET https://httpbin.org/headers [policy:_provider_echo engine:l7]
+[1794498760.606] [sandbox] [OCSF ] [ocsf] HTTP:GET [HIGH] DENIED GET  [policy:_provider_echo engine:credential-binding] [reason:credential_placement_mismatch]
+[1794498760.606] [sandbox] [OCSF ] [ocsf] FINDING:BLOCKED [HIGH] "Provider credential used at an unauthorized request location" [type:openshell.provider_credential.placement_mismatch]
+[1794498893.200] [sandbox] [OCSF ] [ocsf] HTTP:POST [INFO] ALLOWED POST https://httpbin.org/anything/mcp [policy:mcp_echo engine:l7-mcp] [msg:JSONRPC_L7_REQUEST decision=allow rule_methods=tools/call tools=echo_tool http_method=POST endpoint=httpbin.org:443/anyt...]
+[1794498894.815] [sandbox] [OCSF ] [ocsf] HTTP:POST [MED] DENIED POST https://httpbin.org/anything/mcp [policy:mcp_echo engine:l7-mcp] [reason:JSONRPC_L7_REQUEST decision=deny rule_methods=tools/call tools=other_tool http_method=POST endpoint=httpbin.org:443/anything/mcp policy_version=1 reason=MCP tool call has no matching allow rule; ask the policy owner to review rules and tool selectors]
+`
+
+func TestDecisionsFromOpenShell018(t *testing.T) {
+	recs, err := ReadShorthand(strings.NewReader(shorthand018), "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type row struct{ action, dest, rule, explained string }
+	want := []row{
+		{"Allowed", "www.iana.org:443", "pin_iana_read", ""},
+		{"Allowed", "GET www.iana.org/", "pin_iana_read", ""},
+		{"Allowed", "httpbin.org:443", "_provider_echo", ""},
+		{"Allowed", "GET httpbin.org/headers", "_provider_echo", ""},
+		// The refusal takes the address of the request it refused.
+		{"Denied", "GET httpbin.org/headers", "_provider_echo", "the credential was sent where its profile does not allow it"},
+		{"Allowed", "POST httpbin.org/anything/mcp", "mcp_echo", ""},
+		{"Denied", "POST httpbin.org/anything/mcp", "mcp_echo", "tool not in the server's list"},
+	}
+	if len(recs) != len(want) {
+		t.Fatalf("got %d records, want %d: %+v", len(recs), len(want), recs)
+	}
+	for i, w := range want {
+		r := recs[i]
+		if got := (row{r.Action, r.Destination, r.Rule, r.Explained()}); got != w {
+			t.Errorf("record %d: %+v, want %+v", i, got, w)
+		}
+	}
+	if recs[4].Reason != "credential_placement_mismatch" || recs[6].MCPTool != "other_tool" || recs[5].MCPTool != "echo_tool" {
+		t.Errorf("reason %q, tools %q and %q", recs[4].Reason, recs[5].MCPTool, recs[6].MCPTool)
+	}
+}
+
+// A refusal by the credential check with no allowed request just before it
+// keeps the method; its rule names the host. One line at a time, as a
+// follower reads them, it is still a decision.
+func TestACredentialRefusalAlone(t *testing.T) {
+	const line = "[1791126.330] [sandbox] [OCSF ] [ocsf] HTTP:GET [HIGH] DENIED GET  [policy:unbound_postman_echo_com engine:credential-binding] [reason:credential_endpoint_mismatch]"
+	r, ok := FromShorthand(line, "s")
+	if !ok || r.Destination != "GET" || r.Rule != "unbound_postman_echo_com" || !r.Denied() {
+		t.Fatalf("ok %v, %+v", ok, r)
+	}
+	// An allowed request by another rule, or long before, is not its address.
+	recs := []Record{
+		{Class: "HTTP Activity", Action: "Allowed", Destination: "GET example.com/a", Rule: "other", Time: r.Time},
+		{Class: "HTTP Activity", Action: "Allowed", Destination: "GET postman-echo.com/get", Rule: r.Rule, Time: r.Time.Add(-3 * time.Second)},
+		r,
+	}
+	Addressed(recs)
+	if recs[2].Destination != "GET" {
+		t.Errorf("destination %q", recs[2].Destination)
+	}
+	// A line with no address from another engine is not read as a decision.
+	if _, ok := FromShorthand("[1791126.330] [sandbox] [OCSF ] [ocsf] HTTP:GET [MED] DENIED GET  [policy:x engine:l7] [reason:y]", "s"); ok {
+		t.Error("only the credential check's refusal is known to come without an address")
+	}
+}

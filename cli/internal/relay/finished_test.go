@@ -163,3 +163,42 @@ func TestRequestsCarryTheDraftFlagAndTheRevision(t *testing.T) {
 		}
 	}
 }
+
+// A draft that superseded a request the agent filed goes to the console as
+// the agent's, with the agent's reason (recorded on OpenShell 0.1.4; the
+// text is in absorbed_test.go of the openshell package).
+func TestAMergedDraftGoesToTheConsoleAsTheAgents(t *testing.T) {
+	pending := `  Chunk: a3516572-6552-4d50-9719-b2140b7068a7
+  Status: pending
+  Rule: example_net_read
+  Binary: /usr/bin/curl
+  Confidence: 65%
+  Rationale: Allow curl to connect to example.net:443 (HTTPS).
+  Prover: prover: no new findings
+  Candidate: 424afa010498
+  Endpoints: example.net:443 [L7 rest, allow GET /]
+  Binaries: /usr/bin/curl
+`
+	all := pending + `
+  Chunk: 01c4511d-de0a-413b-a447-87485c33b275
+  Status: rejected
+  Rule: example_net_read
+  Binary: /usr/bin/curl
+  Confidence: 75%
+  Rationale: Read the example.net home page for a test.
+  Prover: prover: no new findings
+  Candidate: 424afa010498
+  Endpoints: example.net:443 [L7 rest, allow GET /]
+  Binaries: /usr/bin/curl
+`
+	log := `[1792938297.104] [sandbox] [OCSF ] [ocsf] CONFIG:PROPOSED [INFO] agent_authored proposal chunk:01c4511d-de0a-413b-a447-87485c33b275 on example.net:443 [GET /] by /usr/bin/curl [chunk_id:01c4511d-de0a-413b-a447-87485c33b275]
+`
+	gw := &fakeGW{rules: []byte(pending), all: []byte(all), logs: []byte(log)}
+	f, opt := fakeFixture(t, gw)
+	if _, err := Pass(context.Background(), opt); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.proposals) != 1 || f.proposals[0].Draft || f.proposals[0].Rationale != "Read the example.net home page for a test." || gw.allCalls != 1 {
+		t.Errorf("proposals %+v, rule get read %d times", f.proposals, gw.allCalls)
+	}
+}

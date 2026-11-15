@@ -689,7 +689,7 @@ func mcpToken(e env, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	replaced, err := run.SetMCPToken(e.ctx, oc, name, value)
+	replaced, err := run.SetMCPToken(e.ctx, oc, name, here[name].TokenHeader, value)
 	if err != nil {
 		return 1, err
 	}

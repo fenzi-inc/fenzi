@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -38,7 +39,9 @@ func prover() openshell.Prover { return openshell.Prover{R: openshell.Exec{Bin: 
 
 // imageBuilder picks docker or podman to match the gateway's compute driver:
 // the one the connected gateway names, else compute_driver in the local
-// gateway config. When neither says, docker comes first, then podman.
+// gateway config. When neither says, docker comes first, then podman. docker
+// builds on the socket the gateway's config names, when it names one, so the
+// image is where the gateway starts sandboxes from.
 func imageBuilder(e env, out io.Writer) (engine.Builder, error) {
 	driver := ""
 	if drivers, err := client().ComputeDrivers(e.ctx); err == nil {
@@ -47,7 +50,39 @@ func imageBuilder(e env, out io.Writer) (engine.Builder, error) {
 	if driver == "" {
 		driver = engine.Driver([]string{openshell.ConfiguredDriver()})
 	}
-	return engine.DetectFor(out, driver)
+	b, err := engine.DetectFor(out, driver)
+	if err == nil {
+		b.Socket = gatewaySocket()
+	}
+	return b, err
+}
+
+// gatewaySocket is the Docker socket in the gateway's config; tests replace it.
+var gatewaySocket = openshell.ConfiguredSocket
+
+// builderAnswers asks the image builder's daemon; tests replace it.
+var builderAnswers = func(ctx context.Context, b engine.Builder) error { return b.Ping(ctx) }
+
+// imageBuilds is doctor's line on image builds: the builder must answer
+// where it will build, since a docker CLI on PATH says nothing about the
+// runtime behind it.
+func imageBuilds(e env) (ok bool, detail string) {
+	b, err := imageBuilder(e, e.stdout)
+	if err != nil {
+		return false, err.Error()
+	}
+	where := ""
+	if b.Socket != "" && b.Bin == "docker" {
+		where = " on the gateway's socket, " + b.Socket
+	}
+	if err := builderAnswers(e.ctx, b); err != nil {
+		// The Mac app shows this line on a screen, so it names no command.
+		return false, b.Bin + " does not answer" + where + ": " + err.Error() + ". The container runtime behind it is not running."
+	}
+	if where != "" {
+		return true, b.Bin + " builds" + where
+	}
+	return true, b.Bin + " is available"
 }
 
 func cmdDoctor(e env, args []string) (int, error) {
@@ -99,8 +134,9 @@ func cmdDoctor(e env, args []string) (int, error) {
 		out, err := oc.Version(e.ctx)
 		if v, ok := openshell.Pinned.Contains(out); err == nil && ok {
 			// An older patch still works, so it is a note, not a failure.
-			if _, behind := openshell.Behind(out); behind {
-				v += ", older than " + openshell.InstallVersion + ". Upstream fixes only the newest patch; run fenzi setup to upgrade. " + restartWarning(e.ctx, oc)
+			if have, behind := openshell.Behind(out); behind {
+				note, _, _ := upgradeNote(e.ctx, oc, have)
+				v += ", older than " + openshell.InstallVersion + ". Upstream fixes only the newest patch; run fenzi setup to upgrade. " + note
 			}
 			line("ok", "Runtime", v)
 		} else {
@@ -169,10 +205,10 @@ func cmdDoctor(e env, args []string) (int, error) {
 	} else {
 		line("FAIL", "Policy check", "missing. It ships with the runtime's Homebrew, Debian, and RPM packages")
 	}
-	if b, err := imageBuilder(e, e.stdout); err != nil {
-		line("FAIL", "Image builds", err.Error())
+	if ok, detail := imageBuilds(e); ok {
+		line("ok", "Image builds", detail)
 	} else {
-		line("ok", "Image builds", b.Bin+" is available")
+		line("FAIL", "Image builds", detail)
 	}
 	reportAccount(e, line)
 	if *asJSON {
@@ -285,6 +321,8 @@ func cmdRun(e env, args []string) (int, error) {
 	noUpload := fs.Bool("no-upload", false, "start with an empty working folder")
 	allowSecrets := fs.Bool("allow-secrets", false, "copy files that look like secrets without asking; the warning is still printed")
 	signIn := fs.Bool("sign-in", false, "start without the stored key, so the agent signs in itself: Claude Code with your Claude subscription")
+	branch := fs.String("branch", "", "switch the folder to this branch before the start; one that does not exist is created from --from, or from the checked-out commit")
+	branchFrom := fs.String("from", "", "with --branch: the branch or commit a new branch starts from")
 	headless := fs.Bool("headless", false, "run unattended: the agent's own non-interactive mode on --task or --task-text, no terminal, a time limit, a summary")
 	taskFile := fs.String("task", "", "with --headless: file that holds the task, - for standard input")
 	taskText := fs.String("task-text", "", "with --headless: the task itself")
@@ -327,6 +365,18 @@ func cmdRun(e env, args []string) (int, error) {
 	entry, err := agents.Get(rest[0])
 	if err != nil {
 		return 1, err
+	}
+	// The branch, after the agent is known and before anything is copied:
+	// the sandbox works from what the folder has checked out.
+	if created, err := switchBranch(repo, *branch, *branchFrom); err != nil {
+		return 1, err
+	} else if *branch != "" {
+		u := tui.New(e.stdin, e.stdout)
+		if created {
+			u.Done("Branch", *branch+", created")
+		} else {
+			u.Done("Branch", *branch)
+		}
 	}
 	if unattended != nil {
 		if err := entry.CanRunHeadless(); err != nil {
@@ -591,7 +641,7 @@ func showRefusedMCP(u *tui.UI, tools []refusedTool) {
 func cmdRequests(e env, args []string) (int, error) {
 	fs := newFlags("requests", e.stderr)
 	sandbox := fs.String("sandbox", "", "sandbox name (default: the latest running one for this folder)")
-	all := fs.Bool("all", false, "also list the drafts the sandbox made from refused connections")
+	all := fs.Bool("all", false, "also list the connections the sandbox blocked that the agent did not ask about")
 	asJSON := jsonFlag(fs)
 	if _, err := parse(fs, args); err != nil {
 		return 1, err
@@ -642,6 +692,8 @@ func cmdRequests(e env, args []string) (int, error) {
 	if log, err := client().LogLines(e.ctx, sb.Name, openshell.RequestLogWindow); err == nil {
 		filed = openshell.AgentFiled(log)
 	}
+	// A request the agent filed can be merged into the sandbox's draft.
+	list = openshell.WithAbsorbed(e.ctx, client(), sb.Name, list, filed)
 	var asked, drafts []openshell.Proposal
 	for _, p := range list {
 		if !p.IsDraft(filed) {
@@ -666,10 +718,10 @@ func cmdRequests(e env, args []string) (int, error) {
 		flag = " --sandbox " + sb.Name
 	}
 	hidden := len(drafts) > 0 && !*all
-	allHint := [2]string{"fenzi requests --all" + flag, "list the drafts too"}
+	allHint := [2]string{"fenzi requests --all" + flag, "list them too"}
 	draftNote := func() {
 		if hidden {
-			u.Note(plural(len(drafts), "more was", "more were") + " drafted by the sandbox from refused connections, not asked for by the agent: " + destinations(drafts) + ".")
+			u.Note(plural(len(drafts), "more connection was", "more connections were") + " blocked that the agent did not ask about: " + destinations(drafts) + ".")
 			u.Blank()
 		}
 	}
@@ -688,8 +740,8 @@ func cmdRequests(e env, args []string) (int, error) {
 		}
 	}
 	if *all && len(drafts) > 0 {
-		u.Title(plural(len(drafts), "draft from refused connections", "drafts from refused connections"), sb.Name)
-		u.Note("The sandbox wrote these when a connection was refused. The agent did not ask for them.")
+		u.Title(plural(len(drafts), "blocked connection the agent did not ask about", "blocked connections the agent did not ask about"), sb.Name)
+		u.Note("The sandbox blocked these on its own and wrote a rule for each. The agent did not ask for them; approve one only if you want it through.")
 		u.Blank()
 		for _, p := range drafts {
 			showRequest(u, p)

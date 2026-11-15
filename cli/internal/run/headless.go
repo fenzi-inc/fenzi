@@ -199,6 +199,7 @@ func (w *requestWatch) pass(ctx context.Context, refuse bool) {
 		if log, err := w.d.OpenShell.LogLines(ctx, w.sandbox, openshell.RequestLogWindow); err == nil {
 			filed = openshell.AgentFiled(log)
 		}
+		list = openshell.WithAbsorbed(ctx, w.d.OpenShell, w.sandbox, list, filed)
 	}
 	now := w.d.Now()
 	w.mu.Lock()

@@ -129,3 +129,34 @@ func TestReadGatewayConfig(t *testing.T) {
 		t.Fatalf("missing file: %+v", c)
 	}
 }
+
+// The socket images are built on is the one the gateway's config names for
+// the docker driver.
+func TestConfiguredSocket(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if got := ConfiguredSocket(); got != "" {
+		t.Errorf("no config: %q", got)
+	}
+	if err := os.MkdirAll(filepath.Dir(GatewayConfig()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(GatewayConfig(), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(ColimaConfig("/Users/you/.colima/default/docker.sock"))
+	if got := ConfiguredSocket(); got != "/Users/you/.colima/default/docker.sock" {
+		t.Errorf("colima: %q", got)
+	}
+	write("[openshell]\nversion = 2\n\n[openshell.gateway]\n")
+	if got := ConfiguredSocket(); got != "" {
+		t.Errorf("no socket named: %q", got)
+	}
+	write("[openshell.gateway]\ncompute_driver = \"podman\"\n\n[openshell.drivers.podman]\nsocket_path = \"/run/user/1000/podman/podman.sock\"\n")
+	if got := ConfiguredSocket(); got != "" {
+		t.Errorf("podman's socket is not docker's: %q", got)
+	}
+}

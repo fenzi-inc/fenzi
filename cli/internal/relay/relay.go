@@ -33,6 +33,7 @@ type Gateway interface {
 	Sandboxes(ctx context.Context) ([]string, error)
 	LogLines(ctx context.Context, name string, n int) ([]byte, error)
 	PendingRules(ctx context.Context, name string) ([]byte, error)
+	Rules(ctx context.Context, name string) ([]byte, error)
 	RuleApprove(ctx context.Context, name, chunk string) error
 	RuleReject(ctx context.Context, name, chunk, reason string) error
 	PolicySet(ctx context.Context, name, file string) error
@@ -467,6 +468,7 @@ func (p *pass) proposals(ctx context.Context, sandbox string, rules []openshell.
 			break
 		}
 	}
+	rules = openshell.WithAbsorbed(ctx, p.Gateway, sandbox, rules, filed)
 	var out []teamapi.Proposal
 	for _, r := range rules {
 		if r.Chunk == "" {
@@ -601,6 +603,8 @@ func (p *pass) streamed(read openshell.StreamRead, name, after string, cur *curs
 			recs = append(recs, r)
 		}
 	}
+	// A refusal by the credential check is logged without its address.
+	forward.Addressed(recs)
 	var out []forward.Record
 	switch {
 	case read.Reset != "":
