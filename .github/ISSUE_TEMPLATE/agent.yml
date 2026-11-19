@@ -1,0 +1,22 @@
+name: An agent you want to run
+description: Ask for an agent that is not in the catalog yet.
+labels: [agent]
+body:
+  - type: input
+    id: agent
+    attributes:
+      label: Agent
+      description: Its name and where it is published.
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: How you run it today
+      description: On a laptop, in CI, or both. With an API key or a subscription sign-in.
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Help
+      options:
+        - label: I can open a pull request with the catalog entry (see CONTRIBUTING.md).

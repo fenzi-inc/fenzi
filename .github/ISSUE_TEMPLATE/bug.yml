@@ -1,0 +1,39 @@
+name: Something does not work
+description: fenzi failed, refused something it should allow, or allowed something it should refuse.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A way for an agent to reach a file, host or credential its policy does not grant is a security report. Send it to security@fenzi.dev, not here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command you ran, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: fenzi doctor
+      description: The output of `fenzi doctor`. Check it for anything you do not want public first.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: fenzi version
+      placeholder: "0.1.47"
+    validations:
+      required: true
+  - type: input
+    id: machine
+    attributes:
+      label: Machine
+      description: Operating system and container runtime.
+      placeholder: macOS 26 with colima, Ubuntu 24.04 with Docker
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent
+      options: [Claude Code, Codex, OpenCode, Grok, None, Other]

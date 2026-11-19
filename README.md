@@ -4,7 +4,44 @@ Run the agent you already use. Keep it in bounds.
 
 The model will make bad calls. That is ordinary. Fenzi starts that agent inside a sandbox on your machine. You choose the files, the hosts, and whether a credential ever enters the sandbox. A bad prompt does not move the boundary. When a call is blocked, you get a log line.
 
-The sandbox is [OpenShell](https://github.com/NVIDIA/OpenShell). This repository is the Free plan in front of it: the command you type, the policy it compiles, and the log on that one machine. One machine is free. No account. The license is Apache-2.0.
+Claude Code, Codex and OpenCode today. The sandbox is [OpenShell](https://github.com/NVIDIA/OpenShell). This repository is the Free plan in front of it: the command you type, the policy it compiles, and the log on that one machine. One machine is free. No account. The license is Apache-2.0.
+
+## What it looks like
+
+The agent tried to paste something to a host the policy does not name, and to send a `POST` to GitHub, which the policy allows read-only. Both were refused. From another terminal:
+
+```text
+$ fenzi log --deny
+■ 2 denies  fenzi-web-4f2a, running, ~/code/web
+
+  time      process  destination                   reason
+  10:42:07  -        paste.example.net             policy_dns_ineligible
+  10:42:31  -        POST api.github.com/markdown  L7_REQUEST deny POST api.github.com:443/markdown reason=POST /markdown not permitted by policy
+```
+
+When the agent needs a host, it asks. A person answers:
+
+```text
+$ fenzi requests
+■ 1 request from the agent  fenzi-web-4f2a
+
+    7f3a91c2  www.example.com:443
+              /usr/bin/curl  “User asked what is on the example.com homepage.”
+
+? 7f3a91c2  www.example.com:443
+  ❯ Approve and save  also in fenzi.yaml, so the next sandbox here has it
+    Approve once      this sandbox only
+    Deny              you give a reason; the agent sees it
+    Decide later
+```
+
+The approval applies while the agent runs, and it retries. Requests never approve themselves. Your home folder, `~/.aws` and `~/.ssh` are not in the sandbox at all: only the project is copied in.
+
+## Install
+
+On a Mac, [download the app](https://fenzi.dev/docs/install). It installs the runtime and starts your first sandbox in a window, with no terminal.
+
+On macOS or Linux, from a terminal:
 
 ```bash
 cd ~/code/your-project
@@ -39,6 +76,31 @@ fenzi run claude
 Run `fenzi setup` again at any time. `FENZI_NO_SETUP=1` installs the command and stops. If the install folder is not on your `PATH`, the installer adds one marked line to your shell profile; `FENZI_NO_MODIFY_PATH=1` prevents that. `fenzi update` installs a newer release, and commands mention one at most once a day (`FENZI_NO_UPDATE_CHECK=1` turns that off).
 
 Your code and your model key stay on this machine. The agent sees a placeholder. The real key is added on the way out, only for the model's own API.
+
+## In CI
+
+The same policy runs an agent unattended in GitHub Actions. Its commits come back as a branch, with a summary of every refused call. Pin the action to a release tag:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0
+- uses: fenzi-inc/fenzi/action@v0.1.47
+  with:
+    agent: claude
+    task-file: .github/agent-task.md
+  env:
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+The inputs and outputs are in [action/action.yml](action/action.yml); the guide is [CI with Fenzi](https://fenzi.dev/docs/ci).
+
+## Try it on your agent first
+
+Two free checks on fenzi.dev, no install:
+
+- [Would your AI agent obey a line in a file?](https://fenzi.dev/canary) Give your agent a checklist with one planted instruction and see whether it follows it.
+- [What does your AI agent connect to?](https://fenzi.dev/agent-labels) Every host each agent tried to reach on the same small tasks, version by version.
 
 ## Docs
 
@@ -154,6 +216,10 @@ make dist    # the binaries the installer downloads
 `make test` does not need a gateway; it replays runtime output recorded in the tests. `make prove` needs the policy prover that ships with the sandbox runtime.
 
 Which agents and platforms have been checked is on the [Agents](https://fenzi.dev/docs/agents) and [Install](https://fenzi.dev/docs/install) pages.
+
+## Contributing
+
+Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) says how to build, test and add an agent to the catalog. What changed in each release is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Security
 
